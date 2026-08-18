@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Instala o Vaultmarks no Linux/GNOME:
-#   1. autostart do daemon (barra residente = abre instantanea)
-#   2. lancador da barra e da PWA no menu de aplicativos
-#   3. servico systemd --user do backend
-#   4. atalho global no GNOME (padrao: Super+Space)
+# Installs on Linux/GNOME:
+#   1. daemon autostart (a resident bar opens instantly)
+#   2. launchers for the bar and the web UI in the applications menu
+#   3. systemd --user service for the backend
+#   4. global shortcut on GNOME (default: Super+Space)
 #
-# Uso:  bash desktop/install-linux.sh [ATALHO]
+# Usage:  bash desktop/install-linux.sh [SHORTCUT]
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -18,40 +18,40 @@ URL="${VAULTMARKS_URL:-http://127.0.0.1:8787}"
 say() { printf '\033[1;34m›\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m!\033[0m %s\n' "$*"; }
 
-# ---------- 0. checagem de toolkit ----------
+# ---------- 0. toolkit check ----------
 if ! "$PYTHON" -c 'import gi' 2>/dev/null && ! "$PYTHON" -c 'import tkinter' 2>/dev/null; then
-  warn "nem python3-gi nem python3-tk encontrados."
-  warn "instale um deles:  sudo apt install python3-gi   (recomendado no GNOME)"
+  warn "neither python3-gi nor python3-tk found."
+  warn "install one of them:  sudo apt install python3-gi   (recommended on GNOME)"
 fi
 
-# ---------- 1. autostart do daemon ----------
+# ---------- 1. daemon autostart ----------
 mkdir -p ~/.config/autostart
 cat > ~/.config/autostart/vaultmarks.desktop <<EOF
 [Desktop Entry]
 Type=Application
-Name=Vaultmarks (barra de busca)
-Comment=Mantem a barra residente para abrir instantaneamente
+Name=Vaultmarks (search bar)
+Comment=Keeps the bar resident so it opens instantly
 Exec=$CMD --daemon
 X-GNOME-Autostart-enabled=true
 NoDisplay=true
 EOF
-say "autostart instalado em ~/.config/autostart/vaultmarks.desktop"
+say "autostart installed at ~/.config/autostart/vaultmarks.desktop"
 
-# ---------- 2. lancadores ----------
+# ---------- 2. launchers ----------
 mkdir -p ~/.local/share/applications
 cat > ~/.local/share/applications/vaultmarks.desktop <<EOF
 [Desktop Entry]
 Type=Application
 Name=Vaultmarks
-Comment=Busca rapida de favoritos
+Comment=Fast bookmark search
 Exec=$CMD
 Icon=bookmark-new
 Terminal=false
 Categories=Utility;
 EOF
 
-# Janela dedicada da web (mesmo efeito de "instalar a PWA"), se houver um
-# navegador baseado em Chromium por perto.
+# A dedicated window for the web UI (the same effect as "install the PWA"), when
+# a Chromium-based browser is around.
 BROWSER=""
 for b in google-chrome google-chrome-stable chromium chromium-browser brave-browser microsoft-edge; do
   if command -v "$b" >/dev/null 2>&1; then BROWSER="$(command -v "$b")"; break; fi
@@ -62,19 +62,19 @@ if [[ -n "$BROWSER" ]]; then
 [Desktop Entry]
 Type=Application
 Name=Vaultmarks (web)
-Comment=Abre o vault em janela propria
+Comment=Opens the vault in its own window
 Exec=$BROWSER --app=$URL
 Icon=bookmark-new
 Terminal=false
 Categories=Utility;
 EOF
-  say "lancador da janela web criado (usando $(basename "$BROWSER"))"
+  say "web window launcher created (using $(basename "$BROWSER"))"
 else
-  warn "nenhum navegador Chromium encontrado — abra $URL e use 'Instalar app'"
+  warn "no Chromium browser found: open $URL and use 'Install app'"
 fi
-say "lancadores instalados no menu de aplicativos"
+say "launchers installed in the applications menu"
 
-# ---------- 3. servico do backend ----------
+# ---------- 3. backend service ----------
 mkdir -p ~/.config/systemd/user
 cat > ~/.config/systemd/user/vaultmarks.service <<EOF
 [Unit]
@@ -91,19 +91,19 @@ WantedBy=default.target
 EOF
 systemctl --user daemon-reload
 systemctl --user enable --now vaultmarks.service >/dev/null 2>&1 \
-  && say "backend rodando via systemd ($URL)" \
-  || warn "systemd --user indisponivel; rode manualmente: mise run server"
+  && say "backend running via systemd ($URL)" \
+  || warn "systemd --user unavailable; run it by hand: mise run server"
 
-# ---------- 4. atalho global do GNOME ----------
+# ---------- 4. GNOME global shortcut ----------
 KEY_PATH=/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings
 SCHEMA=org.gnome.settings-daemon.plugins.media-keys.custom-keybinding
 
 if ! command -v gsettings >/dev/null 2>&1; then
-  warn "gsettings nao encontrado — registre o atalho na mao para: $CMD"
+  warn "gsettings not found: register the shortcut by hand for: $CMD"
 else
   existing=$(gsettings get org.gnome.settings-daemon.plugins.media-keys custom-keybindings)
   slot=""
-  # Reaproveita o slot se o Vaultmarks ja estiver registrado.
+  # Reuses the slot when it is already registered.
   for i in $(seq 0 20); do
     p="$KEY_PATH/custom$i/"
     if [[ "$existing" == *"$p"* ]]; then
@@ -125,15 +125,15 @@ else
   gsettings set "$SCHEMA:$slot" name "$NAME"
   gsettings set "$SCHEMA:$slot" command "$CMD"
   gsettings set "$SCHEMA:$slot" binding "$BINDING"
-  say "atalho global registrado: $BINDING"
+  say "global shortcut registered: $BINDING"
 
-  # Super+space costuma estar preso a troca de layout de teclado — libera so
-  # essa tecla, preservando os outros atalhos da mesma acao (ex.: XF86Keyboard).
+  # Super+space is usually taken by the keyboard layout switch: free that key
+  # alone, keeping the other shortcuts of the same action (e.g. XF86Keyboard).
   if [[ "$BINDING" == "<Super>space" ]]; then
     for action in switch-input-source switch-input-source-backward; do
       current=$(gsettings get org.gnome.desktop.wm.keybindings "$action" 2>/dev/null || echo "@as []")
       if [[ "$current" == *"<Super>space"* ]]; then
-        novo=$("$PYTHON" - "$current" <<'PY'
+        left=$("$PYTHON" - "$current" <<'PY'
 import ast, sys
 try:
     binds = ast.literal_eval(sys.argv[1].replace("@as ", "", 1))
@@ -143,16 +143,16 @@ binds = [b for b in binds if b not in ("<Super>space", "<Super>Space")]
 print("[" + ", ".join(f"'{b}'" for b in binds) + "]" if binds else "@as []")
 PY
         )
-        gsettings set org.gnome.desktop.wm.keybindings "$action" "$novo"
-        say "liberado <Super>space de $action (restante: $novo)"
+        gsettings set org.gnome.desktop.wm.keybindings "$action" "$left"
+        say "freed <Super>space from $action (left: $left)"
       fi
     done
   fi
 fi
 
-# Inicia o daemon agora para o atalho ja funcionar sem relogar.
+# Starts the daemon now so the shortcut works without logging out first.
 pgrep -f "vaultmarks_bar.py --daemon" >/dev/null || (setsid $CMD --daemon >/dev/null 2>&1 &)
 
 echo
-say "pronto! aperte $BINDING para abrir a barra"
+say "done! press $BINDING to open the bar"
 say "web: $URL"

@@ -1,7 +1,7 @@
 'use strict';
 
-// Testes do backend: auth, isolamento entre usuarios, CRUD, busca via API,
-// sync bidirecional e os arquivos que fazem a PWA instalar.
+// Backend tests: auth, isolation between users, CRUD, search over the API,
+// two-way sync and the files that make the PWA installable.
 
 const test = require('node:test');
 const assert = require('node:assert');
@@ -38,61 +38,61 @@ async function call(method, p, { token, body } = {}) {
   return { status: res.status, body: await res.json().catch(() => ({})) };
 }
 
-const USER = { email: 'apolzek@example.com', username: 'apolzek', password: 'senha123' };
+const USER = { email: 'apolzek@example.com', username: 'apolzek', password: 'secret123' };
 let token;
 
 /* ---------------- auth ---------------- */
 
-test('health responde sem auth', async () => {
+test('health answers without auth', async () => {
   const r = await call('GET', '/api/health');
   assert.equal(r.status, 200);
   assert.equal(r.body.ok, true);
 });
 
-test('registro cria usuario e devolve token (email nao e validado)', async () => {
+test('register creates a user and returns a token (the email is not validated)', async () => {
   const r = await call('POST', '/api/auth/register', { body: USER });
   assert.equal(r.status, 201);
   assert.ok(r.body.token);
   assert.equal(r.body.user.username, 'apolzek');
-  assert.equal(r.body.user.pass_hash, undefined, 'hash da senha nao pode vazar');
+  assert.equal(r.body.user.pass_hash, undefined, 'the password hash must not leak');
   token = r.body.token;
 });
 
-test('registro duplicado e recusado', async () => {
+test('a duplicate registration is refused', async () => {
   assert.equal((await call('POST', '/api/auth/register', { body: USER })).status, 409);
   const mesmoEmail = await call('POST', '/api/auth/register', {
     body: { ...USER, username: 'outro_nome' },
   });
-  assert.equal(mesmoEmail.status, 409, 'email repetido tambem barra');
+  assert.equal(mesmoEmail.status, 409, 'a repeated email is blocked too');
 });
 
-test('registro valida entrada', async () => {
+test('register validates its input', async () => {
   const casos = [
-    [{ email: 'x@y.com', username: 'curto', password: '123' }, 'senha curta'],
-    [{ email: 'semarroba', username: 'valido', password: 'senha123' }, 'email sem @'],
-    [{ email: 'x@y.com', username: 'a', password: 'senha123' }, 'usuario de 1 char'],
-    [{ email: 'x@y.com', username: 'com espaco', password: 'senha123' }, 'usuario com espaco'],
-    [{ email: 'x@y.com', username: 'Ação', password: 'senha123' }, 'usuario com acento'],
+    [{ email: 'x@y.com', username: 'short', password: '123' }, 'short password'],
+    [{ email: 'noatsign', username: 'valid', password: 'secret123' }, 'email without @'],
+    [{ email: 'x@y.com', username: 'a', password: 'secret123' }, '1-char username'],
+    [{ email: 'x@y.com', username: 'with space', password: 'secret123' }, 'username with a space'],
+    [{ email: 'x@y.com', username: 'Ação', password: 'secret123' }, 'username with an accent'],
   ];
-  for (const [body, motivo] of casos) {
+  for (const [body, reason] of casos) {
     const r = await call('POST', '/api/auth/register', { body });
-    assert.equal(r.status, 400, `deveria recusar: ${motivo}`);
+    assert.equal(r.status, 400, `should refuse: ${reason}`);
   }
 });
 
-test('login por usuario e por email', async () => {
-  assert.equal((await call('POST', '/api/auth/login', { body: { login: 'apolzek', password: 'senha123' } })).status, 200);
-  assert.equal((await call('POST', '/api/auth/login', { body: { login: USER.email, password: 'senha123' } })).status, 200);
-  assert.equal((await call('POST', '/api/auth/login', { body: { login: 'APOLZEK', password: 'senha123' } })).status, 200,
-    'login nao diferencia caixa');
+test('login by username and by email', async () => {
+  assert.equal((await call('POST', '/api/auth/login', { body: { login: 'apolzek', password: 'secret123' } })).status, 200);
+  assert.equal((await call('POST', '/api/auth/login', { body: { login: USER.email, password: 'secret123' } })).status, 200);
+  assert.equal((await call('POST', '/api/auth/login', { body: { login: 'APOLZEK', password: 'secret123' } })).status, 200,
+    'login is case-insensitive');
 });
 
-test('login com credencial errada falha', async () => {
+test('login with a wrong credential fails', async () => {
   assert.equal((await call('POST', '/api/auth/login', { body: { login: 'apolzek', password: 'errada' } })).status, 401);
-  assert.equal((await call('POST', '/api/auth/login', { body: { login: 'ninguem', password: 'senha123' } })).status, 401);
+  assert.equal((await call('POST', '/api/auth/login', { body: { login: 'ninguem', password: 'secret123' } })).status, 401);
 });
 
-test('rotas protegidas exigem token valido', async () => {
+test('protected routes require a valid token', async () => {
   assert.equal((await call('GET', '/api/bookmarks')).status, 401);
   assert.equal((await call('GET', '/api/bookmarks', { token: 'lixo' })).status, 401);
   assert.equal((await call('GET', '/api/me')).status, 401);
@@ -106,10 +106,10 @@ const FIXTURES = [
   { url: 'https://go.dev/blog', title: 'The Go Blog', folder: 'dev', category: 'studies', tags: 'go,backend' },
   { url: 'https://news.ycombinator.com', title: 'Hacker News', folder: 'diario', category: '@news', tags: 'noticias', description: 'leitura diaria' },
   { url: 'https://grafana.com', title: 'Grafana', folder: 'dev/infra', category: 'work', tags: 'observabilidade,devops' },
-  { url: 'https://exemplo.com/pagina', title: 'Página com Acentuação', folder: '', category: 'work', tags: 'teste' },
+  { url: 'https://example.com/page', title: 'Página com Acentuação', folder: '', category: 'work', tags: 'accents' },
 ];
 
-test('cria favoritos e normaliza tags/categoria/pasta', async () => {
+test('creates bookmarks and normalizes tags/category/folder', async () => {
   for (const f of FIXTURES) {
     const r = await call('POST', '/api/bookmarks', { token, body: f });
     assert.equal(r.status, 201, JSON.stringify(r.body));
@@ -119,30 +119,30 @@ test('cria favoritos e normaliza tags/categoria/pasta', async () => {
 
   const k8s = list.body.items.find((b) => b.title === 'Kubernetes Docs');
   assert.equal(k8s.tags, 'k8s,devops', 'tags perdem o # e viram csv');
-  assert.equal(k8s.category, 'studies', 'categoria perde o @');
+  assert.equal(k8s.category, 'studies', 'the category loses the @');
   assert.equal(k8s.folder, 'dev/infra');
 });
 
-test('normalizacao remove duplicata e barra sobrando', async () => {
+test('normalization drops duplicates and a trailing slash', async () => {
   const r = await call('POST', '/api/bookmarks', {
     token,
     body: { url: 'https://dup.com', title: 'Dup', tags: '#go, go, GO, #Go', folder: '/dev/infra/', category: '@WORK' },
   });
-  assert.equal(r.body.item.tags, 'go', 'tag repetida entra uma vez so');
+  assert.equal(r.body.item.tags, 'go', 'a repeated tag enters only once');
   assert.equal(r.body.item.folder, 'dev/infra', 'barras das pontas somem');
-  assert.equal(r.body.item.category, 'work', 'categoria vira minuscula');
+  assert.equal(r.body.item.category, 'work', 'the category is lowercased');
   await call('DELETE', `/api/bookmarks/${r.body.item.id}`, { token });
 });
 
-test('cria favorito sem url nem titulo e recusado', async () => {
+test('creating a bookmark with no url and no title is refused', async () => {
   assert.equal((await call('POST', '/api/bookmarks', { token, body: { tags: 'nada' } })).status, 400);
 });
 
-// Cria o proprio favorito e o remove no fim: assim os testes de busca abaixo
-// continuam vendo FIXTURES intacto, independente da ordem de execucao.
-test('edicao atualiza e mantem created_at', async () => {
+// Creates its own bookmark and removes it at the end, so the search tests below
+// keep seeing FIXTURES intact regardless of execution order.
+test('editing updates and keeps created_at', async () => {
   const criado = await call('POST', '/api/bookmarks', {
-    token, body: { url: 'https://editar.com', title: 'Para Editar', category: 'antiga', tags: 'antes' },
+    token, body: { url: 'https://edit-me.com', title: 'To Edit', category: 'old', tags: 'before' },
   });
   const bm = criado.body.item;
 
@@ -152,16 +152,16 @@ test('edicao atualiza e mantem created_at', async () => {
   assert.equal(r.body.item.tags, 'metrics');
   assert.equal(r.body.item.created_at, bm.created_at);
   assert.ok(r.body.item.updated_at >= bm.updated_at);
-  assert.equal(r.body.item.url, bm.url, 'campo nao enviado e preservado');
-  assert.equal(r.body.item.title, bm.title, 'titulo nao enviado e preservado');
+  assert.equal(r.body.item.url, bm.url, 'a field not sent is preserved');
+  assert.equal(r.body.item.title, bm.title, 'a title not sent is preserved');
 
   await call('DELETE', `/api/bookmarks/${bm.id}`, { token });
 });
 
-test('editar id inexistente da 404', async () => {
-  assert.equal((await call('PUT', '/api/bookmarks/nao-existe', { token, body: { title: 'x' } })).status, 404);
-  assert.equal((await call('GET', '/api/bookmarks/nao-existe', { token })).status, 404);
-  assert.equal((await call('DELETE', '/api/bookmarks/nao-existe', { token })).status, 404);
+test('editing a missing id gives 404', async () => {
+  assert.equal((await call('PUT', '/api/bookmarks/does-not-exist', { token, body: { title: 'x' } })).status, 404);
+  assert.equal((await call('GET', '/api/bookmarks/does-not-exist', { token })).status, 404);
+  assert.equal((await call('DELETE', '/api/bookmarks/does-not-exist', { token })).status, 404);
 });
 
 /* ---------------- busca via API ---------------- */
@@ -172,61 +172,61 @@ async function q(query) {
   return r.body.items.map((b) => b.title);
 }
 
-test('busca: substring em titulo e url', async () => {
+test('search: substring in title and url', async () => {
   assert.deepEqual(await q('kuber'), ['Kubernetes Docs']);
   assert.deepEqual(await q('BERNET'), ['Kubernetes Docs'], 'case-insensitive');
   assert.deepEqual(await q('ycombinator'), ['Hacker News']);
-  assert.equal((await q('https://')).length, FIXTURES.length, 'casa em todas as urls');
+  assert.equal((await q('https://')).length, FIXTURES.length, 'matches in every url');
 });
 
-test('busca: sigilos de campo', async () => {
+test('search: field sigils', async () => {
   assert.deepEqual((await q('#devops')).sort(), ['Grafana', 'Kubernetes Docs']);
   assert.deepEqual((await q('@studies')).sort(), ['Kubernetes Docs', 'The Go Blog']);
   assert.deepEqual((await q('/dev/infra')).sort(), ['Grafana', 'Kubernetes Docs']);
-  assert.equal((await q('/dev')).length, 3, 'pasta pai casa as filhas');
+  assert.equal((await q('/dev')).length, 3, 'a parent folder matches its children');
 });
 
-test('busca: campo:valor', async () => {
+test('search: field:value', async () => {
   assert.deepEqual(await q('title:grafana'), ['Grafana']);
   assert.deepEqual(await q('url:ycombinator'), ['Hacker News']);
   assert.deepEqual(await q('description:diaria'), ['Hacker News']);
-  assert.deepEqual(await q('title:grafana.com'), [], 'url nao casa em title:');
+  assert.deepEqual(await q('title:grafana.com'), [], 'a url does not match under title:');
 });
 
-test('busca: frase entre aspas', async () => {
+test('search: quoted phrase', async () => {
   assert.deepEqual(await q('"hacker news"'), ['Hacker News']);
   assert.deepEqual(await q('"news hacker"'), []);
 });
 
-test('busca: negacao', async () => {
+test('search: negation', async () => {
   assert.deepEqual(await q('#devops -#k8s'), ['Grafana']);
   assert.deepEqual(await q('/dev -@studies'), ['Grafana']);
   assert.equal((await q('-#devops')).length, FIXTURES.length - 2);
 });
 
-test('busca: AND entre termos', async () => {
+test('search: AND between terms', async () => {
   assert.deepEqual(await q('#devops @work'), ['Grafana']);
   assert.deepEqual(await q('#devops @news'), []);
 });
 
-test('busca: ignora acentos', async () => {
+test('search: ignores accents', async () => {
   assert.deepEqual(await q('acentuacao'), ['Página com Acentuação']);
   assert.deepEqual(await q('pagina'), ['Página com Acentuação']);
 });
 
-test('busca: sem query lista tudo', async () => {
+test('search: no query lists everything', async () => {
   assert.equal((await q('')).length, FIXTURES.length);
   assert.equal((await q('   ')).length, FIXTURES.length);
 });
 
-test('busca: tag exata ranqueia acima de substring', async () => {
+test('search: an exact tag ranks above a substring', async () => {
   await call('POST', '/api/bookmarks', { token, body: { url: 'https://golang.org', title: 'Golang', tags: 'golanguage' } });
   assert.equal((await q('#go'))[0], 'The Go Blog', 'tag exata "go" vence a substring "golanguage"');
   const created = await call('GET', '/api/bookmarks?q=golang.org', { token });
   await call('DELETE', `/api/bookmarks/${created.body.items[0].id}`, { token });
 });
 
-test('busca: limit e respeitado e limitado', async () => {
+test('search: limit is honoured and capped', async () => {
   const r = await call('GET', '/api/bookmarks?limit=2', { token });
   assert.equal(r.body.items.length, 2);
   assert.equal(r.body.total, FIXTURES.length, 'total ignora o limit');
@@ -237,7 +237,7 @@ test('busca: limit e respeitado e limitado', async () => {
 
 /* ---------------- exclusao e sync ---------------- */
 
-test('delete some da listagem mas fica no sync como tombstone', async () => {
+test('delete disappears from the listing but stays in sync as a tombstone', async () => {
   const list = await call('GET', '/api/bookmarks?q=Hacker', { token });
   const id = list.body.items[0].id;
   assert.equal((await call('DELETE', `/api/bookmarks/${id}`, { token })).status, 200);
@@ -249,27 +249,27 @@ test('delete some da listagem mas fica no sync como tombstone', async () => {
   assert.equal((await call('DELETE', `/api/bookmarks/${id}`, { token })).status, 404);
 });
 
-test('isolamento entre usuarios', async () => {
+test('isolation between users', async () => {
   const other = await call('POST', '/api/auth/register', {
-    body: { email: 'outro@example.com', username: 'outro', password: 'senha123' },
+    body: { email: 'outro@example.com', username: 'outro', password: 'secret123' },
   });
   const list = await call('GET', '/api/bookmarks', { token: other.body.token });
-  assert.equal(list.body.total, 0, 'usuario novo nao ve favoritos alheios');
+  assert.equal(list.body.total, 0, 'a new user does not see other people bookmarks');
 
   const mine = await call('GET', '/api/bookmarks?q=Grafana', { token });
   const id = mine.body.items[0].id;
   assert.equal((await call('GET', `/api/bookmarks/${id}`, { token: other.body.token })).status, 404,
-    'nao da pra ler favorito de outro usuario por id');
+    'you cannot read another user bookmark by id');
   assert.equal((await call('PUT', `/api/bookmarks/${id}`, { token: other.body.token, body: { title: 'hack' } })).status, 404,
     'nem editar');
   assert.equal((await call('DELETE', `/api/bookmarks/${id}`, { token: other.body.token })).status, 404,
     'nem apagar');
 
-  const ainda = await call('GET', `/api/bookmarks/${id}`, { token });
-  assert.equal(ainda.body.item.title, 'Grafana', 'o dono continua com o favorito intacto');
+  const still = await call('GET', `/api/bookmarks/${id}`, { token });
+  assert.equal(still.body.item.title, 'Grafana', 'the owner still has the bookmark intact');
 });
 
-test('sync bidirecional entre dois clientes (web <-> desktop)', async () => {
+test('two-way sync between two clients (web <-> desktop)', async () => {
   const a = await call('POST', '/api/sync', {
     token,
     body: { since: 0, changes: [{ id: 'uuid-desktop-1', url: 'https://zed.dev', title: 'Zed', tags: 'editor', category: 'dev', updated_at: Date.now() }] },
@@ -280,31 +280,31 @@ test('sync bidirecional entre dois clientes (web <-> desktop)', async () => {
   assert.ok(b.body.changes.some((c) => c.id === 'uuid-desktop-1'));
 
   const c = await call('POST', '/api/sync', { token, body: { since: b.body.now, changes: [] } });
-  assert.equal(c.body.changes.length, 0, 'sync incremental nao reenvia o que ja foi visto');
+  assert.equal(c.body.changes.length, 0, 'an incremental sync does not resend what was already seen');
 });
 
-test('sync resolve conflito por last-write-wins', async () => {
+test('sync resolves conflicts by last-write-wins', async () => {
   const t0 = Date.now();
   const push = (title, ts) => call('POST', '/api/sync', {
-    token, body: { changes: [{ id: 'conflito', url: 'https://a.com', title, updated_at: ts }] },
+    token, body: { changes: [{ id: 'conflict', url: 'https://a.com', title, updated_at: ts }] },
   });
 
-  await push('antigo', t0);
-  await push('novo', t0 + 1000);
-  await push('atrasado', t0 - 1000);
+  await push('old', t0);
+  await push('new', t0 + 1000);
+  await push('late', t0 - 1000);
 
-  const r = await call('GET', '/api/bookmarks/conflito', { token });
-  assert.equal(r.body.item.title, 'novo', 'a escrita mais nova vence');
+  const r = await call('GET', '/api/bookmarks/conflict', { token });
+  assert.equal(r.body.item.title, 'new', 'the newest write wins');
 });
 
-test('sync ignora payload malformado sem derrubar', async () => {
-  const r = await call('POST', '/api/sync', { token, body: { since: 'abc', changes: 'nao-e-array' } });
+test('sync ignores a malformed payload without falling over', async () => {
+  const r = await call('POST', '/api/sync', { token, body: { since: 'abc', changes: 'not-an-array' } });
   assert.equal(r.status, 200);
   assert.equal(r.body.pushed, 0);
 });
 
-test('logout invalida so a sessao usada', async () => {
-  const s = await call('POST', '/api/auth/login', { body: { login: 'apolzek', password: 'senha123' } });
+test('logout invalidates only the session used', async () => {
+  const s = await call('POST', '/api/auth/login', { body: { login: 'apolzek', password: 'secret123' } });
   assert.equal((await call('POST', '/api/auth/logout', { token: s.body.token })).status, 200);
   assert.equal((await call('GET', '/api/bookmarks', { token: s.body.token })).status, 401);
   assert.equal((await call('GET', '/api/bookmarks', { token })).status, 200, 'outras sessoes continuam validas');
@@ -312,93 +312,93 @@ test('logout invalida so a sessao usada', async () => {
 
 /* ---------------- export e import ---------------- */
 
-async function baixar(format) {
+async function download(format) {
   const res = await fetch(`${base}/api/export?format=${format}`, {
     headers: { authorization: `Bearer ${token}` },
   });
-  return { status: res.status, headers: res.headers, texto: await res.text() };
+  return { status: res.status, headers: res.headers, text: await res.text() };
 }
 
-test('export exige autenticacao', async () => {
+test('export requires authentication', async () => {
   assert.equal((await fetch(`${base}/api/export`)).status, 401);
 });
 
-test('export yaml vem como download com nome de arquivo', async () => {
-  const r = await baixar('yaml');
+test('the yaml export comes as a download with a filename', async () => {
+  const r = await download('yaml');
   assert.equal(r.status, 200);
   assert.match(r.headers.get('content-type'), /yaml/);
   assert.match(r.headers.get('content-disposition'), /attachment; filename="vaultmarks-\d{4}-\d{2}-\d{2}\.yaml"/);
-  assert.match(r.texto, /^# Vaultmarks/);
-  assert.match(r.texto, /^bookmarks:$/m);
+  assert.match(r.text, /^# Bookmarks vault export/);
+  assert.match(r.text, /^bookmarks:$/m);
 });
 
-test('export html e o formato que o navegador importa', async () => {
-  const r = await baixar('html');
-  assert.match(r.texto, /^<!DOCTYPE NETSCAPE-Bookmark-file-1>/);
+test('the html export is the format browsers import', async () => {
+  const r = await download('html');
+  assert.match(r.text, /^<!DOCTYPE NETSCAPE-Bookmark-file-1>/);
   assert.match(r.headers.get('content-disposition'), /\.html"/);
 });
 
 test('export json', async () => {
-  const r = await baixar('json');
-  const doc = JSON.parse(r.texto);
+  const r = await download('json');
+  const doc = JSON.parse(r.text);
   assert.ok(Array.isArray(doc.bookmarks));
 });
 
-test('export com formato invalido e recusado', async () => {
+test('an export with an invalid format is refused', async () => {
   const r = await call('GET', '/api/export?format=xml', { token });
   assert.equal(r.status, 400);
 });
 
-test('import sem apply nao grava nada', async () => {
-  const antes = (await call('GET', '/api/bookmarks', { token })).body.total;
-  const conteudo = 'bookmarks:\n  - title: Fantasma\n    url: https://fantasma.com\n';
+test('import without apply writes nothing', async () => {
+  const before = (await call('GET', '/api/bookmarks', { token })).body.total;
+  const content = 'bookmarks:\n  - title: Fantasma\n    url: https://fantasma.com\n';
 
-  const r = await call('POST', '/api/import', { token, body: { content: conteudo, mode: 'adicionar' } });
+  const r = await call('POST', '/api/import', { token, body: { content: content, mode: 'add' } });
   assert.equal(r.status, 200);
-  assert.equal(r.body.aplicado, false);
-  assert.equal(r.body.resumo.criar, 1);
-  assert.equal(r.body.formato, 'yaml');
+  assert.equal(r.body.applied, false);
+  assert.equal(r.body.summary.create, 1);
+  assert.equal(r.body.format, 'yaml');
 
-  const depois = (await call('GET', '/api/bookmarks', { token })).body.total;
-  assert.equal(depois, antes, 'preview nao pode alterar o vault');
+  const after = (await call('GET', '/api/bookmarks', { token })).body.total;
+  assert.equal(after, before, 'a preview must not change the vault');
   assert.deepEqual(await q('Fantasma'), [], 'nada foi criado');
 });
 
-test('import aplica e depois e idempotente', async () => {
-  const conteudo = 'bookmarks:\n  - title: Importado\n    url: https://importado.com\n    tags: [novo]\n';
+test('import applies and is idempotent afterwards', async () => {
+  const content = 'bookmarks:\n  - title: Importado\n    url: https://importado.com\n    tags: [novo]\n';
 
-  const um = await call('POST', '/api/import', { token, body: { content: conteudo, mode: 'adicionar', apply: true } });
-  assert.equal(um.body.aplicado, true);
-  assert.equal(um.body.resumo.criar, 1);
+  const one = await call('POST', '/api/import', { token, body: { content: content, mode: 'add', apply: true } });
+  assert.equal(one.body.applied, true);
+  assert.equal(one.body.summary.create, 1);
   assert.deepEqual(await q('Importado'), ['Importado']);
 
-  const dois = await call('POST', '/api/import', { token, body: { content: conteudo, mode: 'adicionar', apply: true } });
-  assert.equal(dois.body.resumo.criar, 0, 'reimportar nao duplica');
-  assert.equal(dois.body.resumo.iguais, 1);
+  const two = await call('POST', '/api/import', { token, body: { content: content, mode: 'add', apply: true } });
+  assert.equal(two.body.summary.create, 0, 'reimporting does not duplicate');
+  assert.equal(two.body.summary.same, 1);
   assert.deepEqual(await q('Importado'), ['Importado']);
 });
 
-test('import respeita o modo escolhido', async () => {
-  const editado = 'bookmarks:\n  - title: Importado EDITADO\n    url: https://importado.com\n    tags: [novo]\n';
+test('import honours the chosen mode', async () => {
+  const edited = 'bookmarks:\n  - title: Importado EDITADO\n    url: https://importado.com\n    tags: [novo]\n';
 
-  const mantendo = await call('POST', '/api/import', { token, body: { content: editado, mode: 'adicionar', apply: true } });
-  assert.equal(mantendo.body.resumo.ignorar, 1);
-  assert.deepEqual(await q('Importado'), ['Importado'], 'modo adicionar preserva o titulo antigo');
+  const keeping = await call('POST', '/api/import', { token, body: { content: edited, mode: 'add', apply: true } });
+  assert.equal(keeping.body.summary.skip, 1);
+  assert.deepEqual(await q('Importado'), ['Importado'], 'the add mode keeps the old title');
 
-  const usandoArquivo = await call('POST', '/api/import', { token, body: { content: editado, mode: 'atualizar', apply: true } });
-  assert.equal(usandoArquivo.body.resumo.atualizar, 1);
+  const usingFile = await call('POST', '/api/import', { token, body: { content: edited, mode: 'update', apply: true } });
+  assert.equal(usingFile.body.summary.update, 1);
   assert.deepEqual(await q('Importado'), ['Importado EDITADO']);
 });
 
-test('import do proprio export nao muda nada', async () => {
-  const { texto } = await baixar('yaml');
-  const r = await call('POST', '/api/import', { token, body: { content: texto, mode: 'atualizar', apply: true } });
-  assert.equal(r.body.resumo.criar, 0);
-  assert.equal(r.body.resumo.atualizar, 0);
-  assert.ok(r.body.resumo.iguais > 0, 'tudo bate consigo mesmo');
+test('importing our own export changes nothing', async () => {
+  const { text } = await download('yaml');
+  const r = await call('POST', '/api/import', { token, body: { content: text, mode: 'update', apply: true } });
+  assert.equal(r.body.summary.create, 0);
+  assert.equal(r.body.summary.update, 0);
+  assert.ok(r.body.summary.same > 0, 'everything matches itself');
 });
 
-test('import le o formato do navegador', async () => {
+test('import reads the browser format', async () => {
   const html = `<!DOCTYPE NETSCAPE-Bookmark-file-1>
 <DL><p>
     <DT><H3>navegador</H3>
@@ -407,106 +407,106 @@ test('import le o formato do navegador', async () => {
     </DL><p>
 </DL><p>`;
   const r = await call('POST', '/api/import', { token, body: { content: html, apply: true } });
-  assert.equal(r.body.formato, 'html');
-  assert.equal(r.body.resumo.criar, 1);
-  assert.deepEqual(await q('/navegador'), ['Do Chrome'], 'a pasta do navegador virou pasta do vault');
+  assert.equal(r.body.format, 'html');
+  assert.equal(r.body.summary.create, 1);
+  assert.deepEqual(await q('/navegador'), ['Do Chrome'], 'the browser folder became the vault folder');
 });
 
-test('import da erro util em arquivo quebrado', async () => {
-  const quebrado = await call('POST', '/api/import', { token, body: { content: 'bookmarks:\n\t- x\n' } });
-  assert.equal(quebrado.status, 400);
-  assert.match(quebrado.body.error, /nao consegui ler/);
-  assert.match(quebrado.body.error, /linha 2/, 'o erro precisa dizer onde');
+test('import gives a useful error on a broken file', async () => {
+  const broken = await call('POST', '/api/import', { token, body: { content: 'bookmarks:\n\t- x\n' } });
+  assert.equal(broken.status, 400);
+  assert.match(broken.body.error, /could not read/);
+  assert.match(broken.body.error, /line 2/, 'the error has to say where');
 
-  const vazio = await call('POST', '/api/import', { token, body: { content: '   ' } });
-  assert.equal(vazio.status, 400);
+  const empty = await call('POST', '/api/import', { token, body: { content: '   ' } });
+  assert.equal(empty.status, 400);
 
-  const modoErrado = await call('POST', '/api/import', { token, body: { content: 'bookmarks: []', mode: 'apagar' } });
-  assert.equal(modoErrado.status, 400);
-  assert.match(modoErrado.body.error, /modo deve ser/);
+  const wrongMode = await call('POST', '/api/import', { token, body: { content: 'bookmarks: []', mode: 'wipe' } });
+  assert.equal(wrongMode.status, 400);
+  assert.match(wrongMode.body.error, /mode must be/);
 });
 
-test('import nao vaza entre usuarios', async () => {
+test('import does not leak between users', async () => {
   const outro = await call('POST', '/api/auth/register', {
-    body: { email: 'imp@example.com', username: 'importador', password: 'senha123' },
+    body: { email: 'imp@example.com', username: 'importador', password: 'secret123' },
   });
   const r = await call('POST', '/api/import', {
     token: outro.body.token,
     body: { content: 'bookmarks:\n  - title: So dele\n    url: https://dele.com\n', apply: true },
   });
-  assert.equal(r.body.resumo.criar, 1);
+  assert.equal(r.body.summary.create, 1);
 
-  const meu = await call('GET', '/api/bookmarks?q=dele.com', { token });
-  assert.equal(meu.body.items.length, 0, 'o import de um usuario nao aparece no outro');
+  const mine = await call('GET', '/api/bookmarks?q=dele.com', { token });
+  assert.equal(mine.body.items.length, 0, 'one user import does not show up for another');
 });
 
-test('substituir remove o que nao veio no arquivo — e avisa antes', async () => {
+test('replace removes what is missing from the file, and warns first', async () => {
   const solo = await call('POST', '/api/auth/register', {
-    body: { email: 'sub@example.com', username: 'substituidor', password: 'senha123' },
+    body: { email: 'sub@example.com', username: 'replacer', password: 'secret123' },
   });
   const t = solo.body.token;
   for (const url of ['https://a.com', 'https://b.com']) {
     await call('POST', '/api/bookmarks', { token: t, body: { url, title: url } });
   }
 
-  const conteudo = 'bookmarks:\n  - title: Só este\n    url: https://a.com\n';
-  const preview = await call('POST', '/api/import', { token: t, body: { content: conteudo, mode: 'substituir' } });
-  assert.equal(preview.body.resumo.remover, 1);
-  assert.deepEqual(preview.body.exemplos.remover, ['https://b.com']);
-  assert.equal((await call('GET', '/api/bookmarks', { token: t })).body.total, 2, 'ainda nao removeu');
+  const content = 'bookmarks:\n  - title: Only this\n    url: https://a.com\n';
+  const preview = await call('POST', '/api/import', { token: t, body: { content: content, mode: 'replace' } });
+  assert.equal(preview.body.summary.remove, 1);
+  assert.deepEqual(preview.body.examples.remove, ['https://b.com']);
+  assert.equal((await call('GET', '/api/bookmarks', { token: t })).body.total, 2, 'nothing removed yet');
 
-  await call('POST', '/api/import', { token: t, body: { content: conteudo, mode: 'substituir', apply: true } });
-  const restante = await call('GET', '/api/bookmarks', { token: t });
-  assert.equal(restante.body.total, 1);
-  assert.equal(restante.body.items[0].url, 'https://a.com');
+  await call('POST', '/api/import', { token: t, body: { content: content, mode: 'replace', apply: true } });
+  const left = await call('GET', '/api/bookmarks', { token: t });
+  assert.equal(left.body.total, 1);
+  assert.equal(left.body.items[0].url, 'https://a.com');
 });
 
-/* ---------------- web e PWA ---------------- */
+/* ---------------- web and PWA ---------------- */
 
-test('web e servida na raiz', async () => {
+test('the web UI is served at the root', async () => {
   const res = await fetch(base + '/');
   assert.equal(res.status, 200);
   assert.match(await res.text(), /vaultmarks/i);
 });
 
-test('nao serve arquivo fora de web/', async () => {
+test('does not serve files outside web/', async () => {
   for (const p of ['/../server/db.js', '/../../etc/passwd', '/%2e%2e/server/db.js']) {
     const res = await fetch(base + p);
     assert.ok(res.status === 403 || res.status === 404, `${p} devolveu ${res.status}`);
   }
 });
 
-test('assets da PWA existem e sao servidos', async () => {
+test('the PWA assets exist and are served', async () => {
   const esperados = [
     '/manifest.webmanifest', '/sw.js', '/icon.svg',
     '/icon-192.png', '/icon-512.png', '/icon-maskable-512.png', '/apple-touch-icon.png',
     '/style.css', '/app.js', '/search.js',
   ];
   for (const p of esperados) {
-    assert.equal((await fetch(base + p)).status, 200, `${p} deveria existir`);
+    assert.equal((await fetch(base + p)).status, 200, `${p} should exist`);
   }
 });
 
-test('manifest tem o content-type que o navegador exige', async () => {
+test('the manifest has the content-type the browser requires', async () => {
   const res = await fetch(base + '/manifest.webmanifest');
   assert.match(res.headers.get('content-type'), /application\/manifest\+json/,
-    'sem este tipo o navegador ignora o manifest e nao oferece instalar');
+    'without this type the browser ignores the manifest and never offers to install');
 });
 
-test('manifest declara o minimo para ser instalavel', async () => {
+test('the manifest declares the minimum to be installable', async () => {
   const m = await (await fetch(base + '/manifest.webmanifest')).json();
-  assert.ok(m.name && m.short_name, 'precisa de nome');
+  assert.ok(m.name && m.short_name, 'it needs a name');
   assert.equal(m.start_url, '/');
   assert.equal(m.display, 'standalone', 'senao abre como aba comum');
   assert.ok(m.theme_color && m.background_color);
 
   const sizes = m.icons.map((i) => i.sizes);
-  assert.ok(sizes.includes('192x192'), 'Android exige um icone 192');
-  assert.ok(sizes.includes('512x512'), 'Android exige um icone 512');
+  assert.ok(sizes.includes('192x192'), 'Android exige one icone 192');
+  assert.ok(sizes.includes('512x512'), 'Android exige one icone 512');
   assert.ok(m.icons.some((i) => i.purpose === 'maskable'), 'sem maskable o Android recorta torto');
 });
 
-test('service worker vem com cabecalhos que permitem atualizar', async () => {
+test('the service worker comes with headers that allow updating', async () => {
   const res = await fetch(base + '/sw.js');
   assert.match(res.headers.get('content-type'), /javascript/);
   assert.equal(res.headers.get('cache-control'), 'no-cache',
@@ -514,92 +514,92 @@ test('service worker vem com cabecalhos que permitem atualizar', async () => {
   assert.equal(res.headers.get('service-worker-allowed'), '/');
 });
 
-test('service worker nao intercepta a API', async () => {
+test('the service worker does not intercept the API', async () => {
   const sw = await (await fetch(base + '/sw.js')).text();
-  assert.match(sw, /\/api\//, 'precisa tratar /api/ explicitamente');
+  assert.match(sw, /\/api\//, 'it has to handle /api/ explicitly');
   assert.match(sw, /request\.method !== 'GET'/, 'escrita nunca pode sair do cache');
 });
 
-test('icones sao PNG de verdade', async () => {
+test('the icons are real PNGs', async () => {
   for (const p of ['/icon-192.png', '/icon-512.png']) {
     const res = await fetch(base + p);
     assert.equal(res.headers.get('content-type'), 'image/png');
     const bytes = Buffer.from(await res.arrayBuffer());
-    assert.deepEqual([...bytes.subarray(0, 4)], [0x89, 0x50, 0x4e, 0x47], `${p} nao e PNG`);
+    assert.deepEqual([...bytes.subarray(0, 4)], [0x89, 0x50, 0x4e, 0x47], `${p} is not a PNG`);
   }
 });
 
-test('index aponta para manifest, icone e viewport de celular', async () => {
+test('index points at the manifest, the icon and a mobile viewport', async () => {
   const html = await (await fetch(base + '/')).text();
-  assert.match(html, /rel="manifest"/, 'sem link do manifest nao instala');
-  assert.match(html, /apple-touch-icon/, 'iOS usa este icone na tela de inicio');
-  assert.match(html, /viewport-fit=cover/, 'sem isso o conteudo some atras do notch');
+  assert.match(html, /rel="manifest"/, 'without the manifest link it does not install');
+  assert.match(html, /apple-touch-icon/, 'iOS uses this icon on the home screen');
+  assert.match(html, /viewport-fit=cover/, 'sem isso o content some atras do notch');
   assert.match(html, /theme-color/);
 });
 
-/* ---------------- conta de teste ---------------- */
+/* ---------------- test account ---------------- */
 
-// Mesmo caminho do boot real (server.js chama isto antes do listen), so que
-// com banco descartavel e o ambiente restaurado no fim.
+// The same path as the real boot (server.js calls this before listen), only
+// with a throwaway database and the environment restored at the end.
 function bootSeed(env = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vm-seed-'));
   const dbPath = path.join(dir, 'vault.db');
-  const antes = {};
-  for (const [k, v] of Object.entries(env)) { antes[k] = process.env[k]; process.env[k] = v; }
+  const before = {};
+  for (const [k, v] of Object.entries(env)) { before[k] = process.env[k]; process.env[k] = v; }
 
   const users = (app) => app.db.prepare('SELECT * FROM users').all();
   try {
-    const primeiro = createApp(dbPath);
-    ensureSeedUser(primeiro.db);
-    const depoisDoPrimeiroBoot = users(primeiro);
-    primeiro.db.close();
+    const first = createApp(dbPath);
+    ensureSeedUser(first.db);
+    const afterFirstBoot = users(first);
+    first.db.close();
 
-    // Segundo boot no mesmo banco: e onde a idempotencia aparece.
-    const segundo = createApp(dbPath);
-    ensureSeedUser(segundo.db);
-    const depoisDoSegundoBoot = users(segundo);
-    segundo.db.close();
+    // A second boot on the same database: that is where idempotency shows up.
+    const second = createApp(dbPath);
+    ensureSeedUser(second.db);
+    const afterSecondBoot = users(second);
+    second.db.close();
 
-    return { depoisDoPrimeiroBoot, depoisDoSegundoBoot };
+    return { afterFirstBoot, afterSecondBoot };
   } finally {
-    for (const [k, v] of Object.entries(antes)) {
+    for (const [k, v] of Object.entries(before)) {
       if (v === undefined) delete process.env[k]; else process.env[k] = v;
     }
     fs.rmSync(dir, { recursive: true, force: true });
   }
 }
 
-test('boot cria a conta de teste com a senha padrao', () => {
-  const { depoisDoPrimeiroBoot } = bootSeed();
-  assert.equal(depoisDoPrimeiroBoot.length, 1);
-  assert.equal(depoisDoPrimeiroBoot[0].username, 'teste');
-  assert.equal(depoisDoPrimeiroBoot[0].email, 'teste@vaultmarks.local');
-  assert.ok(verifyPassword('teste123', depoisDoPrimeiroBoot[0].pass_hash));
+test('boot creates the test account with the default password', () => {
+  const { afterFirstBoot } = bootSeed();
+  assert.equal(afterFirstBoot.length, 1);
+  assert.equal(afterFirstBoot[0].username, 'teste');
+  assert.equal(afterFirstBoot[0].email, 'teste@vaultmarks.local');
+  assert.ok(verifyPassword('teste123', afterFirstBoot[0].pass_hash));
 });
 
-test('segundo boot nao duplica a conta nem invalida a senha', () => {
-  const { depoisDoSegundoBoot } = bootSeed();
-  assert.equal(depoisDoSegundoBoot.length, 1);
-  assert.ok(verifyPassword('teste123', depoisDoSegundoBoot[0].pass_hash));
+test('a second boot neither duplicates the account nor breaks the password', () => {
+  const { afterSecondBoot } = bootSeed();
+  assert.equal(afterSecondBoot.length, 1);
+  assert.ok(verifyPassword('teste123', afterSecondBoot[0].pass_hash));
 });
 
-test('VAULTMARKS_SEED=0 nao cria conta nenhuma', () => {
-  const { depoisDoSegundoBoot } = bootSeed({ VAULTMARKS_SEED: '0' });
-  assert.equal(depoisDoSegundoBoot.length, 0);
+test('VAULTMARKS_SEED=0 creates no account at all', () => {
+  const { afterSecondBoot } = bootSeed({ VAULTMARKS_SEED: '0' });
+  assert.equal(afterSecondBoot.length, 0);
 });
 
-test('usuario e senha da conta de teste vem do ambiente', () => {
-  const { depoisDoPrimeiroBoot } = bootSeed({
+test('the test account username and password come from the environment', () => {
+  const { afterFirstBoot } = bootSeed({
     VAULTMARKS_SEED_USER: 'qa',
     VAULTMARKS_SEED_PASSWORD: 'segredo123',
   });
-  assert.equal(depoisDoPrimeiroBoot[0].username, 'qa');
-  assert.equal(depoisDoPrimeiroBoot[0].email, 'qa@vaultmarks.local');
-  assert.ok(verifyPassword('segredo123', depoisDoPrimeiroBoot[0].pass_hash));
-  assert.ok(!verifyPassword('teste123', depoisDoPrimeiroBoot[0].pass_hash));
+  assert.equal(afterFirstBoot[0].username, 'qa');
+  assert.equal(afterFirstBoot[0].email, 'qa@vaultmarks.local');
+  assert.ok(verifyPassword('segredo123', afterFirstBoot[0].pass_hash));
+  assert.ok(!verifyPassword('teste123', afterFirstBoot[0].pass_hash));
 });
 
-test('senha trocada no ambiente e reacertada no boot seguinte', () => {
+test('a password changed in the environment is reset on the next boot', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vm-seed-'));
   const dbPath = path.join(dir, 'vault.db');
   try {
@@ -607,13 +607,13 @@ test('senha trocada no ambiente e reacertada no boot seguinte', () => {
     ensureSeedUser(a.db);
     a.db.close();
 
-    process.env.VAULTMARKS_SEED_PASSWORD = 'nova-senha';
+    process.env.VAULTMARKS_SEED_PASSWORD = 'new-password';
     const b = createApp(dbPath);
     ensureSeedUser(b.db);
     const [u] = b.db.prepare('SELECT * FROM users').all();
     b.db.close();
 
-    assert.ok(verifyPassword('nova-senha', u.pass_hash));
+    assert.ok(verifyPassword('new-password', u.pass_hash));
   } finally {
     delete process.env.VAULTMARKS_SEED_PASSWORD;
     fs.rmSync(dir, { recursive: true, force: true });

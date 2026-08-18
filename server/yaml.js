@@ -1,45 +1,45 @@
 'use strict';
 
-// YAML mínimo, sem dependência nenhuma — o backend não tem node_modules.
+// Minimal YAML with no dependency at all: the backend has no node_modules.
 //
-// NÃO é um YAML completo. É o subconjunto necessário para o arquivo de export
-// do Vaultmarks, mais o que uma pessoa razoavelmente escreveria à mão:
+// This is NOT full YAML. It is the subset the export file needs, plus what a
+// person would reasonably write by hand:
 //
-//   chave: valor              mapa
-//   chave:                    mapa/lista aninhada por indentação
-//     - item                  lista
-//   - chave: valor            lista de mapas
-//   tags: [a, b]              lista em linha
-//   {a: 1, b: [x]}            mapa em linha (não emitimos, mas outros emitem)
-//   description: |                  bloco multilinha (| mantém a quebra final, |- corta)
-//     linha 1
-//   "com: dois pontos"        aspas duplas (com \n \t \" \\ \uXXXX)
-//   'literal'                 aspas simples ('' escapa a aspa)
-//   # comentário              linha inteira, ou depois de um espaço
+//   key: value                mapping
+//   key:                      mapping/list nested by indentation
+//     - item                  list
+//   - key: value              list of mappings
+//   tags: [a, b]              flow list
+//   {a: 1, b: [x]}            flow mapping (we never emit one, others do)
+//   description: |            multiline block (| keeps the final break, |- trims it)
+//     line 1
+//   "with: a colon"           double quotes (with \n \t \" \\ \uXXXX)
+//   'literal'                 single quotes ('' escapes the quote)
+//   # comment                 a whole line, or after a space
 //
-// Escalares quebrados em várias linhas (com ou sem aspas) são unidos pela
-// regra de folding do YAML — é o que emissores fazem com texto longo.
+// Scalars broken across several lines (quoted or not) are joined by the YAML
+// folding rule, which is what emitters do with long text.
 //
-// O que NÃO existe aqui — âncoras (&x), aliases (*x), tags (!!str), documentos
-// múltiplos (---), chaves complexas. Encontrando qualquer um deles o parser
-// **lança erro com o número da linha** em vez de adivinhar: adivinhar aqui
-// significaria importar o vault errado calado.
+// What does NOT exist here: anchors (&x), aliases (*x), tags (!!str), multiple
+// documents (---), complex keys. On any of them the parser **throws with the
+// line number** instead of guessing, because guessing here would mean silently
+// importing the wrong vault.
 //
-// Conferido contra o PyYAML nos dois sentidos, com 500 documentos gerados —
-// ver tests/yaml.test.js.
+// Checked against PyYAML in both directions with 500 generated documents; see
+// tests/yaml.test.js.
 
 const INDICATORS = '-?:,[]{}#&*!|>%@`"\'';
 
-/* ============================ emitir ============================ */
+/* ============================ emit ============================ */
 
 function needsQuotes(s) {
   if (s === '') return true;
-  if (s !== s.trim()) return true;                       // espaço nas pontas
-  if (INDICATORS.includes(s[0])) return true;            // começa com indicador
-  if (s.includes(': ') || s.endsWith(':')) return true;  // vira chave
-  if (s.includes(' #')) return true;                     // vira comentário
+  if (s !== s.trim()) return true;                       // whitespace at the edges
+  if (INDICATORS.includes(s[0])) return true;            // starts with an indicator
+  if (s.includes(': ') || s.endsWith(':')) return true;  // would become a key
+  if (s.includes(' #')) return true;                     // would become a comment
   if (/[\n\r\t]/.test(s)) return true;
-  // Não pode ser relido como outro tipo.
+  // Must not read back as another type.
   if (/^(true|false|null|yes|no|on|off|~)$/i.test(s)) return true;
   if (/^[-+]?(\d+\.?\d*|\.\d+)([eE][-+]?\d+)?$/.test(s)) return true;
   return false;
@@ -63,7 +63,7 @@ function scalar(value) {
   return needsQuotes(s) ? quote(s) : s;
 }
 
-// Texto com quebra de linha vira bloco `|-`: fica legível e editável no arquivo.
+// Text with line breaks becomes a `|-` block: readable and editable in the file.
 function blockScalar(value, indent) {
   const pad = ' '.repeat(indent + 2);
   const lines = String(value).replace(/\r\n?/g, '\n').split('\n');
@@ -80,7 +80,7 @@ function dumpValue(value, indent) {
     if (!value.length) return '[]';
     return '\n' + value.map((item) => {
       if (item !== null && typeof item === 'object' && !Array.isArray(item)) {
-        // Lista de mapas: a primeira chave fica na mesma linha do traço.
+        // List of mappings: the first key stays on the same line as the dash.
         const body = dumpMapping(item, indent + 2);
         return `${pad}- ${body.slice(indent + 2)}`;
       }
@@ -102,8 +102,8 @@ function dumpMapping(obj, indent) {
   const out = [];
   for (const [key, value] of Object.entries(obj)) {
     if (value === undefined) continue;
-    // A chave passa pelas mesmas regras do valor: sem aspas, uma chave `yes:`
-    // vira booleano em YAML 1.1 e o arquivo deixa de reler igual em outro parser.
+    // The key follows the same rules as the value: unquoted, a `yes:` key turns
+    // into a boolean in YAML 1.1 and the file stops reading back the same elsewhere.
     const k = scalar(String(key));
     const rendered = dumpValue(value, indent);
     out.push(rendered.startsWith('\n') ? `${pad}${k}:${rendered}` : `${pad}${k}: ${rendered}`);
@@ -121,17 +121,17 @@ function stringify(value, { header = '' } = {}) {
   return `${prefix}${body}\n`;
 }
 
-/* ============================ ler ============================ */
+/* ============================ read ============================ */
 
 class YamlError extends Error {
   constructor(message, line) {
-    super(line ? `linha ${line}: ${message}` : message);
+    super(line ? `line ${line}: ${message}` : message);
     this.name = 'YamlError';
     this.line = line;
   }
 }
 
-// Remove comentário no fim da linha, respeitando aspas.
+// Strips a trailing comment, respecting quotes.
 function stripComment(text) {
   let quoteChar = '';
   for (let i = 0; i < text.length; i++) {
@@ -155,39 +155,39 @@ function parseScalar(raw, line) {
   if (text[0] === '"' || text[0] === "'") {
     const q = text[0];
     const close = closingQuote(text, q);
-    if (close < 0) throw new YamlError(`aspas ${q === '"' ? 'duplas' : 'simples'} nao fechadas`, line);
-    if (close !== text.length - 1) throw new YamlError('sobrou conteudo depois das aspas', line);
+    if (close < 0) throw new YamlError(`unclosed ${q === '"' ? 'double' : 'single'} quote`, line);
+    if (close !== text.length - 1) throw new YamlError('trailing content after the closing quote', line);
     return foldQuoted(text, q, line);
   }
 
-  if (text[0] === '&' || text[0] === '*') throw new YamlError('ancora/alias nao suportado', line);
-  if (text.startsWith('!!') || text.startsWith('!')) throw new YamlError('tag YAML nao suportada', line);
+  if (text[0] === '&' || text[0] === '*') throw new YamlError('anchor/alias not supported', line);
+  if (text.startsWith('!!') || text.startsWith('!')) throw new YamlError('YAML tag not supported', line);
 
   if (text[0] === '[') {
-    if (text[text.length - 1] !== ']') throw new YamlError('lista em linha nao fechada', line);
+    if (text[text.length - 1] !== ']') throw new YamlError('unclosed flow list', line);
     const inner = text.slice(1, -1).trim();
     if (!inner) return [];
     return splitFlow(inner, line).map((part) => parseScalar(part, line));
   }
 
-  // Mapa em linha: `{a: 1, tags: [x, y]}`. Nao e o que a gente emite, mas e o
-  // que sai de outros emissores em modo flow — e recusar isso seria recusar
-  // um export legitimo do usuario.
+  // Flow mapping: `{a: 1, tags: [x, y]}`. Not what we emit, but what other
+  // emitters produce in flow style, and refusing it would mean refusing a
+  // legitimate export.
   if (text[0] === '{') {
-    if (text[text.length - 1] !== '}') throw new YamlError('mapa em linha nao fechado', line);
+    if (text[text.length - 1] !== '}') throw new YamlError('unclosed flow mapping', line);
     const inner = text.slice(1, -1).trim();
     if (!inner) return {};
     const out = {};
     for (const part of splitFlow(inner, line)) {
       const colon = flowColon(part);
-      if (colon < 0) throw new YamlError(`esperava "chave: valor" em ${JSON.stringify(part)}`, line);
+      if (colon < 0) throw new YamlError(`expected "key: value" in ${JSON.stringify(part)}`, line);
       out[String(parseScalar(part.slice(0, colon), line))] = parseScalar(part.slice(colon + 1), line);
     }
     return out;
   }
 
-  // Escalar simples quebrado em varias linhas (emissores fazem isso quando o
-  // valor passa da largura). A quebra vira espaco, pela mesma regra das aspas.
+  // A plain scalar broken across lines (emitters do that when the value goes
+  // past the width). The break becomes a space, by the same rule as quotes.
   if (text.includes('\n')) return foldBreaks(text.split('\n').map((l) => l.trim()));
 
   if (/^(true|yes|on)$/i.test(text)) return true;
@@ -201,7 +201,7 @@ function parseScalar(raw, line) {
   return text;
 }
 
-// Onde a aspa aberta em text[0] fecha. -1 = não fecha nesta string.
+// Where the quote opened at text[0] closes. -1 = it does not close in this string.
 function closingQuote(text, q) {
   for (let i = 1; i < text.length; i++) {
     if (q === '"' && text[i] === '\\') { i++; continue; }
@@ -213,9 +213,9 @@ function closingQuote(text, q) {
   return -1;
 }
 
-// Junta linhas de um escalar quebrado: uma quebra vira espaço, n quebras
-// seguidas viram n-1 novas linhas. Em aspas duplas, uma barra invertida no
-// fim da linha engole a quebra inteira (continuação explícita).
+// Joins the lines of a broken scalar: one break becomes a space, n consecutive
+// breaks become n-1 newlines. Inside double quotes, a backslash at the end of a
+// line swallows the break entirely (explicit continuation).
 function foldBreaks(parts, allowEscapedBreak = false) {
   let out = '';
   let breaks = 0;
@@ -240,17 +240,17 @@ function foldBreaks(parts, allowEscapedBreak = false) {
   return out;
 }
 
-// Escalar entre aspas pode atravessar linhas — é o que PyYAML e outros
-// emissores fazem com texto longo. A quebra simples vira espaço; n quebras
-// seguidas viram n-1 novas linhas (regra de folding do YAML).
+// A quoted scalar may span lines, which is what PyYAML and other emitters do
+// with long text. A single break becomes a space; n consecutive breaks become
+// n-1 newlines (the YAML folding rule).
 function foldQuoted(full, q, line) {
   const close = closingQuote(full, q);
-  if (close < 0) throw new YamlError('aspas nao fechadas', line);
+  if (close < 0) throw new YamlError('unclosed quote', line);
 
   const parts = full.slice(1, close).split('\n');
 
-  // O espaco em branco some quando encosta numa quebra de linha — mas o da
-  // ultima linha nao encosta em quebra nenhuma, encosta na aspa: e conteudo.
+  // Whitespace disappears when it touches a line break, but the whitespace on
+  // the last line touches no break, it touches the quote: it is content.
   const norm = parts.length === 1 ? parts : parts.map((p, i) => (
     i === 0 ? p.replace(/\s+$/, '')
       : i === parts.length - 1 ? p.replace(/^\s+/, '')
@@ -267,8 +267,8 @@ function foldQuoted(full, q, line) {
     });
 }
 
-// Quebra "a, b, 'c, d', [e, f]" nas virgulas do nivel de cima, respeitando
-// aspas e colchetes/chaves aninhados.
+// Splits "a, b, 'c, d', [e, f]" on the top-level commas, respecting quotes and
+// nested brackets/braces.
 function splitFlow(text, line) {
   const parts = [];
   let cur = '';
@@ -298,13 +298,13 @@ function splitFlow(text, line) {
     }
   }
 
-  if (quoteChar) throw new YamlError('aspas nao fechadas na lista', line);
+  if (quoteChar) throw new YamlError('unclosed quote in the list', line);
   parts.push(cur);
   return parts.map((p) => p.trim()).filter((p, i, arr) => !(p === '' && i === arr.length - 1));
 }
 
-// Uma aspa so abre um escalar quando esta no inicio de um token. No meio de
-// um escalar simples ela e literal: `description: aspa " solta` e YAML valido.
+// A quote only opens a scalar at the start of a token. In the middle of a plain
+// scalar it is literal: `description: a stray " quote` is valid YAML.
 function opensQuote(text, i) {
   for (let j = i - 1; j >= 0; j--) {
     const c = text[j];
@@ -314,7 +314,7 @@ function opensQuote(text, i) {
   return true;
 }
 
-// Uma estrutura em linha ([...] ou {...}) fechou dentro deste texto?
+// Did a flow structure ([...] or {...}) close inside this text?
 function flowComplete(text) {
   let quoteChar = '';
   let depth = 0;
@@ -338,8 +338,8 @@ function flowComplete(text) {
   return false;
 }
 
-// Posicao do ":" que separa chave de valor num item de mapa em linha.
-// Exige espaco depois, senao "https://x" viraria chave.
+// Position of the ":" separating key from value in a flow mapping item.
+// It requires a space after it, otherwise "https://x" would become a key.
 function flowColon(text) {
   let quoteChar = '';
   let depth = 0;
@@ -363,10 +363,10 @@ function flowColon(text) {
 
 class Reader {
   constructor(text) {
-    if (typeof text !== 'string') throw new YamlError('conteudo precisa ser texto');
+    if (typeof text !== 'string') throw new YamlError('content must be text');
     this.lines = text.replace(/\r\n?/g, '\n').split('\n').map((raw, i) => {
       const withoutTabs = raw.match(/^\t/) ? null : raw;
-      if (withoutTabs === null) throw new YamlError('indentacao com TAB — YAML exige espacos', i + 1);
+      if (withoutTabs === null) throw new YamlError('indentation with TAB, YAML requires spaces', i + 1);
       const indent = raw.length - raw.trimStart().length;
       const trimmed = raw.trim();
       const content = stripComment(raw.slice(indent)).trimEnd();
@@ -389,7 +389,7 @@ class Reader {
   parse() {
     const first = this.peek();
     if (!first) return null;
-    if (first.content.startsWith('---')) throw new YamlError('documento multiplo (---) nao suportado', first.n);
+    if (first.content.startsWith('---')) throw new YamlError('multiple documents (---) not supported', first.n);
     return this.parseNode(first.indent);
   }
 
@@ -397,7 +397,7 @@ class Reader {
     const line = this.peek();
     if (!line || line.indent < indent) return null;
 
-    // Documento inteiro em estilo flow: `{a: 1, b: [x]}`.
+    // A whole document in flow style: `{a: 1, b: [x]}`.
     if (line.content[0] === '{' || line.content[0] === '[') {
       this.i++;
       return this.readScalar(line.content, line.n);
@@ -414,7 +414,7 @@ class Reader {
 
       const dash = line.content.match(/^-\s*/)[0];
       const rest = line.content.slice(dash.length);
-      // Coluna real onde o conteúdo começa — respeita "-   chave: v".
+      // The real column where content starts, respecting "-   key: v".
       const contentCol = indent + dash.length;
 
       if (rest === '') {
@@ -422,7 +422,7 @@ class Reader {
         const next = this.peek();
         out.push(next && next.indent > indent ? this.parseNode(next.indent) : null);
       } else if (this.looksLikeKey(rest)) {
-        // A primeira chave do mapa mora na linha do traço.
+        // The mapping's first key lives on the dash line.
         this.lines[this.i] = { ...line, indent: contentCol, content: rest };
         out.push(this.parseMapping(contentCol));
       } else {
@@ -447,7 +447,7 @@ class Reader {
     for (;;) {
       const line = this.peek();
       if (!line || line.indent < indent) break;
-      if (line.indent > indent) throw new YamlError('indentacao inesperada', line.n);
+      if (line.indent > indent) throw new YamlError('unexpected indentation', line.n);
       if (/^-(\s|$)/.test(line.content)) break;
 
       const { key, rest } = this.splitKey(line);
@@ -467,17 +467,17 @@ class Reader {
     return out;
   }
 
-  // Escalar comum, exceto quando a aspa nao fecha na propria linha: ai o valor
-  // continua nas seguintes (emissores quebram texto longo assim).
+  // An ordinary scalar, except when the quote does not close on its own line:
+  // then the value continues on the next ones (that is how emitters break long text).
   readScalar(rest, lineNo, parentIndent = null) {
     const head = rest[0];
 
-    // Estrutura em linha que nao fechou: emissores quebram `{a: 1, b: 2}`
-    // em varias linhas quando fica longo.
+    // A flow structure that did not close: emitters break `{a: 1, b: 2}` across
+    // several lines when it gets long.
     if (head === '[' || head === '{') {
       let acc = rest;
       while (!flowComplete(acc)) {
-        if (this.i >= this.lines.length) throw new YamlError('estrutura em linha nao fechada', lineNo);
+        if (this.i >= this.lines.length) throw new YamlError('unclosed flow structure', lineNo);
         acc += '\n' + this.lines[this.i].raw;
         this.i++;
       }
@@ -485,8 +485,8 @@ class Reader {
     }
 
     if (head !== '"' && head !== "'") {
-      // Escalar simples tambem pode continuar nas linhas seguintes: qualquer
-      // linha mais indentada que nao seja outra chave nem item de lista.
+      // A plain scalar can continue on the next lines too: any line indented
+      // further that is neither another key nor a list item.
       if (parentIndent !== null) {
         const segs = [rest];
         while (this.i < this.lines.length) {
@@ -503,12 +503,12 @@ class Reader {
 
     if (closingQuote(rest, head) >= 0) return parseScalar(rest, lineNo);
 
-    // Aspas que atravessam linhas.
+    // Quotes spanning several lines.
     const segs = [rest];
     while (closingQuote(segs.join('\n'), head) < 0) {
-      if (this.i >= this.lines.length) throw new YamlError('aspas nao fechadas', lineNo);
-      // Cru: quem decide o que e espaco de indentacao e o que e conteudo
-      // e o foldQuoted, que conhece a regra de quebra do YAML.
+      if (this.i >= this.lines.length) throw new YamlError('unclosed quote', lineNo);
+      // Raw: foldQuoted is what decides which whitespace is indentation and
+      // which is content, because it knows the YAML folding rule.
       segs.push(this.lines[this.i].raw);
       this.i++;
     }
@@ -519,16 +519,16 @@ class Reader {
     const text = line.content;
     if (text[0] === '"' || text[0] === "'") {
       const close = text.indexOf(text[0], 1);
-      if (close < 0) throw new YamlError('chave com aspas nao fechadas', line.n);
+      if (close < 0) throw new YamlError('key with an unclosed quote', line.n);
       const after = text.slice(close + 1).replace(/^\s*:\s?/, '');
       return { key: parseScalar(text.slice(0, close + 1), line.n), rest: after.trim() };
     }
     const idx = text.indexOf(':');
-    if (idx < 0) throw new YamlError(`esperava "chave: valor", veio ${JSON.stringify(text)}`, line.n);
+    if (idx < 0) throw new YamlError(`expected "key: value", got ${JSON.stringify(text)}`, line.n);
     return { key: text.slice(0, idx).trim(), rest: text.slice(idx + 1).trim() };
   }
 
-  // Bloco literal: usa as linhas cruas, sem tirar comentário nem espaço.
+  // Literal block: uses the raw lines, stripping neither comment nor whitespace.
   readBlock(parentIndent, marker) {
     const collected = [];
     let blockIndent = null;

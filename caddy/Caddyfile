@@ -1,28 +1,28 @@
-# TLS na frente do Vaultmarks.
+# TLS in front of the backend.
 #
-# Por que isso existe: no celular a PWA so instala (e o service worker so
-# registra) em "secure context" — https ou localhost. Acessar
-# http://192.168.0.x:8787 do celular nao serve. O Caddy emite um certificado
-# com uma CA propria e resolve isso sem depender de dominio publico.
+# Why this exists: on a phone the PWA only installs (and the service worker only
+# registers) in a "secure context", meaning https or localhost. Reaching
+# http://192.168.0.x:8787 from the phone does not work. Caddy issues a
+# certificate from its own CA and solves that without a public domain.
 #
-# Passo unico: instalar a CA raiz no celular. Ela fica em
-# http://<SITE>/root.crt (ver o bloco http:// abaixo).
+# The one step: install the root CA on the phone. It lives at
+# http://<SITE>/root.crt (see the http:// block below).
 
 {
-	# Emite tudo com a CA interna em vez do Let's Encrypt — nao ha dominio
-	# publico nem porta 80 aberta pra fora numa rede local.
+	# Issues everything with the internal CA instead of Let's Encrypt: on a
+	# local network there is no public domain and no port 80 open outside.
 	local_certs
 	admin off
 }
 
-# VAULTMARKS_SITE = como voce acessa: hostname, ou o IP da maquina na LAN.
+# VAULTMARKS_SITE = how you reach it: a hostname, or the machine's LAN IP.
 {$VAULTMARKS_SITE:vaultmarks.local} {
 	tls internal
 
 	encode zstd gzip
 
 	header {
-		# Sem isso o navegador pode adivinhar o tipo do manifest e ignora-lo.
+		# Without this the browser may sniff the manifest type and ignore it.
 		X-Content-Type-Options nosniff
 		Referrer-Policy strict-origin-when-cross-origin
 		X-Frame-Options SAMEORIGIN
@@ -32,8 +32,8 @@
 	reverse_proxy vaultmarks:8787
 }
 
-# HTTP fica so para entregar a CA raiz — antes de confiar nela, o celular
-# obviamente nao consegue abrir o HTTPS.
+# HTTP is only there to hand out the root CA: before trusting it, the phone
+# obviously cannot open the HTTPS.
 http://{$VAULTMARKS_SITE:vaultmarks.local} {
 	handle /root.crt {
 		root * /data/caddy/pki/authorities/local

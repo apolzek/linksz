@@ -1,7 +1,7 @@
 'use strict';
 
-// Testes do motor de busca. O espelho em Python vive em tests/test_desktop.py,
-// que alem de repetir estes casos compara as duas implementacoes.
+// Search engine tests. The Python mirror lives in tests/test_desktop.py, which
+// repeats these cases and also compares the two implementations.
 
 const test = require('node:test');
 const assert = require('node:assert');
@@ -26,9 +26,9 @@ const FIXTURES = [
 const t = (q) => search(FIXTURES, q).map((b) => b.title);
 const sorted = (q) => t(q).sort();
 
-/* ---------------- normalizacao ---------------- */
+/* ---------------- normalization ---------------- */
 
-test('norm remove acentos e caixa', () => {
+test('norm strips accents and case', () => {
   assert.equal(norm('Página COM Acentuação'), 'pagina com acentuacao');
   assert.equal(norm('ÀÉÎÕÜç'), 'aeiouc');
   assert.equal(norm(null), '');
@@ -38,34 +38,34 @@ test('norm remove acentos e caixa', () => {
 
 /* ---------------- tokenizer ---------------- */
 
-test('tokenize quebra por espaco', () => {
+test('tokenize splits on whitespace', () => {
   assert.deepEqual(tokenize('a b  c'), ['a', 'b', 'c']);
   assert.deepEqual(tokenize('   '), []);
   assert.deepEqual(tokenize(''), []);
   assert.deepEqual(tokenize(null), []);
 });
 
-test('tokenize mantem aspas juntas', () => {
+test('tokenize keeps quoted runs together', () => {
   assert.deepEqual(tokenize('"duas palavras" solta'), ['"duas palavras"', 'solta']);
-  assert.deepEqual(tokenize("'aspas simples' x"), ["'aspas simples'", 'x']);
+  assert.deepEqual(tokenize("'single quotes' x"), ["'single quotes'", 'x']);
   assert.deepEqual(tokenize('a "b c" d'), ['a', '"b c"', 'd']);
 });
 
-test('tokenize aguenta aspas nao fechadas', () => {
+test('tokenize survives an unclosed quote', () => {
   assert.deepEqual(tokenize('"sem fechar'), ['"sem fechar']);
   assert.equal(parseQuery('"sem fechar')[0].value, 'sem fechar');
 });
 
 /* ---------------- parser ---------------- */
 
-test('parseQuery entende os sigilos', () => {
+test('parseQuery understands the sigils', () => {
   assert.deepEqual(parseQuery('#tag'), [{ field: 'tags', value: 'tag', negate: false }]);
   assert.deepEqual(parseQuery('@cat'), [{ field: 'category', value: 'cat', negate: false }]);
-  assert.deepEqual(parseQuery('/pasta'), [{ field: 'folder', value: 'pasta', negate: false }]);
+  assert.deepEqual(parseQuery('/folder'), [{ field: 'folder', value: 'folder', negate: false }]);
   assert.deepEqual(parseQuery('livre'), [{ field: 'any', value: 'livre', negate: false }]);
 });
 
-test('parseQuery entende campo:valor e apelidos', () => {
+test('parseQuery understands field:value and aliases', () => {
   const field = (q) => parseQuery(q)[0].field;
   assert.equal(field('title:x'), 'title');
   assert.equal(field('url:x'), 'url');
@@ -81,113 +81,113 @@ test('parseQuery entende campo:valor e apelidos', () => {
   assert.equal(field('TITLE:x'), 'title', 'nome do campo e case-insensitive');
 });
 
-test('parseQuery nao confunde url com campo:valor', () => {
+test('parseQuery does not mistake a url for field:value', () => {
   const term = parseQuery('https://go.dev')[0];
   assert.equal(term.field, 'any');
   assert.equal(term.value, 'https://go.dev');
   assert.equal(parseQuery('foo:bar')[0].value, 'foo:bar', 'campo desconhecido fica literal');
 });
 
-test('parseQuery entende negacao em todas as formas', () => {
+test('parseQuery understands negation in every form', () => {
   assert.deepEqual(parseQuery('-x'), [{ field: 'any', value: 'x', negate: true }]);
   assert.deepEqual(parseQuery('-#t'), [{ field: 'tags', value: 't', negate: true }]);
   assert.deepEqual(parseQuery('-@c'), [{ field: 'category', value: 'c', negate: true }]);
   assert.deepEqual(parseQuery('-title:x'), [{ field: 'title', value: 'x', negate: true }]);
 });
 
-test('parseQuery descarta termos vazios', () => {
+test('parseQuery drops empty terms', () => {
   for (const q of ['#', '@', '/', '-', '""', "''", '   ', '']) {
-    assert.deepEqual(parseQuery(q), [], `${JSON.stringify(q)} nao deve virar termo`);
+    assert.deepEqual(parseQuery(q), [], `${JSON.stringify(q)} must not become a term`);
   }
 });
 
-test('aspas protegem o hifen literal', () => {
-  const term = parseQuery('"-nao-e-negacao"')[0];
+test('quotes protect a literal hyphen', () => {
+  const term = parseQuery('"-not-a-negation"')[0];
   assert.equal(term.negate, false);
-  assert.equal(term.value, '-nao-e-negacao');
+  assert.equal(term.value, '-not-a-negation');
 });
 
-/* ---------------- busca por substring ---------------- */
+/* ---------------- substring search ---------------- */
 
-test('substring casa no meio de qualquer campo', () => {
-  assert.deepEqual(t('kuber'), ['Kubernetes Docs'], 'inicio do titulo');
-  assert.deepEqual(t('bernet'), ['Kubernetes Docs'], 'meio do titulo');
-  assert.deepEqual(t('ycombinator'), ['Hacker News'], 'meio da url');
+test('substring matches in the middle of any field', () => {
+  assert.deepEqual(t('kuber'), ['Kubernetes Docs'], 'start of the title');
+  assert.deepEqual(t('bernet'), ['Kubernetes Docs'], 'middle of the title');
+  assert.deepEqual(t('ycombinator'), ['Hacker News'], 'middle of the url');
   assert.deepEqual(t('diaria'), ['Hacker News'], 'notas');
-  // Empate na pasta (mesmo peso, mesma posicao): o mais recente vem antes.
-  assert.deepEqual(t('infra'), ['Kubernetes Docs', 'Grafana'], 'pasta');
+  // A tie on folder (same weight, same position): the most recent comes first.
+  assert.deepEqual(t('infra'), ['Kubernetes Docs', 'Grafana'], 'folder');
 });
 
-test('busca e case-insensitive', () => {
+test('search is case-insensitive', () => {
   assert.deepEqual(t('BERNET'), ['Kubernetes Docs']);
   assert.deepEqual(t('KuBeRnEtEs'), ['Kubernetes Docs']);
 });
 
-test('busca ignora acentos nos dois sentidos', () => {
+test('search ignores accents in both directions', () => {
   assert.deepEqual(t('acentuacao'), ['Página com Acentuação']);
   assert.deepEqual(t('Acentuação'), ['Página com Acentuação']);
   assert.deepEqual(t('pagina'), ['Página com Acentuação']);
 });
 
-test('caracteres especiais sao literais, nao regex', () => {
+test('special characters are literal, not regex', () => {
   assert.deepEqual(t('go.dev'), ['The Go Blog']);
-  assert.deepEqual(t('.*'), [], 'nao e interpretado como regex');
+  assert.deepEqual(t('.*'), [], 'it is not interpreted as a regex');
   assert.deepEqual(t('kubernetes.io/docs'), ['Kubernetes Docs']);
   assert.deepEqual(t('['), []);
 });
 
 /* ---------------- busca por campo ---------------- */
 
-test('#tag busca so em tags', () => {
+test('#tag searches tags only', () => {
   assert.deepEqual(sorted('#devops'), ['Grafana', 'Kubernetes Docs']);
   assert.deepEqual(t('#k8s'), ['Kubernetes Docs']);
   assert.deepEqual(t('#inexistente'), []);
-  assert.deepEqual(t('#Hacker'), [], 'titulo nao entra na busca por tag');
+  assert.deepEqual(t('#Hacker'), [], 'a title does not enter a tag search');
 });
 
-test('@categoria busca so em categoria', () => {
+test('@category searches the category only', () => {
   assert.deepEqual(sorted('@studies'), ['Kubernetes Docs', 'The Go Blog']);
   assert.deepEqual(sorted('@stud'), ['Kubernetes Docs', 'The Go Blog'], 'substring vale');
-  assert.deepEqual(t('@grafana'), [], 'titulo nao entra na busca por categoria');
+  assert.deepEqual(t('@grafana'), [], 'a title does not enter a category search');
 });
 
-test('/pasta busca so em pasta e pega as filhas', () => {
+test('/folder searches folders only and catches children', () => {
   assert.deepEqual(sorted('/dev/infra'), ['Grafana', 'Kubernetes Docs']);
-  assert.equal(t('/dev').length, 3, 'pasta pai casa as filhas');
+  assert.equal(t('/dev').length, 3, 'a parent folder matches its children');
 });
 
-test('campo:valor filtra o campo certo', () => {
+test('field:value filters the right field', () => {
   assert.deepEqual(t('title:go'), ['The Go Blog']);
   assert.deepEqual(t('url:ycombinator'), ['Hacker News']);
   assert.deepEqual(t('description:diaria'), ['Hacker News']);
   assert.deepEqual(sorted('cat:work'), ['Grafana', 'Página com Acentuação']);
-  assert.deepEqual(t('title:grafana.com'), [], 'url nao casa quando o campo e title');
+  assert.deepEqual(t('title:grafana.com'), [], 'a url does not match when the field is title');
 });
 
-test('frase entre aspas casa com espaco', () => {
+test('a quoted phrase matches with the space', () => {
   assert.deepEqual(t('"hacker news"'), ['Hacker News']);
   assert.deepEqual(t('"news hacker"'), [], 'ordem importa numa frase');
-  assert.deepEqual(t('hacker news'), ['Hacker News'], 'sem aspas sao dois termos com AND');
+  assert.deepEqual(t('hacker news'), ['Hacker News'], 'without quotes they are two AND terms');
   assert.deepEqual(t('title:"go blog"'), ['The Go Blog']);
 });
 
 /* ---------------- combinacoes ---------------- */
 
-test('termos combinam com AND', () => {
+test('terms combine with AND', () => {
   assert.deepEqual(t('#devops @work'), ['Grafana']);
   assert.deepEqual(t('#devops @studies'), ['Kubernetes Docs']);
   assert.deepEqual(t('#devops @news'), []);
   assert.deepEqual(t('#k8s @studies /dev/infra'), ['Kubernetes Docs']);
 });
 
-test('negacao exclui', () => {
+test('negation excludes', () => {
   assert.deepEqual(t('#devops -#k8s'), ['Grafana']);
   assert.deepEqual(t('/dev -@studies'), ['Grafana']);
   assert.deepEqual(t('#devops -grafana'), ['Kubernetes Docs']);
-  assert.deepEqual(t('#devops -#devops'), [], 'negar o mesmo termo zera');
+  assert.deepEqual(t('#devops -#devops'), [], 'negating the same term empties it');
 });
 
-test('so negacao lista todo o resto', () => {
+test('negation alone lists everything else', () => {
   const all = t('');
   const semDevops = t('-#devops');
   assert.equal(semDevops.length, all.length - 2);
@@ -195,19 +195,19 @@ test('so negacao lista todo o resto', () => {
   assert.ok(!semDevops.includes('Kubernetes Docs'));
 });
 
-test('negacao de frase', () => {
+test('negating a phrase', () => {
   assert.deepEqual(t('-"hacker news"').includes('Hacker News'), false);
 });
 
 /* ---------------- ranking ---------------- */
 
-test('tag exata ranqueia acima de substring', () => {
-  // "go" e tag inteira em The Go Blog e substring em "golanguage".
+test('an exact tag ranks above a substring', () => {
+  // "go" is a whole tag in The Go Blog and a substring in "golanguage".
   assert.equal(t('#go')[0], 'The Go Blog');
-  assert.ok(t('#go').includes('Página com Acentuação'), 'a substring ainda casa');
+  assert.ok(t('#go').includes('Página com Acentuação'), 'the substring still matches');
 });
 
-test('titulo pesa mais que notas', () => {
+test('the title weighs more than the description', () => {
   const items = [
     { id: 'a', title: 'nada', url: '', tags: '', category: '', folder: '', description: 'zebra', updated_at: 2 },
     { id: 'b', title: 'zebra', url: '', tags: '', category: '', folder: '', description: '', updated_at: 1 },
@@ -215,7 +215,7 @@ test('titulo pesa mais que notas', () => {
   assert.deepEqual(search(items, 'zebra').map((b) => b.id), ['b', 'a']);
 });
 
-test('empate desempata pelo mais recente', () => {
+test('ties break by recency', () => {
   const items = [
     { id: 'velho', title: 'igual', url: '', tags: '', category: '', folder: '', description: '', updated_at: 1 },
     { id: 'novo', title: 'igual', url: '', tags: '', category: '', folder: '', description: '', updated_at: 9 },
@@ -223,7 +223,7 @@ test('empate desempata pelo mais recente', () => {
   assert.deepEqual(search(items, 'igual').map((b) => b.id), ['novo', 'velho']);
 });
 
-test('updated_at ausente nao quebra a ordenacao', () => {
+test('a missing updated_at does not break the ordering', () => {
   const items = [
     { id: 'a', title: 'igual', url: '', tags: '', category: '', folder: '', description: '' },
     { id: 'b', title: 'igual', url: '', tags: '', category: '', folder: '', description: '', updated_at: null },
@@ -233,23 +233,23 @@ test('updated_at ausente nao quebra a ordenacao', () => {
 
 /* ---------------- bordas ---------------- */
 
-test('query vazia lista tudo menos excluidos', () => {
+test('an empty query lists everything but deleted rows', () => {
   assert.equal(t('').length, 5);
   assert.ok(!t('').includes('Excluido'));
 });
 
-test('excluidos nunca aparecem', () => {
+test('deleted rows never show up', () => {
   assert.deepEqual(t('excluido.com'), []);
-  assert.deepEqual(t('#'), t(''), 'termo vazio nao filtra nada');
+  assert.deepEqual(t('#'), t(''), 'an empty term filters nothing');
 });
 
-test('limit corta o resultado', () => {
+test('limit truncates the result', () => {
   assert.equal(search(FIXTURES, '', 2).length, 2);
   assert.equal(search(FIXTURES, '', 0).length, 0);
   assert.equal(search([], 'x').length, 0);
 });
 
-test('campos ausentes nao quebram', () => {
+test('missing fields do not break anything', () => {
   const items = [{ id: 'x' }];
   assert.equal(search(items, '').length, 1);
   assert.equal(search(items, 'qualquer').length, 0);

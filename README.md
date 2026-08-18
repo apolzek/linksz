@@ -2,14 +2,14 @@
 
 Bookmark manager with instant substring search, in two frontends over the same vault:
 
-- **Bar**: a Spotlight-style launcher for your bookmarks, opened by a global shortcut (Linux, GTK3).
-- **Web UI**: the whole vault in the browser, served by the backend.
+* **Bar**: a Spotlight-style launcher for your bookmarks, opened by a global shortcut (Linux, GTK3).
+* **Web UI**: the whole vault in the browser, served by the backend.
 
 ## Requirements
 
-- Node 24
-- Python 3 with GTK3 (`python3-gi`)
-- `mise` (optional, pins the versions)
+* Node 24
+* Python 3 with GTK3 (`python3-gi`)
+* `mise` (optional, pins the versions)
 
 ## Install
 

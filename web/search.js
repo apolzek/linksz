@@ -1,25 +1,25 @@
-// Motor de busca compartilhado: roda no Node (server) e no browser (web).
-// A versao Python equivalente vive em desktop/vmsearch.py e PRECISA devolver
-// exatamente os mesmos resultados — tests/test_desktop.py compara as duas.
+// Shared search engine: runs on Node (server) and in the browser (web).
+// The equivalent Python version lives in desktop/vmsearch.py and MUST return
+// exactly the same results; tests/test_desktop.py compares the two.
 'use strict';
 
 // ---------------------------------------------------------------------------
-// Sintaxe
+// Syntax
 //
-//   texto            substring em titulo, url, tags, categoria, pasta, notas
-//   "duas palavras"  substring com espaco (frase literal)
-//   #tag             so em tags
-//   @categoria       so em categoria
-//   /pasta           so em pasta
-//   campo:valor      so no campo (title, url, description, tag/tags, cat/category, folder)
-//   -termo           exclui (funciona com qualquer forma acima)
+//   text             substring in title, url, tags, category, folder, description
+//   "two words"      substring with a space (literal phrase)
+//   #tag             tags only
+//   @category        category only
+//   /folder          folder only
+//   field:value      that field only (title, url, description, tag/tags, cat/category, folder)
+//   -term            excludes (works with any of the forms above)
 //
-// Termos combinam com AND. Tudo e substring, case-insensitive e sem acentos.
+// Terms combine with AND. Everything is substring, case- and accent-insensitive.
 // ---------------------------------------------------------------------------
 
 const FIELDS = ['title', 'url', 'tags', 'category', 'folder', 'description'];
 
-// Peso de cada campo na busca livre: onde casou importa mais que quantas vezes.
+// Weight of each field in free search: where it matched matters more than how often.
 const ANY_WEIGHTS = [
   ['title', 60],
   ['url', 50],
@@ -37,7 +37,7 @@ const FIELD_ALIASES = {
   link: 'url',
   desc: 'description',
   description: 'description',
-  // O campo se chamava `notes`; quem digita `notes:algo` continua achando.
+  // The field used to be called `notes`; typing `notes:something` still works.
   note: 'description',
   notes: 'description',
   tag: 'tags',
@@ -50,9 +50,9 @@ const FIELD_ALIASES = {
 
 const QUOTES = '"\'';
 
-// Espaco definido na unha (em vez de /\s/ e isspace()) porque as duas
-// linguagens discordam em cantos como U+0085 e U+FEFF — e a paridade
-// JS <-> Python precisa valer para qualquer entrada.
+// Whitespace spelled out by hand (instead of /\s/ and isspace()) because the
+// two languages disagree on corners like U+0085 and U+FEFF, and JS <-> Python
+// parity has to hold for any input.
 const WHITESPACE =
   ' \t\n\v\f\r\u00a0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006'
   + '\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000\ufeff';
@@ -64,8 +64,8 @@ function norm(s) {
     .toLowerCase();
 }
 
-// Quebra por espaco, mas mantem junto o que estiver entre aspas. As aspas
-// seguem no token — quem remove e stripQuotes, depois de ler os prefixos.
+// Splits on whitespace but keeps quoted runs together. The quotes stay in the
+// token; stripQuotes removes them later, after the prefixes are read.
 function tokenize(q) {
   const tokens = [];
   let cur = '';
@@ -88,9 +88,9 @@ function tokenize(q) {
   return tokens;
 }
 
-// Quebra um campo em componentes (tags sao csv, titulos tem espaco).
-// Escrito na mao pelo mesmo motivo de WHITESPACE: split(/[,\s]+/) e
-// str.split() nao concordam em todos os caracteres.
+// Splits a field into components (tags are csv, titles have spaces).
+// Hand-written for the same reason as WHITESPACE: split(/[,\s]+/) and
+// str.split() do not agree on every character.
 function components(hay) {
   const out = [];
   let cur = '';
@@ -105,7 +105,7 @@ function components(hay) {
   return out;
 }
 
-// Aspas nao fechadas ainda contam: `"foo bar` vira `foo bar`.
+// An unclosed quote still counts: `"foo bar` becomes `foo bar`.
 function stripQuotes(s) {
   if (s.length && QUOTES.includes(s[0])) {
     const q = s[0];
@@ -118,9 +118,9 @@ function stripQuotes(s) {
 function parseToken(raw) {
   let text = raw;
 
-  // Sigilo sem valor (`#`, `-`, `@`) vira termo vazio e e descartado por
-  // parseQuery — enquanto se digita `#devops`, o `#` sozinho nao pode zerar
-  // a lista.
+  // A sigil with no value (`#`, `-`, `@`) becomes an empty term and is dropped
+  // by parseQuery: while `#devops` is being typed, a lone `#` must not empty
+  // the list.
   const negate = text[0] === '-';
   if (negate) text = text.slice(1);
 
@@ -129,8 +129,8 @@ function parseToken(raw) {
     field = SIGILS[text[0]];
     text = text.slice(1);
   } else {
-    // `campo:valor` — mas so para campos conhecidos, senao `https://x` viraria
-    // um filtro pelo campo "https".
+    // `field:value`, but only for known fields, otherwise `https://x` would
+    // become a filter on a "https" field.
     const m = /^([a-zA-Z]+):([\s\S]*)$/.exec(text);
     if (m && FIELD_ALIASES[m[1].toLowerCase()]) {
       field = FIELD_ALIASES[m[1].toLowerCase()];
@@ -145,7 +145,7 @@ function parseQuery(q) {
   const terms = [];
   for (const raw of tokenize(q)) {
     const term = parseToken(raw);
-    // Sobrou nada depois dos prefixos (ex.: `#`, `""`, `-`): ignora.
+    // Nothing left after the prefixes (e.g. `#`, `""`, `-`): ignore it.
     if (term.value) terms.push(term);
   }
   return terms;
@@ -157,7 +157,7 @@ function fieldsOf(b) {
   return f;
 }
 
-// null = nao casou. Numero = pontuacao (maior e melhor).
+// null = no match. A number = score (higher is better).
 function scoreTerm(f, term) {
   const v = term.value;
 
@@ -165,7 +165,7 @@ function scoreTerm(f, term) {
     const hay = f[term.field];
     const i = hay.indexOf(v);
     if (i < 0) return null;
-    // Componente inteiro (tag `go` em `go,golang`) vale mais que substring.
+    // A whole component (tag `go` in `go,golang`) is worth more than a substring.
     const exact = components(hay).includes(v);
     return exact ? 100 : i === 0 ? 70 : 50;
   }
@@ -206,8 +206,8 @@ function search(bookmarks, q, limit = 50) {
     if (ok) out.push({ bookmark: b, score: total });
   }
 
-  // Empate desempata pelo mais recente. Alem disso o sort e estavel nas duas
-  // linguagens, entao a ordem de entrada decide o resto — e a paridade se mantem.
+  // Ties break by recency. Beyond that the sort is stable in both languages, so
+  // input order decides the rest and parity holds.
   out.sort((a, b) =>
     (b.score - a.score) ||
     ((Number(b.bookmark.updated_at) || 0) - (Number(a.bookmark.updated_at) || 0)));

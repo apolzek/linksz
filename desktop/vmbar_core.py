@@ -1,8 +1,8 @@
-"""Toda a logica da barra, sem depender de GTK nem de Tk.
+"""All of the bar's logic, with no GTK or Tk dependency.
 
-As views (vmbar_gtk.py, vmbar_tk.py) so desenham o que este modulo decide e
-mandam de volta as teclas. Isso mantem Linux e macOS com comportamento
-identico e — o que importa mais — deixa a barra inteira testavel sem display.
+The views (vmbar_gtk.py, vmbar_tk.py) only draw what this module decides and
+send the keys back. That keeps Linux and macOS behaving identically and, more
+importantly, makes the whole bar testable without a display.
 """
 
 from vmclient import parse_quick_add
@@ -10,7 +10,7 @@ from vmsearch import search
 
 MAX_RESULTS = 12
 
-# Acoes devolvidas por activate(), para a view executar.
+# Actions returned by activate(), for the view to carry out.
 OPEN = "open"
 ADDED = "added"
 ERROR = "error"
@@ -18,15 +18,15 @@ NOTHING = "nothing"
 
 
 class Row:
-    """Uma linha da lista, ja pronta para desenhar."""
+    """One row of the list, ready to draw."""
 
     __slots__ = ("kind", "title", "subtitle", "badges", "bookmark", "parsed")
 
     def __init__(self, kind, title, subtitle="", badges=(), bookmark=None, parsed=None):
-        self.kind = kind          # "result" ou "add"
+        self.kind = kind          # "result" or "add"
         self.title = title
         self.subtitle = subtitle
-        self.badges = list(badges)  # [(tipo, texto)] — tipo: folder | cat | tag
+        self.badges = list(badges)  # [(kind, text)], kind: folder | cat | tag
         self.bookmark = bookmark
         self.parsed = parsed
 
@@ -46,7 +46,7 @@ def _badges_of(bookmark, max_tags=3):
 
 
 def _describe(parsed):
-    bits = [parsed["url"] or "(sem url)"]
+    bits = [parsed["url"] or "(no url)"]
     if parsed["title"]:
         bits.append(parsed["title"])
     if parsed["folder"]:
@@ -64,18 +64,18 @@ class BarCore:
         self.query = ""
         self.rows = []
         self.sel = 0
-        self.message = ""   # transitoria: "copiado", "removido", erro de sync
+        self.message = ""   # transient: "copied", "deleted", a sync error
         self._all = []
         self.refresh()
 
-    # ---------------- estado ----------------
+    # ---------------- state ----------------
     def set_query(self, text):
         self.query = text or ""
         self.message = ""
         self.refresh()
 
     def refresh(self):
-        """Recalcula as linhas a partir do cache local (nunca vai na rede)."""
+        """Recomputes the rows from the local cache (never hits the network)."""
         self._all = self.client.all_bookmarks()
 
         if self.is_quick_add:
@@ -111,7 +111,7 @@ class BarCore:
             return f"nothing found · type «+ {self.query}» to add it as a bookmark"
         return f"{len(self.rows)} of {self.total} · Enter opens · Ctrl+C copies · Ctrl+D deletes"
 
-    # ---------------- navegacao ----------------
+    # ---------------- navigation ----------------
     def move(self, delta):
         if not self.rows:
             self.sel = 0
@@ -129,9 +129,9 @@ class BarCore:
             return self.rows[self.sel]
         return None
 
-    # ---------------- acoes ----------------
+    # ---------------- actions ----------------
     def activate(self, index=None):
-        """Enter. Devolve (acao, payload) para a view executar."""
+        """Enter. Returns (action, payload) for the view to carry out."""
         if index is not None:
             self.select(index)
         row = self.selected()
@@ -141,17 +141,17 @@ class BarCore:
         if row.kind == "add":
             parsed = row.parsed
             if not parsed["url"] and not parsed["title"]:
-                self.message = "informe ao menos uma url"
+                self.message = "provide at least a url"
                 return (ERROR, self.message)
             bookmark = self.client.add(**parsed)
             self.set_query("")
-            self.message = "bookmark added — syncing…"
+            self.message = "bookmark added, syncing…"
             return (ADDED, bookmark)
 
         return (OPEN, row.bookmark.get("url", ""))
 
     def copy_selected(self):
-        """Devolve a URL a copiar (a view mexe no clipboard) ou None."""
+        """Returns the URL to copy (the view touches the clipboard), or None."""
         row = self.selected()
         if row is None or row.kind != "result":
             return None
@@ -172,9 +172,9 @@ class BarCore:
         return bookmark
 
     def on_sync_result(self, applied, error):
-        """Resultado do sync em background. True = a view precisa redesenhar."""
+        """Result of the background sync. True = the view has to redraw."""
         if error:
-            self.message = f"offline — usando cache local ({error})"
+            self.message = f"offline, using the local cache ({error})"
             return True
         if applied:
             keep_query, keep_sel = self.query, self.sel

@@ -1,12 +1,12 @@
-"""Instancia unica via socket unix.
+"""Single instance over a unix socket.
 
-O daemon fica residente escutando; o atalho global roda o script de novo, que
-so entrega a mensagem "show" e sai. Abrir a barra vira um round-trip local em
-vez de subir um processo Python inteiro — e a diferenca entre instantaneo e
-"esperei meio segundo".
+The daemon stays resident listening; the global shortcut runs the script again,
+which only delivers the "show" message and exits. Opening the bar becomes a
+local round-trip instead of starting a whole Python process, which is the
+difference between instant and "I waited half a second".
 
-O GTK teria isso de graca no Gtk.Application, mas o Tk (macOS) nao tem nada
-equivalente, entao os dois usam este modulo e o comportamento fica igual.
+GTK would get this for free from Gtk.Application, but Tk (macOS) has nothing
+equivalent, so both use this module and the behaviour stays identical.
 """
 
 import os
@@ -18,7 +18,7 @@ PING = "ping"
 
 
 def send(path, message, timeout=0.5):
-    """Entrega uma mensagem ao daemon. False = ninguem escutando."""
+    """Delivers a message to the daemon. False = nobody listening."""
     try:
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
             sock.settimeout(timeout)
@@ -35,10 +35,10 @@ def is_running(path, timeout=0.5):
 
 
 class Listener:
-    """Escuta mensagens e chama on_message(msg) numa thread de fundo.
+    """Listens for messages and calls on_message(msg) on a background thread.
 
-    on_message roda fora da thread de UI: quem usa precisa agendar de volta
-    (GLib.idle_add no GTK, root.after no Tk).
+    on_message runs outside the UI thread: the caller has to schedule back
+    (GLib.idle_add on GTK, root.after on Tk).
     """
 
     def __init__(self, path, on_message):
@@ -49,7 +49,7 @@ class Listener:
         self._stop = threading.Event()
 
     def start(self):
-        """Assume o socket. Levanta OSError se outro daemon ja o tem."""
+        """Takes over the socket. Raises OSError if another daemon already has it."""
         self._clear_stale()
         self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         self.sock.bind(self.path)
@@ -60,14 +60,15 @@ class Listener:
         return self
 
     def _clear_stale(self):
-        """Socket orfao de um processo que morreu sem limpar: remove.
+        """Orphan socket from a process that died without cleaning up: remove it.
 
-        So remove se ninguem responder — senao dois daemons brigariam pelo path.
+        Only removed when nobody answers, otherwise two daemons would fight over
+        the path.
         """
         if not os.path.exists(self.path):
             return
         if is_running(self.path):
-            raise OSError(f"ja existe um daemon escutando em {self.path}")
+            raise OSError(f"a daemon is already listening on {self.path}")
         os.unlink(self.path)
 
     def _serve(self):

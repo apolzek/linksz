@@ -1,9 +1,9 @@
-# Backend do Vaultmarks. Sem `npm install`: o servidor usa so modulos nativos
-# do Node (inclusive node:sqlite), entao a imagem e o runtime + o codigo.
+# Backend image. No `npm install`: the server uses only Node built-in modules
+# (node:sqlite included), so the image is the runtime plus the code.
 FROM node:24-alpine
 
 LABEL org.opencontainers.image.title="Vaultmarks" \
-      org.opencontainers.image.description="Organizador de favoritos com busca instantanea" \
+      org.opencontainers.image.description="Bookmark manager with instant search" \
       org.opencontainers.image.source="https://github.com/nochaosio/vaultmarks"
 
 WORKDIR /app
@@ -11,7 +11,7 @@ WORKDIR /app
 COPY server ./server
 COPY web ./web
 
-# Usuario sem privilegio + /data como ponto de montagem do banco.
+# Unprivileged user + /data as the database mount point.
 RUN addgroup -S vaultmarks && adduser -S -G vaultmarks vaultmarks \
     && mkdir -p /data \
     && chown -R vaultmarks:vaultmarks /data /app

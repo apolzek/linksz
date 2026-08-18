@@ -6,29 +6,29 @@ python = "3.12"
 VAULTMARKS_PORT = "8787"
 
 [tasks.server]
-description = "Sobe o backend + web (http://localhost:8787)"
+description = "Starts the backend + web UI (http://localhost:8787)"
 run = "node server/server.js"
 
 [tasks.bar]
-description = "Abre a barra de busca do desktop"
+description = "Opens the desktop search bar"
 run = "python3 desktop/vaultmarks_bar.py"
 
 [tasks.install]
-description = "Instala no desktop (detecta Linux ou macOS)"
+description = "Installs on the desktop (detects Linux or macOS)"
 run = "bash desktop/install.sh"
 
 [tasks.test]
-description = "Roda a suite de testes"
+description = "Runs the test suite"
 run = "bash tests/run.sh"
 
 [tasks.test-all]
-description = "Suite completa, incluindo a stack Docker"
+description = "Full suite, including the Docker stack"
 run = "bash tests/run.sh --compose"
 
 [tasks.up]
-description = "Sobe a stack Docker (backend + Caddy com TLS) para o celular"
+description = "Starts the Docker stack (backend + Caddy with TLS) for the phone"
 run = "docker compose up -d --build"
 
 [tasks.down]
-description = "Derruba a stack Docker"
+description = "Stops the Docker stack"
 run = "docker compose down"

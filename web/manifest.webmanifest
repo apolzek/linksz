@@ -2,7 +2,7 @@
   "id": "/",
   "name": "Vaultmarks",
   "short_name": "Vaultmarks",
-  "description": "Seus favoritos com busca instantânea, no celular e no desktop.",
+  "description": "Your bookmarks with instant search, on the phone and on the desktop.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
@@ -10,7 +10,7 @@
   "orientation": "any",
   "background_color": "#0f1115",
   "theme_color": "#0f1115",
-  "lang": "pt-BR",
+  "lang": "en",
   "dir": "ltr",
   "categories": ["productivity", "utilities"],
   "icons": [
@@ -21,9 +21,9 @@
   ],
   "shortcuts": [
     {
-      "name": "Novo favorito",
-      "short_name": "Novo",
-      "url": "/#novo",
+      "name": "New bookmark",
+      "short_name": "New",
+      "url": "/#new",
       "icons": [{ "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" }]
     }
   ],

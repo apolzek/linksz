@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
-"""Testes do lado desktop.
+"""Desktop side tests.
 
-Cobre, sem precisar de display:
-  - o motor de busca em Python e sua paridade com o JS
-  - o nucleo da barra (BarCore), que e o que GTK e Tk compartilham
-  - a camada de plataforma (caminhos e comandos de Linux vs macOS)
-  - a instancia unica por socket, que faz o atalho global acordar a barra
-  - o fluxo real contra o servidor Node: offline, sync, dois clientes
+Covers, with no display needed:
+  * the Python search engine and its parity with the JS one
+  * the bar core (BarCore), which is what GTK and Tk share
+  * the platform layer (paths and commands for Linux vs macOS)
+  * the single instance over a socket, which lets the global shortcut wake the bar
+  * the real flow against the Node server: offline, sync, two clients
 
-O que fica de fora: o desenho em si (widgets GTK/Tk). A view Tk e exercitada
-com um tkinter falso em TestViewTk, o que valida o roteamento de teclas.
+What stays out: the drawing itself (GTK/Tk widgets). The Tk view is exercised
+with a fake tkinter in TestViewTk, which validates the key routing.
 """
 
 import copy
@@ -29,7 +29,7 @@ from unittest import mock
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "desktop"))
 
-# Isola config/cache/socket dos testes do que existe na maquina.
+# Isolates the tests' config/cache/socket from whatever exists on the machine.
 _SANDBOX = tempfile.mkdtemp(prefix="vm-test-home-")
 os.environ["XDG_CONFIG_HOME"] = os.path.join(_SANDBOX, "config")
 os.environ["XDG_DATA_HOME"] = os.path.join(_SANDBOX, "data")
@@ -51,7 +51,7 @@ FIXTURES = [
      "category": "news", "tags": "noticias", "description": "leitura diaria", "updated_at": 3, "deleted": 0},
     {"id": "4", "title": "Grafana", "url": "https://grafana.com", "folder": "dev/infra",
      "category": "work", "tags": "observabilidade,devops", "description": "", "updated_at": 2, "deleted": 0},
-    {"id": "5", "title": "Página com Acentuação", "url": "https://exemplo.com/pagina", "folder": "",
+    {"id": "5", "title": "Página com Acentuação", "url": "https://example.com/page", "folder": "",
      "category": "work", "tags": "golanguage", "description": "", "updated_at": 1, "deleted": 0},
     {"id": "6", "title": "Excluido", "url": "https://excluido.com", "folder": "", "category": "",
      "tags": "", "description": "", "updated_at": 9, "deleted": 1},
@@ -66,8 +66,8 @@ def t(query, limit=50):
     return titles(search(FIXTURES, query, limit))
 
 
-class TestBuscaSubstring(unittest.TestCase):
-    def test_substring_em_qualquer_posicao(self):
+class TestSubstringSearch(unittest.TestCase):
+    def test_substring_at_any_position(self):
         self.assertEqual(t("kuber"), ["Kubernetes Docs"])
         self.assertEqual(t("bernet"), ["Kubernetes Docs"])
         self.assertEqual(t("ycombinator"), ["Hacker News"])
@@ -77,14 +77,14 @@ class TestBuscaSubstring(unittest.TestCase):
         self.assertEqual(t("BERNET"), ["Kubernetes Docs"])
         self.assertEqual(t("KuBeRnEtEs"), ["Kubernetes Docs"])
 
-    def test_ignora_acentos_nos_dois_sentidos(self):
+    def test_ignores_accents_both_ways(self):
         self.assertEqual(t("acentuacao"), ["Página com Acentuação"])
         self.assertEqual(t("Acentuação"), ["Página com Acentuação"])
         self.assertEqual(t("PAGINA"), ["Página com Acentuação"])
 
-    def test_caracteres_especiais_sao_literais(self):
+    def test_special_characters_are_literal(self):
         self.assertEqual(t("go.dev"), ["The Go Blog"])
-        self.assertEqual(t(".*"), [], "nao pode ser tratado como regex")
+        self.assertEqual(t(".*"), [], "must not be treated as a regex")
         self.assertEqual(t("["), [])
         self.assertEqual(t("kubernetes.io/docs"), ["Kubernetes Docs"])
 
@@ -94,75 +94,75 @@ class TestBuscaPorCampo(unittest.TestCase):
         self.assertEqual(sorted(t("#devops")), ["Grafana", "Kubernetes Docs"])
         self.assertEqual(t("#k8s"), ["Kubernetes Docs"])
         self.assertEqual(t("#inexistente"), [])
-        self.assertEqual(t("#Hacker"), [], "titulo nao entra na busca por tag")
+        self.assertEqual(t("#Hacker"), [], "a title does not enter a tag search")
 
-    def test_categoria(self):
+    def test_category(self):
         self.assertEqual(sorted(t("@studies")), ["Kubernetes Docs", "The Go Blog"])
         self.assertEqual(sorted(t("@stud")), ["Kubernetes Docs", "The Go Blog"])
         self.assertEqual(t("@grafana"), [])
 
-    def test_pasta_pai_casa_filhas(self):
+    def test_parent_folder_matches_children(self):
         self.assertEqual(sorted(t("/dev/infra")), ["Grafana", "Kubernetes Docs"])
         self.assertEqual(len(t("/dev")), 3)
 
-    def test_campo_valor(self):
+    def test_field_value(self):
         self.assertEqual(t("title:go"), ["The Go Blog"])
         self.assertEqual(t("url:ycombinator"), ["Hacker News"])
         self.assertEqual(t("description:diaria"), ["Hacker News"])
         self.assertEqual(sorted(t("cat:work")), ["Grafana", "Página com Acentuação"])
-        self.assertEqual(t("title:grafana.com"), [], "url nao casa quando o campo e title")
+        self.assertEqual(t("title:grafana.com"), [], "a url does not match when the field is title")
 
-    def test_url_nao_vira_campo_valor(self):
+    def test_url_does_not_become_field_value(self):
         self.assertEqual(len(t("https://")), 5)
         self.assertEqual(parse_query("https://go.dev")[0].field, "any")
 
 
 class TestBuscaFrasesENegacao(unittest.TestCase):
-    def test_frase_entre_aspas(self):
+    def test_quoted_phrase(self):
         self.assertEqual(t('"hacker news"'), ["Hacker News"])
         self.assertEqual(t('"news hacker"'), [], "ordem importa dentro da frase")
         self.assertEqual(t("hacker news"), ["Hacker News"], "sem aspas sao dois termos com AND")
         self.assertEqual(t('title:"go blog"'), ["The Go Blog"])
 
-    def test_aspas_simples_tambem_valem(self):
+    def test_single_quotes_count_too(self):
         self.assertEqual(t("'hacker news'"), ["Hacker News"])
 
-    def test_negacao(self):
+    def test_negation(self):
         self.assertEqual(t("#devops -#k8s"), ["Grafana"])
         self.assertEqual(t("/dev -@studies"), ["Grafana"])
         self.assertEqual(t("#devops -grafana"), ["Kubernetes Docs"])
         self.assertEqual(t("#devops -#devops"), [])
 
-    def test_so_negacao_lista_o_resto(self):
+    def test_negation_alone_lists_the_rest(self):
         self.assertEqual(len(t("-#devops")), len(t("")) - 2)
         self.assertNotIn("Grafana", t("-#devops"))
 
-    def test_aspas_protegem_hifen(self):
-        term = parse_query('"-nao-e-negacao"')[0]
+    def test_quotes_protect_the_hyphen(self):
+        term = parse_query('"-not-a-negation"')[0]
         self.assertFalse(term.negate)
-        self.assertEqual(term.value, "-nao-e-negacao")
+        self.assertEqual(term.value, "-not-a-negation")
 
 
 class TestRanking(unittest.TestCase):
-    def test_tag_exata_acima_de_substring(self):
+    def test_exact_tag_above_substring(self):
         self.assertEqual(t("#go")[0], "The Go Blog")
         self.assertIn("Página com Acentuação", t("#go"))
 
-    def test_titulo_pesa_mais_que_notas(self):
+    def test_title_weighs_more_than_description(self):
         itens = [
             {"id": "a", "title": "nada", "description": "zebra", "updated_at": 2},
             {"id": "b", "title": "zebra", "description": "", "updated_at": 1},
         ]
         self.assertEqual([b["id"] for b in search(itens, "zebra")], ["b", "a"])
 
-    def test_empate_desempata_pelo_mais_recente(self):
+    def test_ties_break_by_recency(self):
         itens = [
             {"id": "velho", "title": "igual", "updated_at": 1},
             {"id": "novo", "title": "igual", "updated_at": 9},
         ]
         self.assertEqual([b["id"] for b in search(itens, "igual")], ["novo", "velho"])
 
-    def test_updated_at_ausente_ou_invalido(self):
+    def test_updated_at_missing_or_invalid(self):
         itens = [
             {"id": "a", "title": "igual"},
             {"id": "b", "title": "igual", "updated_at": None},
@@ -174,40 +174,40 @@ class TestRanking(unittest.TestCase):
 class TestParserEBordas(unittest.TestCase):
     def test_tokenize(self):
         self.assertEqual(tokenize("a b  c"), ["a", "b", "c"])
-        self.assertEqual(tokenize('"duas palavras" solta'), ['"duas palavras"', "solta"])
+        self.assertEqual(tokenize('"duas words" solta'), ['"duas words"', "solta"])
         self.assertEqual(tokenize("   "), [])
         self.assertEqual(tokenize(None), [])
 
-    def test_tokenize_aspas_nao_fechadas(self):
+    def test_tokenize_unclosed_quotes(self):
         self.assertEqual(tokenize('"sem fechar'), ['"sem fechar'])
         self.assertEqual(parse_query('"sem fechar')[0].value, "sem fechar")
 
-    def test_parse_query_sigilos(self):
+    def test_parse_query_sigils(self):
         self.assertEqual(parse_query("#a @b /c livre"),
                          [("tags", "a", False), ("category", "b", False),
                           ("folder", "c", False), ("any", "livre", False)])
 
-    def test_parse_query_apelidos_de_campo(self):
+    def test_parse_query_field_aliases(self):
         for texto, campo in (("title:x", "title"), ("link:x", "url"), ("note:x", "description"),
                              ("tag:x", "tags"), ("cat:x", "category"), ("dir:x", "folder"),
                              ("TITLE:x", "title")):
             self.assertEqual(parse_query(texto)[0].field, campo, texto)
 
-    def test_sigilo_sozinho_e_ignorado(self):
-        # Digitar "#" a caminho de "#devops" nao pode esvaziar a lista.
+    def test_lone_sigil_is_ignored(self):
+        # Typing "#" on the way to "#devops" must not empty the list.
         for q in ("#", "@", "/", "-", '""', "''", "  ", ""):
             self.assertEqual(parse_query(q), [], repr(q))
         self.assertEqual(t("#"), t(""))
 
-    def test_excluidos_nunca_aparecem(self):
+    def test_deleted_never_show_up(self):
         self.assertNotIn("Excluido", t(""))
         self.assertEqual(t("excluido.com"), [])
 
-    def test_limite(self):
+    def test_limit(self):
         self.assertEqual(len(t("", limit=2)), 2)
         self.assertEqual(len(t("", limit=0)), 0)
 
-    def test_lista_vazia_e_campos_ausentes(self):
+    def test_empty_list_and_missing_fields(self):
         self.assertEqual(search([], "x"), [])
         self.assertEqual(len(search([{"id": "x"}], "")), 1)
         self.assertEqual(search([{"id": "x"}], "qualquer"), [])
@@ -217,26 +217,26 @@ class TestParserEBordas(unittest.TestCase):
         self.assertEqual(components(""), [])
 
 
-class TestParidadeComJS(unittest.TestCase):
-    """A barra (Python) e a web (JS) precisam responder identico a mesma query.
+class TestParityWithJS(unittest.TestCase):
+    """The bar (Python) and the web (JS) have to answer a query identically.
 
-    Sao dois motores escritos na mao em linguagens diferentes; sem este teste
-    a divergencia aparece so quando o usuario busca a mesma coisa nos dois
-    lugares e ve resultados diferentes.
+    They are two engines written by hand in different languages; without this
+    test the divergence only shows up when someone searches the same thing in
+    both places and sees different results.
     """
 
     QUERIES = [
         "", "   ", "kuber", "BERNET", "ycombinator", "go.dev", "#devops", "#go",
         "@studies", "@stud", "/dev", "/dev/infra", "#devops @work", "acentuacao",
         "pagina", "diaria", "inexistente", "https://", "#k8s @studies /dev/infra",
-        # sintaxe avancada
-        '"hacker news"', '"news hacker"', "'aspas simples'", 'title:"go blog"',
+        # advanced syntax
+        '"hacker news"', '"news hacker"', "'single quotes'", 'title:"go blog"',
         "title:go", "url:ycombinator", "description:diaria", "cat:work", "dir:dev",
         "-grafana", "#devops -#k8s", "/dev -@studies", "-#devops", '-"hacker news"',
         "#devops -#devops", "foo:bar", "TITLE:go",
-        # bordas
+        # edge cases
         "#", "@", "/", "-", '""', '"', "-#", "//", "@@", ".*", "[", "a b c",
-        "  espaco  duplo  ", "ÁÉÍ", " nbsp", "x﻿y",
+        "  double  space  ", "ÁÉÍ", " nbsp", "x﻿y",
     ]
 
     @classmethod
@@ -253,43 +253,43 @@ class TestParidadeComJS(unittest.TestCase):
         )
         return json.loads(proc.stdout)
 
-    def test_queries_conhecidas(self):
-        esperado = self.run_js(FIXTURES, self.QUERIES)
-        for query, js_ids in zip(self.QUERIES, esperado):
+    def test_known_queries(self):
+        expected = self.run_js(FIXTURES, self.QUERIES)
+        for query, js_ids in zip(self.QUERIES, expected):
             py_ids = [b["id"] for b in search(FIXTURES, query, 50)]
             self.assertEqual(py_ids, js_ids, f"divergencia na query {query!r}")
 
     def test_fuzz(self):
-        """Gera queries e acervos aleatorios — pega o que a lista fixa nao cobre."""
+        """Generates random queries and vaults: catches what the fixed list misses."""
         rnd = random.Random(20260813)
-        palavras = ["kuber", "go", "golang", "dev", "infra", "news", "café", "Ação",
+        words = ["kuber", "go", "golang", "dev", "infra", "news", "café", "Ação",
                     "web dev", "k8s", "devops", "a,b", "https://x.com", "TÍTULO", "", "ícone"]
-        sigilos = ["", "#", "@", "/", "-", "-#", "-@", '"', "title:", "tag:", "cat:",
+        sigils = ["", "#", "@", "/", "-", "-#", "-@", '"', "title:", "tag:", "cat:",
                    "folder:", "url:", "description:", "https:", "-title:"]
 
-        acervo = [{
+        vault = [{
             "id": str(i),
-            "title": rnd.choice(palavras), "url": rnd.choice(palavras),
-            "folder": rnd.choice(palavras), "category": rnd.choice(palavras),
-            "tags": ",".join(rnd.sample(palavras, k=rnd.randint(0, 3))),
-            "description": rnd.choice(palavras),
+            "title": rnd.choice(words), "url": rnd.choice(words),
+            "folder": rnd.choice(words), "category": rnd.choice(words),
+            "tags": ",".join(rnd.sample(words, k=rnd.randint(0, 3))),
+            "description": rnd.choice(words),
             "updated_at": rnd.choice([rnd.randint(0, 100), None, 0]),
             "deleted": rnd.choice([0, 0, 0, 1]),
         } for i in range(30)]
 
         queries = []
         for _ in range(250):
-            partes = []
+            parts = []
             for _ in range(rnd.randint(1, 3)):
-                palavra = rnd.choice(palavras)
-                if " " in palavra and rnd.random() < 0.7:
-                    palavra = f'"{palavra}"'
-                partes.append(rnd.choice(sigilos) + palavra)
-            queries.append(" ".join(partes))
+                word = rnd.choice(words)
+                if " " in word and rnd.random() < 0.7:
+                    word = f'"{word}"'
+                parts.append(rnd.choice(sigils) + word)
+            queries.append(" ".join(parts))
 
-        esperado = self.run_js(acervo, queries)
-        for query, js_ids in zip(queries, esperado):
-            py_ids = [b["id"] for b in search(acervo, query, 50)]
+        expected = self.run_js(vault, queries)
+        for query, js_ids in zip(queries, expected):
+            py_ids = [b["id"] for b in search(vault, query, 50)]
             self.assertEqual(py_ids, js_ids, f"divergencia na query {query!r}")
 
 
@@ -308,73 +308,73 @@ class TestNormalizacao(unittest.TestCase):
         self.assertEqual(p["category"], "dev")
         self.assertEqual(p["folder"], "ferramentas")
 
-    def test_quick_add_infere_https(self):
+    def test_quick_add_infers_https(self):
         self.assertEqual(parse_quick_add("go.dev #go")["url"], "https://go.dev")
 
-    def test_quick_add_sem_url(self):
-        p = parse_quick_add("so um titulo #tag")
+    def test_quick_add_without_url(self):
+        p = parse_quick_add("just a title #tag")
         self.assertEqual(p["url"], "")
-        self.assertEqual(p["title"], "so um titulo")
+        self.assertEqual(p["title"], "just a title")
 
 
-class TestPlataforma(unittest.TestCase):
-    """Linux e macOS diferem em caminho e em como se abre uma URL."""
+class TestPlatform(unittest.TestCase):
+    """Linux and macOS differ in paths and in how a URL is opened."""
 
-    def test_caminhos_respeitam_xdg(self):
+    def test_paths_respect_xdg(self):
         self.assertTrue(vmplatform.config_dir().startswith(_SANDBOX))
         self.assertTrue(vmplatform.data_dir().startswith(_SANDBOX))
         self.assertTrue(vmplatform.config_dir().endswith("vaultmarks"))
 
-    def test_caminhos_macos(self):
+    def test_paths_macos(self):
         with mock.patch.dict(os.environ, {}, clear=True), \
              mock.patch.object(vmplatform, "IS_MAC", True):
             self.assertIn("Library/Application Support", vmplatform.config_dir())
             self.assertIn("Library/Application Support", vmplatform.data_dir())
 
-    def test_caminhos_linux(self):
+    def test_paths_linux(self):
         with mock.patch.dict(os.environ, {}, clear=True), \
              mock.patch.object(vmplatform, "IS_MAC", False):
             self.assertIn(".config", vmplatform.config_dir())
             self.assertIn(".local/share", vmplatform.data_dir())
 
-    def test_open_url_por_sistema(self):
+    def test_open_url_per_system(self):
         with mock.patch.object(vmplatform, "IS_MAC", True):
             self.assertEqual(vmplatform.open_url_command("https://go.dev"), ["open", "https://go.dev"])
         with mock.patch.object(vmplatform, "IS_MAC", False):
             self.assertEqual(vmplatform.open_url_command("https://go.dev"), ["xdg-open", "https://go.dev"])
 
-    def test_open_url_completa_esquema(self):
+    def test_open_url_completes_the_scheme(self):
         cmd = vmplatform.open_url_command("go.dev")
         self.assertEqual(cmd[-1], "https://go.dev")
         self.assertIsNone(vmplatform.open_url_command(""))
 
-    def test_socket_fica_em_diretorio_privado(self):
+    def test_socket_lives_in_a_private_directory(self):
         caminho = vmplatform.socket_path()
-        modo = os.stat(os.path.dirname(caminho)).st_mode & 0o777
-        self.assertEqual(modo, 0o700, "socket nao pode ficar em diretorio aberto")
+        mode = os.stat(os.path.dirname(caminho)).st_mode & 0o777
+        self.assertEqual(mode, 0o700, "the socket must not sit in an open directory")
 
-    def test_toolkit_pode_ser_forcado(self):
+    def test_toolkit_can_be_forced(self):
         with mock.patch.dict(os.environ, {"VAULTMARKS_UI": "tk"}):
             self.assertEqual(vmplatform.pick_toolkit(), "tk")
         with mock.patch.dict(os.environ, {"VAULTMARKS_UI": "gtk"}):
             self.assertEqual(vmplatform.pick_toolkit(), "gtk")
 
-    def test_sem_toolkit_da_erro_util(self):
+    def test_no_toolkit_gives_a_useful_error(self):
         with mock.patch.dict(os.environ, {"VAULTMARKS_UI": ""}), \
              mock.patch.object(vmplatform, "available_toolkits", return_value=[]):
             with self.assertRaises(RuntimeError) as ctx:
                 vmplatform.pick_toolkit()
-            self.assertIn("instale", str(ctx.exception).lower())
+            self.assertIn("install", str(ctx.exception).lower())
 
-    def test_macos_prefere_tk(self):
-        """No macOS o Tk vem com o Python; GTK praticamente nunca existe."""
+    def test_macos_prefers_tk(self):
+        """On macOS Tk comes with Python; GTK is almost never there."""
         with mock.patch.object(vmplatform, "IS_MAC", True):
             with mock.patch.dict(sys.modules, {"tkinter": mock.MagicMock()}):
                 self.assertEqual(vmplatform.available_toolkits()[0], "tk")
 
 
 class TestIPCInstanciaUnica(unittest.TestCase):
-    """O atalho global roda o script de novo; ele so acorda o daemon."""
+    """The global shortcut runs the script again; it only wakes the daemon."""
 
     def setUp(self):
         self.dir = tempfile.mkdtemp(prefix="vm-ipc-")
@@ -384,11 +384,11 @@ class TestIPCInstanciaUnica(unittest.TestCase):
     def tearDown(self):
         shutil.rmtree(self.dir, ignore_errors=True)
 
-    def test_send_sem_daemon_falha(self):
+    def test_send_without_daemon_fails(self):
         self.assertFalse(vmipc.send(self.path, vmipc.SHOW))
         self.assertFalse(vmipc.is_running(self.path))
 
-    def test_daemon_recebe_mensagens(self):
+    def test_daemon_receives_messages(self):
         listener = vmipc.Listener(self.path, self.recebidas.append).start()
         try:
             self.assertTrue(vmipc.is_running(self.path))
@@ -402,7 +402,7 @@ class TestIPCInstanciaUnica(unittest.TestCase):
         finally:
             listener.close()
 
-    def test_ping_nao_vira_mensagem(self):
+    def test_ping_does_not_become_a_message(self):
         listener = vmipc.Listener(self.path, self.recebidas.append).start()
         try:
             vmipc.is_running(self.path)
@@ -411,7 +411,7 @@ class TestIPCInstanciaUnica(unittest.TestCase):
         finally:
             listener.close()
 
-    def test_dois_daemons_nao_coexistem(self):
+    def test_two_daemons_do_not_coexist(self):
         listener = vmipc.Listener(self.path, self.recebidas.append).start()
         try:
             with self.assertRaises(OSError):
@@ -419,8 +419,8 @@ class TestIPCInstanciaUnica(unittest.TestCase):
         finally:
             listener.close()
 
-    def test_socket_orfao_e_reassumido(self):
-        """Daemon morto sem limpar deixa o arquivo; o proximo precisa assumir."""
+    def test_orphan_socket_is_taken_over(self):
+        """A daemon that died without cleaning up leaves the file; the next one has to take over."""
         open(self.path, "w").close()
         listener = vmipc.Listener(self.path, self.recebidas.append).start()
         try:
@@ -428,18 +428,18 @@ class TestIPCInstanciaUnica(unittest.TestCase):
         finally:
             listener.close()
 
-    def test_close_remove_o_socket(self):
+    def test_close_removes_the_socket(self):
         listener = vmipc.Listener(self.path, self.recebidas.append).start()
         listener.close()
         self.assertFalse(os.path.exists(self.path))
 
 
 class FakeClient:
-    """Cliente em memoria: BarCore so precisa destes quatro metodos."""
+    """In-memory client: BarCore only needs these four methods."""
 
     def __init__(self, items=None):
-        # Copia profunda: delete() marca deleted=1 no dict, e sem isso um teste
-        # sujaria as FIXTURES globais para todos os que rodam depois.
+        # Deep copy: delete() sets deleted=1 on the dict, and without this one test
+        # would dirty the global FIXTURES for everything that runs afterwards.
         self.items = copy.deepcopy(list(items or []))
         self.deleted = []
         self.added = []
@@ -463,34 +463,34 @@ class FakeClient:
 
 
 class TestBarCore(unittest.TestCase):
-    """O nucleo que GTK e Tk compartilham — tudo que a barra decide esta aqui."""
+    """The core GTK and Tk share: everything the bar decides lives here."""
 
     def setUp(self):
         self.client = FakeClient(FIXTURES)
         self.core = BarCore(self.client)
 
-    def test_lista_tudo_sem_query(self):
+    def test_lists_everything_without_a_query(self):
         self.assertEqual(len(self.core.rows), 5)
         self.assertEqual(self.core.total, 5)
         self.assertIn("5 bookmarks", self.core.status())
 
-    def test_busca_filtra(self):
+    def test_search_filters(self):
         self.core.set_query("kuber")
         self.assertEqual([r.title for r in self.core.rows], ["Kubernetes Docs"])
         self.assertIn("1 of 5", self.core.status())
 
-    def test_busca_avancada_chega_na_barra(self):
+    def test_advanced_search_reaches_the_bar(self):
         self.core.set_query("#devops -#k8s")
         self.assertEqual([r.title for r in self.core.rows], ["Grafana"])
         self.core.set_query('"hacker news"')
         self.assertEqual([r.title for r in self.core.rows], ["Hacker News"])
 
-    def test_sem_resultado_sugere_adicionar(self):
+    def test_no_result_suggests_adding(self):
         self.core.set_query("naoexiste")
         self.assertEqual(self.core.rows, [])
         self.assertIn("+ naoexiste", self.core.status())
 
-    def test_linha_traz_titulo_url_e_badges(self):
+    def test_row_carries_title_url_and_badges(self):
         self.core.set_query("kuber")
         row = self.core.rows[0]
         self.assertEqual(row.kind, "result")
@@ -499,33 +499,33 @@ class TestBarCore(unittest.TestCase):
                          [("folder", "/dev/infra"), ("cat", "@studies"),
                           ("tag", "#k8s"), ("tag", "#devops")])
 
-    def test_titulo_cai_pra_url_quando_falta(self):
+    def test_title_falls_back_to_url(self):
         core = BarCore(FakeClient([{"id": "x", "url": "https://so-url.com", "title": ""}]))
         self.assertEqual(core.rows[0].title, "https://so-url.com")
 
-    def test_navegacao_respeita_limites(self):
+    def test_navigation_respects_the_bounds(self):
         self.assertEqual(self.core.sel, 0)
-        self.assertEqual(self.core.move(-1), 0, "nao passa do topo")
+        self.assertEqual(self.core.move(-1), 0, "does not go past the top")
         self.core.move(1)
         self.assertEqual(self.core.sel, 1)
         self.core.move(50)
-        self.assertEqual(self.core.sel, 4, "nao passa do fim")
+        self.assertEqual(self.core.sel, 4, "does not go past the end")
 
-    def test_navegacao_com_lista_vazia(self):
+    def test_navigation_with_an_empty_list(self):
         self.core.set_query("naoexiste")
         self.assertEqual(self.core.move(1), 0)
         self.assertIsNone(self.core.selected())
 
-    def test_busca_reseta_selecao(self):
+    def test_search_resets_the_selection(self):
         self.core.move(3)
         self.core.set_query("kuber")
         self.assertEqual(self.core.sel, 0)
 
-    def test_enter_abre_a_url(self):
+    def test_enter_opens_the_url(self):
         self.core.set_query("kuber")
         self.assertEqual(self.core.activate(), (OPEN, "https://kubernetes.io/docs"))
 
-    def test_enter_sem_linha_nao_faz_nada(self):
+    def test_enter_without_a_row_does_nothing(self):
         self.core.set_query("naoexiste")
         self.assertEqual(self.core.activate(), (NOTHING, None))
 
@@ -543,23 +543,23 @@ class TestBarCore(unittest.TestCase):
         self.assertEqual(bookmark["tags"], "rust")
         self.assertEqual(self.core.query, "", "o campo limpa depois de adicionar")
 
-    def test_quick_add_vazio_reclama(self):
+    def test_empty_quick_add_complains(self):
         self.core.set_query("+   ")
         acao, msg = self.core.activate()
         self.assertEqual(acao, ERROR)
         self.assertIn("url", msg)
         self.assertEqual(self.client.added, [])
 
-    def test_copiar(self):
+    def test_copy(self):
         self.core.set_query("kuber")
         self.assertEqual(self.core.copy_selected(), "https://kubernetes.io/docs")
         self.assertIn("copied", self.core.status())
 
-    def test_copiar_na_linha_de_add_nao_faz_nada(self):
+    def test_copy_on_the_add_row_does_nothing(self):
         self.core.set_query("+ algo")
         self.assertIsNone(self.core.copy_selected())
 
-    def test_remover(self):
+    def test_delete(self):
         self.core.set_query("kuber")
         removido = self.core.delete_selected()
         self.assertEqual(removido["id"], "1")
@@ -567,35 +567,36 @@ class TestBarCore(unittest.TestCase):
         self.assertEqual(self.core.rows, [], "some da lista na hora")
         self.assertIn("deleted", self.core.status())
 
-    def test_remover_ajusta_selecao(self):
-        self.core.move(4)          # ultima linha
+    def test_delete_adjusts_the_selection(self):
+        self.core.move(4)          # last row
         self.core.delete_selected()
-        self.assertEqual(self.core.sel, 3, "selecao nao pode ficar fora da lista")
+        self.assertEqual(self.core.sel, 3, "the selection must not fall outside the list")
 
-    def test_sync_com_erro_avisa_e_mantem_cache(self):
+    def test_sync_error_warns_and_keeps_the_cache(self):
         mudou = self.core.on_sync_result(0, "servidor inacessivel")
         self.assertTrue(mudou)
         self.assertIn("offline", self.core.status())
         self.assertEqual(len(self.core.rows), 5, "continua listando do cache")
 
-    def test_sync_sem_novidade_nao_redesenha(self):
+    def test_sync_without_news_does_not_redraw(self):
         self.assertFalse(self.core.on_sync_result(0, None))
 
-    def test_sync_com_novidade_preserva_a_busca(self):
+    def test_sync_with_news_keeps_the_search(self):
         self.core.set_query("kuber")
         self.client.items.append({"id": "9", "title": "Kubernetes Extra", "url": "https://k.io",
                                   "tags": "", "category": "", "folder": "", "updated_at": 50})
         self.assertTrue(self.core.on_sync_result(1, None))
-        self.assertEqual(self.core.query, "kuber", "a busca digitada nao pode sumir")
+        self.assertEqual(self.core.query, "kuber", "the typed search must not vanish")
         self.assertEqual(len(self.core.rows), 2)
 
 
 class TestViewTk(unittest.TestCase):
-    """Caminho do macOS: valida o roteamento de teclas da view Tk.
+    """The macOS path: validates the key routing of the Tk view.
 
-    tkinter nao esta instalado em toda maquina de CI (e nao ha display aqui),
-    entao trocamos por um duble. Nao valida o desenho — valida que cada tecla
-    chama a acao certa no nucleo, que e onde a logica mora.
+    tkinter is not installed on every CI machine (and there is no display here),
+    so it is swapped for a double. This does not validate the drawing: it
+    validates that each key calls the right action on the core, where the logic
+    lives.
     """
 
     def setUp(self):
@@ -636,26 +637,26 @@ class TestViewTk(unittest.TestCase):
         ev.state = state
         return ev
 
-    def test_setas_navegam(self):
+    def test_arrows_navigate(self):
         bar, _ = self._bar()
         bar.on_key(self._evento("Down"))
         self.assertEqual(bar.core.sel, 1)
         bar.on_key(self._evento("Up"))
         self.assertEqual(bar.core.sel, 0)
 
-    def test_control_n_e_p_navegam(self):
+    def test_control_n_and_p_navigate(self):
         bar, _ = self._bar()
         bar.on_key(self._evento("n", state=0x4))     # Control
         self.assertEqual(bar.core.sel, 1)
         bar.on_key(self._evento("p", state=0x4))
         self.assertEqual(bar.core.sel, 0)
 
-    def test_command_navega_no_macos(self):
+    def test_command_navigates_on_macos(self):
         bar, _ = self._bar()
         bar.on_key(self._evento("n", state=0x8))     # Command
         self.assertEqual(bar.core.sel, 1, "no Mac o modificador natural e Command")
 
-    def test_escape_limpa_depois_fecha(self):
+    def test_escape_clears_then_closes(self):
         bar, _ = self._bar()
         bar.var.get.return_value = "algo"
         bar.on_key(self._evento("Escape"))
@@ -666,7 +667,7 @@ class TestViewTk(unittest.TestCase):
         bar.on_key(self._evento("Escape"))
         bar.hide.assert_called_once()
 
-    def test_enter_abre_e_esconde(self):
+    def test_enter_opens_and_hides(self):
         bar, vmbar_tk = self._bar()
         with mock.patch.object(vmbar_tk.vmplatform, "open_url") as abrir:
             bar.on_key(self._evento("Return"))
@@ -674,29 +675,29 @@ class TestViewTk(unittest.TestCase):
             self.assertTrue(abrir.call_args[0][0].startswith("http"))
         bar.hide.assert_called_once()
 
-    def test_ctrl_c_copia_para_o_clipboard(self):
+    def test_ctrl_c_copies_to_the_clipboard(self):
         bar, _ = self._bar()
         bar.on_key(self._evento("c", state=0x4))
         bar.root.clipboard_clear.assert_called_once()
         bar.root.clipboard_append.assert_called_once()
 
-    def test_ctrl_d_remove(self):
+    def test_ctrl_d_deletes(self):
         bar, _ = self._bar()
         alvo = bar.core.rows[0].bookmark["id"]
         bar.on_key(self._evento("d", state=0x4))
         self.assertEqual(bar.client.deleted, [alvo])
         bar.sync_async.assert_called_once()
 
-    def test_ctrl_r_sincroniza(self):
+    def test_ctrl_r_syncs(self):
         bar, _ = self._bar()
         bar.on_key(self._evento("r", state=0x4))
         bar.sync_async.assert_called_once()
 
-    def test_tecla_desconhecida_passa_adiante(self):
+    def test_unknown_key_passes_through(self):
         bar, _ = self._bar()
         self.assertIsNone(bar.on_key(self._evento("a")), "digitar letra tem que chegar no campo")
 
-    def test_teclas_tratadas_nao_propagam(self):
+    def test_handled_keys_do_not_propagate(self):
         bar, _ = self._bar()
         self.assertEqual(bar.on_key(self._evento("Down")), "break")
 
@@ -707,8 +708,8 @@ def free_port():
         return s.getsockname()[1]
 
 
-class TestSyncComServidor(unittest.TestCase):
-    """Fluxo real contra o servidor Node: escrever offline, sincronizar, convergir."""
+class TestSyncWithServer(unittest.TestCase):
+    """The real flow against the Node server: write offline, sync, converge."""
 
     @classmethod
     def setUpClass(cls):
@@ -728,7 +729,7 @@ class TestSyncComServidor(unittest.TestCase):
             except Exception:
                 time.sleep(0.05)
         else:
-            raise RuntimeError("servidor nao subiu")
+            raise RuntimeError("the server did not come up")
 
     @classmethod
     def tearDownClass(cls):
@@ -737,14 +738,14 @@ class TestSyncComServidor(unittest.TestCase):
         shutil.rmtree(cls.tmp, ignore_errors=True)
 
     def make_client(self, name):
-        """Cliente com config+cache proprios (simula outra maquina)."""
+        """A client with its own config and cache (simulates another machine)."""
         d = os.path.join(self.tmp, name)
         os.makedirs(d, exist_ok=True)
         c = Client(config_path=os.path.join(d, "config.json"), cache_path=os.path.join(d, "cache.db"))
         c.config["server"] = self.base
         return c
 
-    def test_01_registro_e_login(self):
+    def test_01_register_and_login(self):
         c = self.make_client("reg")
         user = c.register("desktop@example.com", "desktop", "senha123")
         self.assertEqual(user["username"], "desktop")
@@ -759,13 +760,13 @@ class TestSyncComServidor(unittest.TestCase):
         c2.login("desktop", "senha123")
         self.assertTrue(c2.authenticated)
 
-    def test_02_token_fica_com_permissao_restrita(self):
+    def test_02_token_file_is_locked_down(self):
         c = self.make_client("perm")
         c.login("desktop", "senha123")
-        modo = os.stat(c.config_path).st_mode & 0o777
-        self.assertEqual(modo, 0o600, "o token de sessao nao pode ficar legivel pra todos")
+        mode = os.stat(c.config_path).st_mode & 0o777
+        self.assertEqual(mode, 0o600, "the session token must not be world readable")
 
-    def test_03_add_offline_depois_sincroniza(self):
+    def test_03_add_offline_then_sync(self):
         c = self.make_client("a")
         c.login("desktop", "senha123")
 
@@ -774,21 +775,21 @@ class TestSyncComServidor(unittest.TestCase):
         self.assertEqual(b["category"], "dev")
         self.assertEqual(b["folder"], "ferramentas")
 
-        # Ja da pra buscar antes de qualquer rede.
+        # Searching already works before any network.
         self.assertEqual(titles(search(c.all_bookmarks(), "#rust")), ["Zed"])
 
         c.sync()
         pendentes = c.db.execute("SELECT COUNT(*) n FROM bookmarks WHERE dirty = 1").fetchone()["n"]
         self.assertEqual(pendentes, 0, "apos o sync nada fica pendente")
 
-    def test_04_outro_cliente_recebe(self):
+    def test_04_another_client_receives_it(self):
         b = self.make_client("b")
         b.login("desktop", "senha123")
         b.sync()
         self.assertEqual(titles(search(b.all_bookmarks(), "zed")), ["Zed"])
         self.assertEqual(titles(search(b.all_bookmarks(), "@dev")), ["Zed"])
 
-    def test_05_edicao_propaga_nos_dois_sentidos(self):
+    def test_05_edits_propagate_both_ways(self):
         a = self.make_client("a")
         a.login("desktop", "senha123")
         a.sync()
@@ -801,7 +802,7 @@ class TestSyncComServidor(unittest.TestCase):
         b.sync()
         self.assertEqual(titles(search(b.all_bookmarks(), "#ide")), ["Zed Editor"])
 
-    def test_06_exclusao_propaga(self):
+    def test_06_deletion_propagates(self):
         a = self.make_client("a")
         a.login("desktop", "senha123")
         a.sync()
@@ -812,9 +813,9 @@ class TestSyncComServidor(unittest.TestCase):
         b = self.make_client("b")
         b.login("desktop", "senha123")
         b.sync()
-        self.assertEqual(search(b.all_bookmarks(), "zed"), [], "exclusao no desktop some no outro cliente")
+        self.assertEqual(search(b.all_bookmarks(), "zed"), [], "exclusao no desktop some no other cliente")
 
-    def test_07_criado_na_web_aparece_no_desktop(self):
+    def test_07_created_on_the_web_shows_on_the_desktop(self):
         a = self.make_client("a")
         a.login("desktop", "senha123")
         req = urllib.request.Request(
@@ -828,7 +829,7 @@ class TestSyncComServidor(unittest.TestCase):
         a.sync()
         self.assertEqual(titles(search(a.all_bookmarks(), "@news")), ["Hacker News"])
 
-    def test_08_sync_sem_servidor_falha_mas_cache_funciona(self):
+    def test_08_sync_without_server_fails_but_the_cache_works(self):
         c = self.make_client("offline")
         c.login("desktop", "senha123")
         c.sync()
@@ -839,13 +840,13 @@ class TestSyncComServidor(unittest.TestCase):
         with self.assertRaises(ApiError):
             c.sync()
 
-        # Busca local continua funcionando e o item pendente esta la.
+        # Local search keeps working and the pending item is there.
         self.assertEqual(titles(search(c.all_bookmarks(), "offline")), ["Offline"])
         self.assertEqual(len(c.all_bookmarks()), antes + 1)
         pendentes = c.db.execute("SELECT COUNT(*) n FROM bookmarks WHERE dirty = 1").fetchone()["n"]
         self.assertEqual(pendentes, 1, "fica pendente pra empurrar quando voltar")
 
-        # Voltando a rede, o pendente sobe.
+        # With the network back, the pending one goes up.
         c.config["server"] = self.base
         c.sync()
         d = self.make_client("d")
@@ -853,27 +854,27 @@ class TestSyncComServidor(unittest.TestCase):
         d.sync()
         self.assertEqual(titles(search(d.all_bookmarks(), "offline")), ["Offline"])
 
-    def test_09_edicao_local_nao_e_sobrescrita_pelo_servidor(self):
-        """Editou offline e o servidor tinha versao mais velha: a local vence."""
+    def test_09_local_edit_is_not_overwritten_by_the_server(self):
+        """Edited offline while the server had an older version: the local one wins."""
         a = self.make_client("conflito-a")
         a.login("desktop", "senha123")
         a.sync()
 
         item = search(a.all_bookmarks(), "offline")[0]
         a.update(item["id"], title="Offline Editado Localmente")
-        # Sem sincronizar: o registro esta sujo e mais novo que o do servidor.
+        # Without syncing: the row is dirty and newer than the server one.
         a.sync()
         self.assertEqual(titles(search(a.all_bookmarks(), "offline")), ["Offline Editado Localmente"])
 
-    def test_10_token_invalido_e_rejeitado(self):
+    def test_10_invalid_token_is_rejected(self):
         c = self.make_client("ruim")
         c.config["token"] = "lixo"
         with self.assertRaises(ApiError):
             c.sync()
 
-    def test_11_barra_completa_contra_servidor_real(self):
-        """BarCore ligado no Client de verdade: adicionar, buscar, remover."""
-        c = self.make_client("barra")
+    def test_11_full_bar_against_a_real_server(self):
+        """BarCore wired to the real Client: add, search, delete."""
+        c = self.make_client("bar")
         c.login("desktop", "senha123")
         c.sync()
 
@@ -887,15 +888,15 @@ class TestSyncComServidor(unittest.TestCase):
         core.set_query("#tls")
         self.assertEqual([r.title for r in core.rows], ["Caddy"])
 
-        outro = self.make_client("barra-2")
-        outro.login("desktop", "senha123")
-        outro.sync()
-        self.assertEqual(titles(search(outro.all_bookmarks(), "#proxy")), ["Caddy"])
+        other = self.make_client("bar-2")
+        other.login("desktop", "senha123")
+        other.sync()
+        self.assertEqual(titles(search(other.all_bookmarks(), "#proxy")), ["Caddy"])
 
         core.delete_selected()
         c.sync()
-        outro.sync()
-        self.assertEqual(search(outro.all_bookmarks(), "#tls"), [])
+        other.sync()
+        self.assertEqual(search(other.all_bookmarks(), "#tls"), [])
 
 
 if __name__ == "__main__":

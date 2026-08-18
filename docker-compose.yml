@@ -1,12 +1,11 @@
-# Vaultmarks para o celular.
+# The stack for the phone.
 #
-#   1. descubra o IP desta maquina na rede:  ip route get 1 | awk '{print $7; exit}'
+#   1. find this machine's IP on the network:  ip route get 1 | awk '{print $7; exit}'
 #   2. VAULTMARKS_SITE=192.168.0.10 docker compose up -d
-#   3. no celular, abra http://192.168.0.10/root.crt e instale o certificado
-#   4. abra https://192.168.0.10 e use "Adicionar a tela de inicio"
+#   3. on the phone, open http://192.168.0.10/root.crt and install the certificate
+#   4. open https://192.168.0.10 and use "Add to home screen"
 #
-# Sem o passo 3 o navegador do celular recusa o HTTPS e a PWA nao instala.
-# Detalhes de cada plataforma estao no README.
+# Without step 3 the phone browser refuses the HTTPS and the PWA does not install.
 
 services:
   vaultmarks:
@@ -17,34 +16,34 @@ services:
       VAULTMARKS_HOST: 0.0.0.0
       VAULTMARKS_PORT: "8787"
       VAULTMARKS_DB: /data/vault.db
-      # Conta de teste criada a cada boot (padrao: teste / teste123).
-      # A stack aqui fica exposta na rede local — troque a senha, ou desligue
-      # com VAULTMARKS_SEED=0, antes de deixar isso de pe.
+      # Test account created on every boot (default: teste / teste123).
+      # This stack is exposed on the local network: change the password, or turn
+      # it off with VAULTMARKS_SEED=0, before leaving it running.
       VAULTMARKS_SEED_PASSWORD: ${VAULTMARKS_SEED_PASSWORD:-teste123}
     volumes:
       - vault-data:/data
-    # Sem ports: quem fala com a rede e o Caddy. Para acessar o backend direto
-    # (debug), descomente:
+    # No ports: Caddy is what talks to the network. To reach the backend
+    # directly (debugging), uncomment:
     # ports:
     #   - "8787:8787"
     networks:
       - vaultmarks
 
   caddy:
-    build: ./caddy          # o Caddyfile vai embutido — veja caddy/Dockerfile
+    build: ./caddy          # the Caddyfile is baked in, see caddy/Dockerfile
     image: vaultmarks-caddy:local
     restart: unless-stopped
     depends_on:
       vaultmarks:
         condition: service_healthy
     environment:
-      # Hostname ou IP pelo qual voce acessa. O certificado e emitido para ele.
+      # The hostname or IP you use to reach it. The certificate is issued for it.
       VAULTMARKS_SITE: ${VAULTMARKS_SITE:-vaultmarks.local}
     ports:
       - "${VAULTMARKS_HTTP_PORT:-80}:80"
       - "${VAULTMARKS_HTTPS_PORT:-443}:443"
     volumes:
-      - caddy-data:/data       # guarda a CA: apagar aqui = recertificar tudo
+      - caddy-data:/data       # holds the CA: deleting it means recertifying everything
       - caddy-config:/config
     networks:
       - vaultmarks

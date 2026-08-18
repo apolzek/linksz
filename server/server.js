@@ -1,18 +1,18 @@
-// Backend do Vaultmarks: API REST + sync + serve a web.
+// Backend: REST API, sync and static hosting for the web UI.
 //
-// Node puro, zero dependências — `node:sqlite`, `node:http` e `node:crypto` já
-// dão conta. Não há framework nem roteador: as rotas são um objeto indexado
-// por "MÉTODO /caminho", e o que não começa com /api/ vira arquivo estático.
+// Plain Node, zero dependencies: `node:sqlite`, `node:http` and `node:crypto`
+// cover it. There is no framework and no router; routes are an object keyed by
+// "METHOD /path", and anything not under /api/ is served as a static file.
 //
-// Autenticação é token opaco no header `Authorization: Bearer`, guardado na
-// tabela `sessions`. Não há cookie nem CSRF a considerar porque a barra do
-// desktop fala com a mesma API de outra origem.
+// Authentication is an opaque token in the `Authorization: Bearer` header,
+// stored in the `sessions` table. There is no cookie and no CSRF to consider,
+// because the desktop bar talks to this same API from another origin.
 //
-// Vizinhos:
-//   db.js           schema e conexão
-//   auth.js         hash de senha e token
-//   portability.js  import/export
-//   ../web/search.js  o mesmo motor de busca que roda no browser
+// Neighbours:
+//   db.js             schema and connection
+//   auth.js           password hashing and tokens
+//   portability.js    import/export
+//   ../web/search.js  the same search engine that runs in the browser
 'use strict';
 
 const http = require('node:http');
@@ -35,7 +35,7 @@ const MIME = {
   '.json': 'application/json; charset=utf-8',
   '.png': 'image/png',
   '.webp': 'image/webp',
-  // Sem este content-type o navegador ignora o manifest e nao oferece instalar.
+  // Without this content-type the browser ignores the manifest and never offers to install.
   '.webmanifest': 'application/manifest+json; charset=utf-8',
 };
 
@@ -51,7 +51,7 @@ function json(res, code, body) {
   res.end(data);
 }
 
-// Import de um vault grande passa fácil de 2 MB — o HTML do Chrome é verboso.
+// Importing a large vault easily goes past 2 MB; Chrome's HTML export is verbose.
 const IMPORT_LIMIT = 32 * 1024 * 1024;
 
 function readBody(req, limit = 2 * 1024 * 1024) {
@@ -66,7 +66,7 @@ function readBody(req, limit = 2 * 1024 * 1024) {
     req.on('end', () => {
       const raw = Buffer.concat(chunks).toString('utf8');
       if (!raw) return resolve({});
-      try { resolve(JSON.parse(raw)); } catch { reject(new Error('JSON invalido')); }
+      try { resolve(JSON.parse(raw)); } catch { reject(new Error('invalid JSON')); }
     });
     req.on('error', reject);
   });
@@ -76,7 +76,7 @@ function str(v, max = 2000) {
   return String(v == null ? '' : v).slice(0, max).trim();
 }
 
-// Aceita "#a, b  #c" ou ["a","b"] -> "a,b,c" (normalizado, sem #)
+// Accepts "#a, b  #c" or ["a","b"] -> "a,b,c" (normalized, no #)
 function normTags(v) {
   const parts = Array.isArray(v) ? v : String(v == null ? '' : v).split(/[,\s]+/);
   const seen = [];
@@ -98,8 +98,8 @@ function normFolder(v) {
 function createApp(dbPath) {
   const db = open(dbPath);
 
-  // Preenchido no boot (ensureSeedUser). Fica fora do `q` porque e estado do
-  // processo, nao do banco.
+  // Filled in at boot (ensureSeedUser). Kept out of `q` because it is process
+  // state, not database state.
   const runtime = { demo: null };
 
   const q = {
@@ -132,8 +132,8 @@ function createApp(dbPath) {
     return q.userById.get(s.user_id) || null;
   }
 
-  // Grava um bookmark vindo do cliente. `updated_at` do cliente vence se for
-  // mais novo (last-write-wins) — e o que mantem web e desktop convergindo.
+  // Writes a bookmark coming from a client. The client's `updated_at` wins when
+  // it is newer (last-write-wins), which is what keeps web and desktop converging.
   function writeBookmark(userId, b, ts = now()) {
     const id = str(b.id, 64) || crypto.randomUUID();
     const existing = q.getOne.get(userId, id);
@@ -144,7 +144,7 @@ function createApp(dbPath) {
       id, userId,
       str(b.title, 500), str(b.url, 2000),
       normFolder(b.folder), normCategory(b.category), normTags(b.tags),
-      str(b.description ?? b.notes, 5000),   // `notes`: nome antigo do campo
+      str(b.description ?? b.notes, 5000),   // `notes`: the field's old name
       created, updated, b.deleted ? 1 : 0,
     );
     return q.getOne.get(userId, id);
@@ -157,10 +157,10 @@ function createApp(dbPath) {
       const username = str(b.username, 60).toLowerCase();
       const password = String(b.password || '');
 
-      if (!looksLikeEmail(email)) return json(res, 400, { error: 'email invalido' });
-      if (!/^[a-z0-9._-]{2,60}$/.test(username)) return json(res, 400, { error: 'usuario deve ter 2-60 chars (a-z 0-9 . _ -)' });
-      if (password.length < 6) return json(res, 400, { error: 'senha precisa de ao menos 6 caracteres' });
-      if (q.userByLogin.get(email, username)) return json(res, 409, { error: 'email ou usuario ja existe' });
+      if (!looksLikeEmail(email)) return json(res, 400, { error: 'invalid email' });
+      if (!/^[a-z0-9._-]{2,60}$/.test(username)) return json(res, 400, { error: 'username must be 2-60 chars (a-z 0-9 . _ -)' });
+      if (password.length < 6) return json(res, 400, { error: 'password needs at least 6 characters' });
+      if (q.userByLogin.get(email, username)) return json(res, 409, { error: 'email or username already exists' });
 
       const info = q.insertUser.run(email, username, hashPassword(password), now());
       const token = newToken();
@@ -173,7 +173,7 @@ function createApp(dbPath) {
       const login = str(b.login || b.email || b.username, 200).toLowerCase();
       const user = q.userByLogin.get(login, login);
       if (!user || !verifyPassword(String(b.password || ''), user.pass_hash)) {
-        return json(res, 401, { error: 'credenciais invalidas' });
+        return json(res, 401, { error: 'invalid credentials' });
       }
       const token = newToken();
       q.insertSession.run(token, user.id, now());
@@ -198,11 +198,11 @@ function createApp(dbPath) {
 
     'POST /api/bookmarks': async (req, res, user) => {
       const b = await readBody(req);
-      if (!str(b.url) && !str(b.title)) return json(res, 400, { error: 'informe ao menos url ou titulo' });
+      if (!str(b.url) && !str(b.title)) return json(res, 400, { error: 'provide at least a url or a title' });
       return json(res, 201, { item: writeBookmark(user.id, b) });
     },
 
-    // Export: yaml (nativo), html (formato do navegador) ou json (script).
+    // Export: yaml (native), html (browser format) or json (for scripts).
     'GET /api/export': async (req, res, user, url) => {
       const format = (url.searchParams.get('format') || 'yaml').toLowerCase();
       const items = q.allBookmarks.all(user.id);
@@ -216,7 +216,7 @@ function createApp(dbPath) {
         json: () => [portability.toJson(items),
           'application/json; charset=utf-8', `vaultmarks-${stamp}.json`],
       };
-      if (!renderers[format]) return json(res, 400, { error: 'formato deve ser yaml, html ou json' });
+      if (!renderers[format]) return json(res, 400, { error: 'format must be yaml, html or json' });
 
       const [body, type, filename] = renderers[format]();
       res.writeHead(200, {
@@ -228,49 +228,49 @@ function createApp(dbPath) {
       return res.end(body);
     },
 
-    // Import em dois tempos: sem `apply`, so devolve o plano — nada e gravado.
-    // A UI mostra o plano, o usuario escolhe o modo, e so entao aplica.
+    // Import happens in two steps: without `apply` it only returns the plan and
+    // nothing is written. The UI shows the plan, the user picks a mode, then applies.
     'POST /api/import': async (req, res, user) => {
       const b = await readBody(req, IMPORT_LIMIT);
       const content = typeof b.content === 'string' ? b.content : '';
-      if (!content.trim()) return json(res, 400, { error: 'arquivo vazio' });
+      if (!content.trim()) return json(res, 400, { error: 'empty file' });
 
-      const mode = String(b.mode || 'adicionar');
+      const mode = String(b.mode || 'add');
       if (!portability.MODES.includes(mode)) {
-        return json(res, 400, { error: `modo deve ser um de: ${portability.MODES.join(', ')}` });
+        return json(res, 400, { error: `mode must be one of: ${portability.MODES.join(', ')}` });
       }
 
       let parsed;
       try {
         parsed = portability.parseImport(content, String(b.format || 'auto'));
       } catch (err) {
-        return json(res, 400, { error: `nao consegui ler o arquivo — ${err.message}` });
+        return json(res, 400, { error: `could not read the file: ${err.message}` });
       }
 
       const existing = q.allBookmarks.all(user.id);
       const plan = portability.planImport(existing, parsed.items, mode);
       const preview = {
-        formato: parsed.format,
-        resumo: plan.resumo,
-        // Amostra para a UI mostrar o que vai acontecer, sem despejar tudo.
-        exemplos: {
-          criar: plan.criar.slice(0, 5).map((p) => p.incoming.title || p.incoming.url),
-          atualizar: plan.atualizar.slice(0, 5).map((p) => p.atual.title || p.atual.url),
-          remover: plan.remover.slice(0, 5).map((p) => p.atual.title || p.atual.url),
+        format: parsed.format,
+        summary: plan.summary,
+        // A sample so the UI can show what will happen without dumping everything.
+        examples: {
+          create: plan.create.slice(0, 5).map((p) => p.incoming.title || p.incoming.url),
+          update: plan.update.slice(0, 5).map((p) => p.current.title || p.current.url),
+          remove: plan.remove.slice(0, 5).map((p) => p.current.title || p.current.url),
         },
       };
 
-      if (!b.apply) return json(res, 200, { ...preview, aplicado: false });
+      if (!b.apply) return json(res, 200, { ...preview, applied: false });
 
       const ts = now();
-      for (const { incoming } of plan.criar) writeBookmark(user.id, { ...incoming, id: '' }, ts);
-      for (const { incoming } of plan.atualizar) writeBookmark(user.id, { ...incoming, updated_at: ts }, ts);
-      for (const { atual } of plan.remover) q.softDelete.run(ts, user.id, atual.id);
+      for (const { incoming } of plan.create) writeBookmark(user.id, { ...incoming, id: '' }, ts);
+      for (const { incoming } of plan.update) writeBookmark(user.id, { ...incoming, updated_at: ts }, ts);
+      for (const { current } of plan.remove) q.softDelete.run(ts, user.id, current.id);
 
-      return json(res, 200, { ...preview, aplicado: true, total: q.allBookmarks.all(user.id).length });
+      return json(res, 200, { ...preview, applied: true, total: q.allBookmarks.all(user.id).length });
     },
 
-    // Sync bidirecional: cliente manda o que mudou, recebe o que mudou no servidor.
+    // Two-way sync: the client sends what changed locally and gets back what changed here.
     'POST /api/sync': async (req, res, user) => {
       const b = await readBody(req);
       const since = Number(b.since) || 0;
@@ -283,8 +283,8 @@ function createApp(dbPath) {
   };
 
   function handleBookmarkId(method, id, req, res, user) {
-    // Linhas com deleted=1 sao tombstones (existem so pro sync) — para a API
-    // REST elas nao existem mais.
+    // Rows with deleted=1 are tombstones (they exist only for sync); to the REST
+    // API they no longer exist.
     const live = () => {
       const row = q.getOne.get(user.id, id);
       return row && !row.deleted ? row : null;
@@ -293,47 +293,47 @@ function createApp(dbPath) {
     if (method === 'PUT') {
       return readBody(req).then((b) => {
         const existing = live();
-        if (!existing) return json(res, 404, { error: 'nao encontrado' });
+        if (!existing) return json(res, 404, { error: 'not found' });
         const merged = { ...existing, ...b, id, updated_at: now() };
         return json(res, 200, { item: writeBookmark(user.id, merged) });
       });
     }
     if (method === 'DELETE') {
-      if (!live()) return json(res, 404, { error: 'nao encontrado' });
+      if (!live()) return json(res, 404, { error: 'not found' });
       q.softDelete.run(now(), user.id, id);
       return json(res, 200, { ok: true });
     }
     if (method === 'GET') {
       const item = live();
-      return item ? json(res, 200, { item }) : json(res, 404, { error: 'nao encontrado' });
+      return item ? json(res, 200, { item }) : json(res, 404, { error: 'not found' });
     }
-    return json(res, 405, { error: 'metodo nao permitido' });
+    return json(res, 405, { error: 'method not allowed' });
   }
 
   function serveStatic(res, pathname) {
     const rel = pathname === '/' ? 'index.html' : pathname.replace(/^\/+/, '');
     const file = path.join(WEB_DIR, rel);
-    // Compara com o separador junto: sem ele, `../webx/y` passaria por
-    // startsWith(WEB_DIR) por ser so um prefixo de string.
+    // Compare with the separator attached: without it `../webx/y` would pass
+    // startsWith(WEB_DIR) just by being a string prefix.
     if (file !== WEB_DIR && !file.startsWith(WEB_DIR + path.sep)) {
-      return json(res, 403, { error: 'proibido' });
+      return json(res, 403, { error: 'forbidden' });
     }
 
     fs.readFile(file, (err, data) => {
-      if (err) return json(res, 404, { error: 'nao encontrado' });
+      if (err) return json(res, 404, { error: 'not found' });
 
       const name = path.basename(file);
       const headers = { 'content-type': MIME[path.extname(file)] || 'application/octet-stream' };
 
       if (name === 'sw.js') {
-        // O service worker precisa ser sempre revalidado, senao o navegador
-        // segura uma versao velha por horas e a atualizacao nunca chega.
+        // The service worker must always be revalidated, otherwise the browser
+        // holds an old version for hours and the update never lands.
         headers['cache-control'] = 'no-cache';
         headers['service-worker-allowed'] = '/';
       } else if (name === 'index.html') {
         headers['cache-control'] = 'no-cache';
       } else {
-        // O proprio SW guarda a casca; aqui basta uma janela curta.
+        // The SW itself caches the shell, so a short window is enough here.
         headers['cache-control'] = 'public, max-age=300';
       }
 
@@ -346,7 +346,7 @@ function createApp(dbPath) {
     const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
     const { pathname } = url;
 
-    // CORS liberado: a barra do desktop e outras origens batem na mesma API.
+    // CORS is open: the desktop bar and other origins hit this same API.
     res.setHeader('access-control-allow-origin', req.headers.origin || '*');
     res.setHeader('access-control-allow-headers', 'content-type, authorization');
     res.setHeader('access-control-allow-methods', 'GET, POST, PUT, DELETE, OPTIONS');
@@ -359,32 +359,32 @@ function createApp(dbPath) {
       const key = `${req.method} ${pathname}`;
       const isPublic = key === 'POST /api/auth/register' || key === 'POST /api/auth/login';
       const user = auth(req);
-      if (!isPublic && !user) return json(res, 401, { error: 'nao autenticado' });
+      if (!isPublic && !user) return json(res, 401, { error: 'not authenticated' });
 
       const idMatch = /^\/api\/bookmarks\/([^/]+)$/.exec(pathname);
       if (idMatch) return await handleBookmarkId(req.method, decodeURIComponent(idMatch[1]), req, res, user);
 
       const handler = routes[key];
-      if (!handler) return json(res, 404, { error: 'rota nao encontrada' });
+      if (!handler) return json(res, 404, { error: 'route not found' });
       return await handler(req, res, user, url);
     } catch (err) {
-      return json(res, 400, { error: err.message || 'erro' });
+      return json(res, 400, { error: err.message || 'error' });
     }
   });
 
   return { server, db, runtime };
 }
 
-// Conta de teste, garantida a cada boot da stack.
+// Test account, guaranteed on every boot of the stack.
 //
-// Sem ela um banco novo abre na tela de login sem ninguém para logar, e a
-// primeira coisa que todo mundo faz é registrar uma conta na mão só para ver
-// o app de pé. Idempotente: se a conta já existe, apenas reacerta a senha —
-// nunca toca nos favoritos dela.
+// Without it a fresh database opens the login screen with nobody to log in as,
+// and the first thing everyone does is register an account by hand just to see
+// the app running. Idempotent: if the account exists it only resets the
+// password, and it never touches that account's bookmarks.
 //
-// É uma senha conhecida por design, então serve para desenvolvimento e teste
-// local. Antes de publicar a instância na rede (compose + Caddy), desligue com
-// VAULTMARKS_SEED=0, senão qualquer um que leia este arquivo entra.
+// The password is known by design, so this is for local development and
+// testing. Before publishing the instance on a network (compose + Caddy), turn
+// it off with VAULTMARKS_SEED=0, or anyone who reads this file can log in.
 function ensureSeedUser(db) {
   if (process.env.VAULTMARKS_SEED === '0') return null;
 
@@ -395,7 +395,7 @@ function ensureSeedUser(db) {
 
   const existing = db.prepare('SELECT * FROM users WHERE email = ? OR username = ?').get(email, username);
   if (existing) {
-    // Só regrava se a senha atual não confere: evita hash novo a cada boot.
+    // Only rewrites when the current password does not match: avoids a fresh hash on every boot.
     if (!verifyPassword(password, existing.pass_hash)) {
       db.prepare('UPDATE users SET pass_hash = ? WHERE id = ?').run(hashPassword(password), existing.id);
     }
@@ -413,16 +413,16 @@ if (require.main === module) {
   const { server, db, runtime } = createApp();
 
   const seed = ensureSeedUser(db);
-  // So anuncia quando a senha e a padrao: com senha propria, o atalho da tela
-  // de login nao teria como funcionar mesmo.
+  // Only announced when the password is the default one: with a custom password
+  // the shortcut on the login screen could not work anyway.
   runtime.demo = seed && seed.isDefaultPassword ? { login: seed.username } : null;
   server.listen(port, host, () => {
-    console.log(`vaultmarks rodando em http://${host}:${port}`);
+    console.log(`vaultmarks running on http://${host}:${port}`);
     if (seed) {
-      // A senha só vai para o log quando é a padrão, que já está neste
-      // arquivo. Se veio de VAULTMARKS_SEED_PASSWORD, fica fora do journal.
-      const senha = seed.isDefaultPassword ? ` / ${seed.password}` : ' (senha de VAULTMARKS_SEED_PASSWORD)';
-      console.log(`usuario de teste: ${seed.username}${senha}`);
+      // The password only reaches the log when it is the default one, which is
+      // already in this file. A VAULTMARKS_SEED_PASSWORD stays out of the journal.
+      const shown = seed.isDefaultPassword ? ` / ${seed.password}` : ' (password from VAULTMARKS_SEED_PASSWORD)';
+      console.log(`test user: ${seed.username}${shown}`);
     }
   });
 }

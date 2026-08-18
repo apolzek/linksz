@@ -45,7 +45,7 @@ body {
 .tabs { display: flex; gap: 4px; background: var(--panel-2); padding: 4px; border-radius: 0; margin-bottom: 16px; }
 .tab { flex: 1; padding: 8px; border: 0; border-radius: 0; background: transparent; color: var(--muted); font: inherit; font-size: 14px; cursor: pointer; }
 .tab.active { background: var(--panel); color: var(--text); box-shadow: 0 1px 3px rgba(0,0,0,.2); }
-/* Semaforo do backend: cor + texto, porque so a cor nao serve para daltonico. */
+/* Backend status light: colour + text, because colour alone fails colour-blind users. */
 .status {
   display: flex; align-items: center; gap: 7px;
   margin: 0 0 16px; padding: 7px 11px; border-radius: 0;
@@ -65,7 +65,7 @@ body {
 .field > span { font-size: 12.5px; color: var(--muted); }
 .field-hint { font-style: normal; font-size: 11.5px; color: var(--muted); opacity: .8; }
 
-/* Campo de senha com o olho por cima, sem empurrar o layout. */
+/* Password field with the eye on top, without pushing the layout around. */
 .pw { position: relative; display: block; }
 .pw-eye {
   position: absolute; right: 6px; top: 50%; transform: translateY(-50%);
@@ -130,7 +130,7 @@ button { cursor: pointer; border-radius: 0; border: 1px solid transparent; paddi
 .layout { display: flex; gap: 8px; max-width: 1060px; margin: 0 auto; align-items: flex-start; }
 .content { flex: 1; min-width: 0; }
 
-/* ---------- painel de pastas/categorias/tags ---------- */
+/* ---------- folders/categories/tags panel ---------- */
 .browse {
   flex: none; width: 232px; position: sticky; top: 12px;
   max-height: calc(100vh - 24px); overflow-y: auto;
@@ -157,7 +157,7 @@ button { cursor: pointer; border-radius: 0; border: 1px solid transparent; paddi
 .facet-count { flex: none; font-size: 11.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .facet-row.on .facet-count { color: inherit; }
 
-/* Arvore de pastas: indentacao por --nivel, seta so em quem tem filho. */
+/* Folder tree: indentation via --nivel, arrow only on nodes with children. */
 .tree-row { display: flex; align-items: center; gap: 2px; padding-left: calc(var(--nivel, 0) * 13px); }
 .tree-toggle {
   flex: none; width: 16px; padding: 0; background: transparent; border: 0;
@@ -167,7 +167,7 @@ button { cursor: pointer; border-radius: 0; border: 1px solid transparent; paddi
 .tree-toggle.vazio { visibility: hidden; }
 .tree-item { min-width: 0; }
 
-/* Mini busca de cada secao do painel. */
+/* Mini search for each section of the panel. */
 .facet-search { padding: 0 6px 6px; }
 .facet-search input {
   padding: 5px 9px; font-size: 12.5px; border-radius: 0;
@@ -175,7 +175,7 @@ button { cursor: pointer; border-radius: 0; border: 1px solid transparent; paddi
 }
 .facet-search input::-webkit-search-cancel-button { cursor: pointer; }
 
-/* ---------- busca ---------- */
+/* ---------- search ---------- */
 .searchwrap { max-width: 720px; margin: 0 auto; padding: 34px 20px 8px; }
 .searchbar {
   display: flex; align-items: center; gap: 10px;
@@ -206,7 +206,7 @@ button { cursor: pointer; border-radius: 0; border: 1px solid transparent; paddi
 }
 kbd { background: var(--panel-2); border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 0; padding: 1px 5px; font: 11px ui-monospace, monospace; margin: 0 1px; }
 
-/* ---------- resultados ---------- */
+/* ---------- results ---------- */
 .count { max-width: 720px; margin: 18px auto 0; padding: 0 22px; font-size: 12px; color: var(--muted); }
 .results { list-style: none; max-width: 720px; margin: 6px auto 60px; padding: 0 20px; }
 .item {
@@ -233,7 +233,7 @@ kbd { background: var(--panel-2); border: 1px solid var(--line); border-bottom-w
 }
 .item:hover .icon-btn, .item.sel .icon-btn, .icon-btn:focus-visible { opacity: 1; }
 .icon-btn:hover { background: var(--panel-2); color: var(--text); }
-/* Sem hover no touch, os botoes ficariam invisiveis para sempre. */
+/* With no hover on touch, the buttons would stay invisible forever. */
 @media (hover: none) { .icon-btn { opacity: 1; } }
 
 mark { background: var(--accent-soft); color: inherit; border-radius: 0; padding: 0 1px; }
@@ -249,7 +249,7 @@ mark { background: var(--accent-soft); color: inherit; border-radius: 0; padding
 .modal-actions { display: flex; gap: 8px; align-items: center; margin-top: 4px; }
 textarea { resize: vertical; }
 
-/* ---------- importar / exportar ---------- */
+/* ---------- import / export ---------- */
 .io-card { max-width: 520px; gap: 0; }
 .io-section { border-top: 1px solid var(--line); padding: 16px 0 4px; }
 .io-section:first-of-type { border-top: 0; padding-top: 4px; }
@@ -258,7 +258,7 @@ textarea { resize: vertical; }
 .io-hint.dim { margin-top: 10px; opacity: .75; }
 .io-buttons { display: flex; gap: 8px; flex-wrap: wrap; }
 
-/* O seletor nativo tem rotulo em ingles e nao estiliza; escondo e uso o label. */
+/* The native file input cannot be styled; it is hidden and the label is used. */
 .io-file {
   display: flex !important;
   flex-direction: row !important;
@@ -282,7 +282,7 @@ textarea { resize: vertical; }
 
 .io-modes { border: 0; margin: 14px 0 4px; padding: 0; display: flex; flex-direction: column; gap: 1px; }
 .io-modes legend { padding: 0 0 6px; font-size: 12.5px; color: var(--muted); }
-/* flex-direction explicito: .modal-card label empilha por padrao. */
+/* Explicit flex-direction: .modal-card label stacks by default. */
 .io-modes label {
   display: flex !important;
   flex-direction: row !important;
@@ -296,7 +296,7 @@ textarea { resize: vertical; }
 .io-modes span { display: block; min-width: 0; }
 .io-modes b { font-size: 13px; font-weight: 600; color: var(--text); }
 .io-modes em { font-style: normal; font-size: 11.5px; color: var(--muted); }
-.io-modes em::before { content: ' — '; }
+.io-modes em::before { content: ': '; }
 
 .io-summary { list-style: none; margin: 4px 0 0; padding: 0; display: flex; flex-direction: column; gap: 5px; }
 .io-line {
@@ -308,9 +308,9 @@ textarea { resize: vertical; }
   display: block; font-style: normal; font-size: 11px; color: var(--muted);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.io-criar { border-left-color: #7ee0a1; }
-.io-atualizar { border-left-color: var(--accent); }
-.io-remover { border-left-color: var(--danger); }
+.io-create { border-left-color: #7ee0a1; }
+.io-update { border-left-color: var(--accent); }
+.io-remove { border-left-color: var(--danger); }
 
 .io-warn {
   margin: 10px 0 0; padding: 9px 11px; border-radius: 0; font-size: 12.5px;
@@ -318,7 +318,7 @@ textarea { resize: vertical; }
   color: var(--danger);
 }
 
-/* ---------- botao flutuante (celular) ---------- */
+/* ---------- floating button (mobile) ---------- */
 .fab {
   position: fixed;
   right: max(18px, env(safe-area-inset-right));
@@ -329,14 +329,14 @@ textarea { resize: vertical; }
   font-size: 30px; line-height: 1; padding: 0;
   border: 0;
   box-shadow: 0 6px 20px rgba(0,0,0,.35);
-  display: none;               /* so aparece no layout de celular */
+  display: none;               /* only shown in the mobile layout */
   z-index: 5;
 }
 .fab:active { filter: brightness(.92); }
 
-/* ---------- celular ---------- */
-/* Estreito demais para uma coluna lateral: o painel vira uma faixa de pills
-   acima dos resultados, sem empurrar a busca para fora da tela. */
+/* ---------- mobile ---------- */
+/* Too narrow for a side column: the panel becomes a strip of pills above the
+   results, without pushing the search off screen. */
 @media (max-width: 900px) {
   .layout { flex-direction: column; gap: 0; }
   .browse {
@@ -355,15 +355,15 @@ textarea { resize: vertical; }
 }
 
 @media (max-width: 640px) {
-  /* Sem teclado fisico, as dicas de atalho so ocupam espaco. */
+  /* With no physical keyboard, the shortcut hints only take up space. */
   .hint:not(.syntax) { display: none; }
   .fab { display: block; }
   #btn-new { display: none; }
-  /* Espaco curto na topbar: o rotulo sai, o icone fica. */
+  /* Little room in the topbar: the label goes, the icon stays. */
   #btn-io { font-size: 0; padding: 9px 11px; }
   #btn-io::before { content: '⇅'; font-size: 15px; }
 
-  /* dvh acompanha a barra de endereco recolhendo; vh nao. */
+  /* dvh follows the address bar collapsing; vh does not. */
   .auth { min-height: 100dvh; }
 
   .topbar {
@@ -375,7 +375,7 @@ textarea { resize: vertical; }
 
   .searchwrap { padding: 14px 14px 4px; }
   .searchbar { position: sticky; top: 0; }
-  /* Abaixo de 16px o iOS da zoom no campo ao focar. */
+  /* Below 16px iOS zooms into the field on focus. */
   #q { font-size: 16px; }
 
   .results { padding: 0 10px; margin-bottom: 20px; }
@@ -387,7 +387,7 @@ textarea { resize: vertical; }
   .item {
     align-items: flex-start;
     padding: 12px;
-    min-height: 44px;          /* alvo de toque confortavel */
+    min-height: 44px;          /* comfortable touch target */
     flex-wrap: wrap;
   }
   .item-meta { width: 100%; flex-wrap: wrap; margin-top: 6px; }
@@ -397,14 +397,14 @@ textarea { resize: vertical; }
   .chips { overflow-x: auto; flex-wrap: nowrap; padding-bottom: 4px; -webkit-overflow-scrolling: touch; }
   .chip { flex: none; }
 
-  /* Uma faixa rolavel em vez de duas linhas empilhadas. */
+  /* A scrollable strip instead of two stacked rows. */
   .hint.syntax {
     overflow-x: auto; flex-wrap: nowrap; justify-content: flex-start;
     padding-bottom: 4px; -webkit-overflow-scrolling: touch;
   }
   .hint.syntax code { flex: none; }
 
-  /* Modal vira folha subindo de baixo — mais natural no toque. */
+  /* The modal becomes a sheet rising from the bottom: more natural on touch. */
   .modal { place-items: end center; padding: 0; }
   .modal-card {
     max-width: none; border-radius: 0;
@@ -414,7 +414,7 @@ textarea { resize: vertical; }
   .row { flex-direction: column; gap: 12px; }
 }
 
-/* Instalado como app: nao ha barra do navegador, entao o topo sobe. */
+/* Installed as an app: there is no browser chrome, so the top moves up. */
 @media (display-mode: standalone) {
   .topbar { padding-top: calc(12px + env(safe-area-inset-top)); }
 }

@@ -1,6 +1,6 @@
-/* Vaultmarks — web. Estrategia: carrega tudo em memoria e busca localmente
-   (instantaneo, sem round-trip). Escritas vao pro servidor e o sync roda em
-   background pra convergir com a app desktop. */
+/* Web UI. Strategy: load everything into memory and search locally (instant,
+   no round-trip). Writes go to the server and the sync runs in the background
+   to converge with the desktop app. */
 'use strict';
 
 const $ = (s) => document.querySelector(s);
@@ -8,13 +8,13 @@ const API = '';
 
 const state = {
   token: localStorage.getItem('vm_token') || '',
-  items: [],          // todos os bookmarks vivos
+  items: [],          // every live bookmark
   results: [],
   sel: 0,
   editing: null,
   lastSync: 0,
-  filtroPainel: {},   // filtros das listas do painel (nao filtram favoritos)
-  pastasFechadas: new Set(JSON.parse(localStorage.getItem('vm_pastas_fechadas') || '[]')),
+  panelFilter: {},   // filters for the panel lists (they do not filter bookmarks)
+  closedFolders: new Set(JSON.parse(localStorage.getItem('vm_closed_folders') || '[]')),
 };
 
 /* ---------------- http ---------------- */
@@ -41,24 +41,24 @@ function setSync(text, cls = '') {
 /* ---------------- auth ---------------- */
 let authMode = 'login';
 
-// `fetch` rejeita com TypeError("Failed to fetch") para qualquer falha de rede
-// — servidor parado, porta errada, DNS. A mensagem crua nao diz nada, entao
-// aqui a falha e classificada antes de virar texto.
-function ehErroDeRede(err) {
+// `fetch` rejects with TypeError("Failed to fetch") for any network failure:
+// server down, wrong port, DNS. The raw message says nothing, so the failure is
+// classified here before it becomes text.
+function isNetworkError(err) {
   return err instanceof TypeError || /failed to fetch|networkerror|load failed/i.test(err.message || '');
 }
 
-// Nao pergunta "o backend esta rodando?" — checa e afirma. Erro de servidor
-// (senha errada, usuario duplicado) vai para a linha embaixo do botao; queda
-// de rede vira o semaforo e o bloco com o que fazer, sem repetir o texto nos
-// tres lugares.
-async function relatarFalha(err) {
-  if (!ehErroDeRede(err)) {
+// It does not ask "is the backend running?", it checks and states. A server
+// error (wrong password, duplicate user) goes to the line under the button; a
+// network outage turns into the status light and the what-to-do block, without
+// repeating the text in three places.
+async function reportFailure(err) {
+  if (!isNetworkError(err)) {
     $('#auth-error').textContent = err.message;
     return;
   }
-  const vivo = await checarServidor();
-  $('#auth-error').textContent = vivo ? 'the connection dropped mid-request — try again' : '';
+  const alive = await checkServer();
+  $('#auth-error').textContent = alive ? 'the connection dropped mid-request, try again' : '';
 }
 
 function renderAuthMode() {
@@ -83,58 +83,58 @@ document.querySelectorAll('.tab').forEach((t) => {
 });
 
 $('#pw-toggle').onclick = () => {
-  const campo = $('#f-password');
-  const mostrando = campo.type === 'text';
-  campo.type = mostrando ? 'password' : 'text';
-  $('#pw-toggle').classList.toggle('on', !mostrando);
-  $('#pw-toggle').title = mostrando ? 'Mostrar senha' : 'Ocultar senha';
-  campo.focus();
+  const field = $('#f-password');
+  const showing = field.type === 'text';
+  field.type = showing ? 'password' : 'text';
+  $('#pw-toggle').classList.toggle('on', !showing);
+  $('#pw-toggle').title = showing ? 'Show password' : 'Hide password';
+  field.focus();
 };
 
-async function entrar(credenciais, modo = authMode) {
-  const botao = $('#auth-submit');
-  const rotulo = botao.textContent;
-  botao.disabled = true;
-  botao.textContent = modo === 'register' ? 'creating…' : 'signing in…';
+async function signIn(credentials, mode = authMode) {
+  const button = $('#auth-submit');
+  const caption = button.textContent;
+  button.disabled = true;
+  button.textContent = mode === 'register' ? 'creating…' : 'signing in…';
   $('#auth-error').textContent = '';
   try {
-    const r = await api(`/api/auth/${modo}`, { method: 'POST', body: JSON.stringify(credenciais) });
+    const r = await api(`/api/auth/${mode}`, { method: 'POST', body: JSON.stringify(credentials) });
     state.token = r.token;
     localStorage.setItem('vm_token', r.token);
     $('#auth-offline').classList.add('hidden');
     await enterApp();
   } catch (err) {
-    await relatarFalha(err);
+    await reportFailure(err);
   } finally {
-    botao.disabled = false;
-    botao.textContent = rotulo;
+    button.disabled = false;
+    button.textContent = caption;
   }
 }
 
 $('#auth-form').onsubmit = (e) => {
   e.preventDefault();
   const password = $('#f-password').value;
-  return entrar(authMode === 'register'
+  return signIn(authMode === 'register'
     ? { email: $('#f-email').value.trim(), username: $('#f-username').value.trim(), password }
     : { login: $('#f-login').value.trim(), password });
 };
 
-// Diz de cara se o backend responde, em vez de esperar a pessoa errar a senha
-// para descobrir que o problema era outro.
-function pintarStatus(estado, texto) {
+// Says up front whether the backend answers, instead of waiting for someone to
+// mistype a password to find out the problem was something else.
+function paintStatus(status, text) {
   const el = $('#auth-status');
-  el.className = `status ${estado}`;
-  $('#auth-status-text').textContent = texto;
+  el.className = `status ${status}`;
+  $('#auth-status-text').textContent = text;
 }
 
-async function checarServidor() {
+async function checkServer() {
   $('#auth-origin').textContent = location.origin;
-  pintarStatus('checking', 'checking the backend…');
+  paintStatus('checking', 'checking the backend…');
   try {
     const r = await fetch('/api/health', { cache: 'no-store' });
     const body = await r.json();
     $('#auth-offline').classList.add('hidden');
-    pintarStatus('up', `backend up at ${location.origin}`);
+    paintStatus('up', `backend up at ${location.origin}`);
 
     const demo = $('#auth-demo');
     if (body.demo?.login) {
@@ -147,7 +147,7 @@ async function checarServidor() {
   } catch {
     $('#auth-offline').classList.remove('hidden');
     $('#auth-demo').classList.add('hidden');
-    pintarStatus('down', `backend down at ${location.origin}`);
+    paintStatus('down', `backend down at ${location.origin}`);
     return false;
   }
 }
@@ -157,16 +157,16 @@ $('#auth-retry').onclick = async () => {
   btn.disabled = true;
   btn.textContent = 'checking…';
   $('#auth-error').textContent = '';
-  const ok = await checarServidor();
+  const ok = await checkServer();
   btn.disabled = false;
   btn.textContent = 'check again';
-  // Sessao ainda valida + servidor de volta: nao ha o que perguntar.
+  // Session still valid + server back up: there is nothing to ask.
   if (ok && state.token) {
     try { await api('/api/me'); await enterApp(); } catch {}
   }
 };
 
-$('#auth-demo').onclick = () => entrar({ login: 'teste', password: 'teste123' }, 'login');
+$('#auth-demo').onclick = () => signIn({ login: 'teste', password: 'teste123' }, 'login');
 
 $('#btn-logout').onclick = async () => {
   try { await api('/api/auth/logout', { method: 'POST' }); } catch {}
@@ -176,7 +176,7 @@ $('#btn-logout').onclick = async () => {
   location.reload();
 };
 
-/* ---------------- dados ---------------- */
+/* ---------------- data ---------------- */
 async function loadAll() {
   const r = await api('/api/bookmarks?limit=500');
   state.items = r.items;
@@ -185,7 +185,7 @@ async function loadAll() {
   render();
 }
 
-// Puxa so o que mudou desde o ultimo sync (inclui mudancas feitas no desktop).
+// Pulls only what changed since the last sync (including desktop changes).
 async function pullChanges() {
   try {
     const r = await api('/api/sync', {
@@ -262,17 +262,17 @@ function iconButton(glyph, title, onClick) {
   return el;
 }
 
-// Liga/desliga um filtro (#tag, @categoria, /pasta) mantendo os outros —
-// e o que permite cruzar "@work #k8s" so clicando.
+// Toggles a filter (#tag, @category, /folder) while keeping the others, which
+// is what allows crossing "@work #k8s" with two clicks.
 function toggleToken(token) {
-  const atual = $('#q').value.trim();
-  const partes = atual.split(/\s+/).filter(Boolean);
-  const i = partes.findIndex((p) => p.toLowerCase() === token.toLowerCase());
-  if (i >= 0) partes.splice(i, 1); else partes.push(token);
-  setQuery(partes.join(' '));
+  const current = $('#q').value.trim();
+  const parts = current.split(/\s+/).filter(Boolean);
+  const i = parts.findIndex((p) => p.toLowerCase() === token.toLowerCase());
+  if (i >= 0) parts.splice(i, 1); else parts.push(token);
+  setQuery(parts.join(' '));
 }
 
-function tokenAtivo(token) {
+function activeToken(token) {
   return $('#q').value.trim().split(/\s+/).some((p) => p.toLowerCase() === token.toLowerCase());
 }
 
@@ -287,8 +287,8 @@ function badge(cls, text, onClick) {
 function render() {
   const q = $('#q').value;
   const terms = VMSearch.parseQuery(q);
-  // Sem corte: o painel existe para varrer o vault inteiro, e cortar em 50
-  // esconderia justamente a cauda que a pessoa esta procurando.
+  // No cap: the panel exists to sweep the whole vault, and cutting at 50 would
+  // hide exactly the tail someone is looking for.
   state.results = VMSearch.search(state.items, q, state.items.length || 1);
   if (state.sel >= state.results.length) state.sel = Math.max(0, state.results.length - 1);
 
@@ -330,15 +330,15 @@ function render() {
     }
     li.append(meta);
 
-    // Editar so por clique-direito e tecla `e` nao se descobre, e no celular
-    // nem existe: por isso os botoes ficam na linha.
-    const acoes = document.createElement('div');
-    acoes.className = 'item-actions';
-    acoes.append(
+    // Editing only via right-click and the `e` key is undiscoverable, and on a
+    // phone it does not exist at all: that is why the buttons sit on the row.
+    const actions = document.createElement('div');
+    actions.className = 'item-actions';
+    actions.append(
       iconButton('✎', 'Edit', () => openModal(b)),
       iconButton('🗑', 'Delete', () => removeBookmark(b)),
     );
-    li.append(acoes);
+    li.append(actions);
     ul.append(li);
   }
 
@@ -357,7 +357,7 @@ function render() {
     empty.classList.remove('hidden');
     empty.textContent = state.items.length
       ? `no bookmark matches "${q}"`
-      : 'no bookmarks yet — click "+ new" or press n';
+      : 'no bookmarks yet: click "+ new" or press n';
   } else {
     empty.classList.add('hidden');
   }
@@ -367,144 +367,144 @@ function render() {
   document.querySelector('.item.sel')?.scrollIntoView({ block: 'nearest' });
 }
 
-// O painel lista TUDO que existe no vault — pastas, categorias e tags — com
-// quantos favoritos cada uma tem. Ordena por uso, e desempata pelo nome para
-// a lista nao dancar a cada sync.
-function facetas(valores) {
+// The panel lists EVERYTHING in the vault (folders, categories and tags) with
+// how many bookmarks each one has. Sorted by usage, ties broken by name so the
+// list does not dance around on every sync.
+function facets(values) {
   const counts = new Map();
-  for (const v of valores) {
+  for (const v of values) {
     if (!v) continue;
     counts.set(v, (counts.get(v) || 0) + 1);
   }
   return [...counts.entries()].sort((a, b) => (b[1] - a[1]) || a[0].localeCompare(b[0]));
 }
 
-function secaoBrowse(titulo, prefixo, entradas, vazio, filtro) {
+function browseSection(heading, prefix, entries, emptyText, filter) {
   const sec = document.createElement('section');
   sec.className = 'facet';
 
   const h = document.createElement('h3');
-  h.textContent = `${titulo} (${entradas.length})`;
+  h.textContent = `${heading} (${entries.length})`;
   sec.append(h);
-  if (filtro) sec.append(filtro);
+  if (filter) sec.append(filter);
 
-  if (!entradas.length) {
+  if (!entries.length) {
     const p = document.createElement('p');
     p.className = 'facet-empty';
-    p.textContent = vazio;
+    p.textContent = emptyText;
     sec.append(p);
     return sec;
   }
 
-  for (const [nome, n] of entradas) {
-    const token = prefixo + nome;
+  for (const [name, n] of entries) {
+    const token = prefix + name;
     const b = document.createElement('button');
-    b.className = 'facet-row' + (tokenAtivo(token) ? ' on' : '');
+    b.className = 'facet-row' + (activeToken(token) ? ' on' : '');
     b.type = 'button';
 
     const label = document.createElement('span');
     label.className = 'facet-name';
-    label.textContent = nome;
+    label.textContent = name;
 
-    const qtd = document.createElement('span');
-    qtd.className = 'facet-count';
-    qtd.textContent = n;
+    const qty = document.createElement('span');
+    qty.className = 'facet-count';
+    qty.textContent = n;
 
-    b.append(label, qtd);
+    b.append(label, qty);
     b.onclick = () => toggleToken(token);
     sec.append(b);
   }
   return sec;
 }
 
-// `dev/k8s` e uma string so no banco; a arvore existe so na tela. O total de um
-// no inclui os descendentes — clicar em `dev` filtra `dev/*` porque a busca faz
-// substring no campo folder.
-function arvoreDePastas(items) {
-  const raiz = new Map();
+// `dev/k8s` is a single string in the database; the tree exists only on screen.
+// A node's total includes its descendants: clicking `dev` filters `dev/*`
+// because the search does a substring match on the folder field.
+function folderTree(items) {
+  const root = new Map();
   for (const b of items) {
     if (!b.folder) continue;
-    let nivel = raiz;
-    let caminho = '';
-    for (const parte of b.folder.split('/').filter(Boolean)) {
-      caminho = caminho ? `${caminho}/${parte}` : parte;
-      if (!nivel.has(parte)) nivel.set(parte, { nome: parte, caminho, total: 0, filhos: new Map() });
-      const no = nivel.get(parte);
-      no.total += 1;
-      nivel = no.filhos;
+    let level = root;
+    let path = '';
+    for (const part of b.folder.split('/').filter(Boolean)) {
+      path = path ? `${path}/${part}` : part;
+      if (!level.has(part)) level.set(part, { name: part, path, total: 0, children: new Map() });
+      const node = level.get(part);
+      node.total += 1;
+      level = node.children;
     }
   }
-  return raiz;
+  return root;
 }
 
-function contaNos(nivel) {
+function countNodes(level) {
   let n = 0;
-  for (const no of nivel.values()) n += 1 + contaNos(no.filhos);
+  for (const node of level.values()) n += 1 + countNodes(node.children);
   return n;
 }
 
-function linhasDaArvore(nivel, profundidade, destino, filtro) {
-  for (const no of [...nivel.values()].sort((a, b) => (b.total - a.total) || a.nome.localeCompare(b.nome))) {
-    // Um no fica visivel se ele casa com o filtro ou se algum descendente casa.
-    const eu = !filtro || VMSearch.norm(no.nome).includes(filtro);
-    const galho = document.createElement('div');
-    const filhos = document.createElement('div');
-    if (no.filhos.size) linhasDaArvore(no.filhos, profundidade + 1, filhos, filtro);
-    if (!eu && !filhos.childElementCount) continue;
+function treeRows(level, depth, destino, filter) {
+  for (const node of [...level.values()].sort((a, b) => (b.total - a.total) || a.name.localeCompare(b.name))) {
+    // A node stays visible when it matches the filter, or when a descendant does.
+    const selfMatch = !filter || VMSearch.norm(node.name).includes(filter);
+    const branch = document.createElement('div');
+    const children = document.createElement('div');
+    if (node.children.size) treeRows(node.children, depth + 1, children, filter);
+    if (!selfMatch && !children.childElementCount) continue;
 
-    const token = '/' + no.caminho;
-    const aberto = !state.pastasFechadas.has(no.caminho);
+    const token = '/' + node.path;
+    const isOpen = !state.closedFolders.has(node.path);
 
     const linha = document.createElement('div');
     linha.className = 'tree-row';
-    linha.style.setProperty('--nivel', profundidade);
+    linha.style.setProperty('--level', depth);
 
-    if (no.filhos.size) {
-      const seta = document.createElement('button');
-      seta.type = 'button';
-      seta.className = 'tree-toggle';
-      seta.textContent = aberto ? '▾' : '▸';
-      seta.title = aberto ? 'Collapse' : 'Expand';
-      seta.onclick = () => {
-        if (aberto) state.pastasFechadas.add(no.caminho); else state.pastasFechadas.delete(no.caminho);
-        localStorage.setItem('vm_pastas_fechadas', JSON.stringify([...state.pastasFechadas]));
+    if (node.children.size) {
+      const arrow = document.createElement('button');
+      arrow.type = 'button';
+      arrow.className = 'tree-toggle';
+      arrow.textContent = isOpen ? '▾' : '▸';
+      arrow.title = isOpen ? 'Collapse' : 'Expand';
+      arrow.onclick = () => {
+        if (isOpen) state.closedFolders.add(node.path); else state.closedFolders.delete(node.path);
+        localStorage.setItem('vm_closed_folders', JSON.stringify([...state.closedFolders]));
         renderBrowse();
       };
-      linha.append(seta);
+      linha.append(arrow);
     } else {
-      const vazio = document.createElement('span');
-      vazio.className = 'tree-toggle vazio';
-      linha.append(vazio);
+      const emptyText = document.createElement('span');
+      emptyText.className = 'tree-toggle emptyText';
+      linha.append(emptyText);
     }
 
     const b = document.createElement('button');
     b.type = 'button';
-    b.className = 'facet-row tree-item' + (tokenAtivo(token) ? ' on' : '');
-    const nome = document.createElement('span');
-    nome.className = 'facet-name';
-    nome.textContent = no.nome;
-    const qtd = document.createElement('span');
-    qtd.className = 'facet-count';
-    qtd.textContent = no.total;
-    b.append(nome, qtd);
+    b.className = 'facet-row tree-item' + (activeToken(token) ? ' on' : '');
+    const name = document.createElement('span');
+    name.className = 'facet-name';
+    name.textContent = node.name;
+    const qty = document.createElement('span');
+    qty.className = 'facet-count';
+    qty.textContent = node.total;
+    b.append(name, qty);
     b.onclick = () => toggleToken(token);
-    b.title = '/' + no.caminho;
+    b.title = '/' + node.path;
     linha.append(b);
 
-    galho.append(linha);
-    // Com filtro ativo, esconder o galho esconderia justamente o que casou.
-    if (aberto || filtro) galho.append(filhos);
-    destino.append(galho);
+    branch.append(linha);
+    // With a filter on, collapsing the branch would hide exactly what matched.
+    if (isOpen || filter) branch.append(children);
+    destino.append(branch);
   }
 }
 
-function secaoArvore(raiz, total, filtro) {
+function treeSection(root, total, filter) {
   const sec = document.createElement('section');
   sec.className = 'facet';
 
   const h = document.createElement('h3');
   h.textContent = `Folders (${total})`;
-  sec.append(h, campoDeFiltro('filtro-pastas', 'filter folders…', renderBrowse));
+  sec.append(h, filterField('filter-folders', 'filter folders…', renderBrowse));
 
   if (!total) {
     const p = document.createElement('p');
@@ -514,23 +514,23 @@ function secaoArvore(raiz, total, filtro) {
     return sec;
   }
 
-  const arvore = document.createElement('div');
-  arvore.className = 'tree';
-  linhasDaArvore(raiz, 0, arvore, filtro);
-  if (!arvore.childElementCount) {
+  const tree = document.createElement('div');
+  tree.className = 'tree';
+  treeRows(root, 0, tree, filter);
+  if (!tree.childElementCount) {
     const p = document.createElement('p');
     p.className = 'facet-empty';
     p.textContent = 'no folder matches the filter';
     sec.append(p);
     return sec;
   }
-  sec.append(arvore);
+  sec.append(tree);
   return sec;
 }
 
-// Filtro da propria lista — nao mexe na busca de favoritos, so encurta o painel
-// quando ha categoria/tag demais para varrer com o olho.
-function campoDeFiltro(id, placeholder, aoMudar) {
+// A filter over the list itself: it does not touch the bookmark search, it only
+// shortens the panel when there are too many categories/tags to scan by eye.
+function filterField(id, placeholder, aoMudar) {
   const wrap = document.createElement('div');
   wrap.className = 'facet-search';
   const input = document.createElement('input');
@@ -538,59 +538,59 @@ function campoDeFiltro(id, placeholder, aoMudar) {
   input.id = id;
   input.placeholder = placeholder;
   input.autocomplete = 'off';
-  input.value = state.filtroPainel[id] || '';
-  input.oninput = () => { state.filtroPainel[id] = input.value; aoMudar(); };
+  input.value = state.panelFilter[id] || '';
+  input.oninput = () => { state.panelFilter[id] = input.value; aoMudar(); };
   wrap.append(input);
   return wrap;
 }
 
 function renderBrowse() {
   const body = $('#browse-body');
-  // Recriar o painel a cada render tiraria o foco de quem esta digitando no
-  // filtro; guardo onde estava o cursor e devolvo no fim.
-  const focado = document.activeElement;
-  const focoId = focado && focado.closest?.('.facet-search') ? focado.id : null;
-  const caret = focoId ? focado.selectionStart : 0;
+  // Rebuilding the panel on every render would steal focus from whoever is
+  // typing in the filter; the caret position is saved and restored at the end.
+  const focused = document.activeElement;
+  const focusId = focused && focused.closest?.('.facet-search') ? focused.id : null;
+  const caret = focusId ? focused.selectionStart : 0;
 
   body.innerHTML = '';
 
-  const raiz = arvoreDePastas(state.items);
+  const root = folderTree(state.items);
   const tags = state.items.flatMap((b) => b.tags.split(',').filter(Boolean));
-  const filtra = (lista, chave) => {
-    const termo = VMSearch.norm(state.filtroPainel[chave] || '');
-    return termo ? lista.filter(([nome]) => VMSearch.norm(nome).includes(termo)) : lista;
+  const filterEntries = (list, key) => {
+    const term = VMSearch.norm(state.panelFilter[key] || '');
+    return term ? list.filter(([name]) => VMSearch.norm(name).includes(term)) : list;
   };
 
   body.append(
-    secaoArvore(raiz, contaNos(raiz), VMSearch.norm(state.filtroPainel['filtro-pastas'] || '')),
-    secaoBrowse('Categories', '@', filtra(facetas(state.items.map((b) => b.category)), 'filtro-categorias'),
-                'no categories yet', campoDeFiltro('filtro-categorias', 'filter categories…', renderBrowse)),
-    secaoBrowse('Tags', '#', filtra(facetas(tags), 'filtro-tags'),
-                'no tags yet', campoDeFiltro('filtro-tags', 'filter tags…', renderBrowse)),
+    treeSection(root, countNodes(root), VMSearch.norm(state.panelFilter['filter-folders'] || '')),
+    browseSection('Categories', '@', filterEntries(facets(state.items.map((b) => b.category)), 'filter-categories'),
+                'no categories yet', filterField('filter-categories', 'filter categories…', renderBrowse)),
+    browseSection('Tags', '#', filterEntries(facets(tags), 'filter-tags'),
+                'no tags yet', filterField('filter-tags', 'filter tags…', renderBrowse)),
   );
 
-  if (focoId) {
-    const alvo = document.getElementById(focoId);
-    if (alvo) { alvo.focus(); alvo.setSelectionRange(caret, caret); }
+  if (focusId) {
+    const target = document.getElementById(focusId);
+    if (target) { target.focus(); target.setSelectionRange(caret, caret); }
   }
 
   $('#browse-clear').classList.toggle('hidden',
-    !$('#q').value.trim() && !Object.values(state.filtroPainel).some(Boolean));
+    !$('#q').value.trim() && !Object.values(state.panelFilter).some(Boolean));
 }
 
-function setBrowseAberto(aberto) {
-  $('#browse').classList.toggle('off', !aberto);
-  $('#btn-browse').setAttribute('aria-expanded', String(aberto));
-  localStorage.setItem('vm_browse', aberto ? '1' : '0');
+function setBrowseOpen(isOpen) {
+  $('#browse').classList.toggle('off', !isOpen);
+  $('#btn-browse').setAttribute('aria-expanded', String(isOpen));
+  localStorage.setItem('vm_browse', isOpen ? '1' : '0');
 }
 
-$('#btn-browse').onclick = () => setBrowseAberto($('#browse').classList.contains('off'));
+$('#btn-browse').onclick = () => setBrowseOpen($('#browse').classList.contains('off'));
 $('#browse-clear').onclick = () => {
-  state.filtroPainel = {};
+  state.panelFilter = {};
   setQuery('');
 };
 
-// Atalhos: categorias e tags mais usadas viram chips clicaveis.
+// Shortcuts: the most used categories and tags become clickable chips.
 function renderChips() {
   const counts = new Map();
   for (const b of state.items) {
@@ -604,7 +604,7 @@ function renderChips() {
     const b = document.createElement('button');
     b.className = 'chip';
     b.textContent = `${label} ${n}`;
-    b.classList.toggle('on', tokenAtivo(label));
+    b.classList.toggle('on', activeToken(label));
     b.onclick = () => toggleToken(label);
     wrap.append(b);
   }
@@ -617,7 +617,7 @@ function setQuery(v) {
   $('#q').focus();
 }
 
-/* ---------------- acoes ---------------- */
+/* ---------------- actions ---------------- */
 function openSelected(newTab = true) {
   const b = state.results[state.sel];
   if (!b?.url) return;
@@ -706,10 +706,10 @@ $('#fab').onclick = () => openModal();
 $('#q-clear').onclick = () => setQuery('');
 $('#q').oninput = () => { state.sel = 0; render(); };
 
-/* ---------------- teclado ---------------- */
+/* ---------------- keyboard ---------------- */
 document.addEventListener('keydown', (e) => {
   if (!$('#io-modal').classList.contains('hidden')) {
-    if (e.key === 'Escape') fecharIo();
+    if (e.key === 'Escape') closeIo();
     return;
   }
   if (!$('#modal').classList.contains('hidden')) {
@@ -738,7 +738,7 @@ document.addEventListener('keydown', (e) => {
     if (e.key === 'n') openModal(); else $('#q').focus();
   } else if (!inSearch && e.key === 'b') {
     e.preventDefault();
-    setBrowseAberto($('#browse').classList.contains('off'));
+    setBrowseOpen($('#browse').classList.contains('off'));
   } else if (!inSearch && e.key === 'e') {
     e.preventDefault();
     if (state.results[state.sel]) openModal(state.results[state.sel]);
@@ -750,17 +750,17 @@ document.addEventListener('keydown', (e) => {
   }
 });
 
-/* ---------------- importar / exportar ---------------- */
-const io = { conteudo: '', nome: '', plano: null };
+/* ---------------- import / export ---------------- */
+const io = { content: '', name: '', plan: null };
 
-function nomeDoArquivo(res, fallback) {
+function fileName(res, fallback) {
   const m = /filename="([^"]+)"/.exec(res.headers.get('content-disposition') || '');
   return m ? m[1] : fallback;
 }
 
-// O download precisa passar pelo fetch porque a rota exige o header de
-// autenticação — um <a href> comum iria sem token e levaria 401.
-async function exportar(format) {
+// The download has to go through fetch because the route requires the auth
+// header: a plain <a href> would go without a token and get a 401.
+async function exportVault(format) {
   const btn = document.querySelector(`[data-export="${format}"]`);
   const label = btn.textContent;
   btn.disabled = true;
@@ -775,7 +775,7 @@ async function exportar(format) {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = nomeDoArquivo(res, `vaultmarks.${format}`);
+    a.download = fileName(res, `vaultmarks.${format}`);
     document.body.append(a);
     a.click();
     a.remove();
@@ -788,64 +788,72 @@ async function exportar(format) {
   }
 }
 
-function modoEscolhido() {
+function chosenMode() {
   return document.querySelector('input[name="io-mode"]:checked').value;
 }
 
-async function pedirPlano({ apply = false } = {}) {
+async function requestPlan({ apply = false } = {}) {
   return api('/api/import', {
     method: 'POST',
-    body: JSON.stringify({ content: io.conteudo, mode: modoEscolhido(), apply }),
+    body: JSON.stringify({ content: io.content, mode: chosenMode(), apply }),
   });
 }
 
-const ROTULOS = {
-  criar: ['new bookmark', 'new bookmarks'],
-  atualizar: ['updated bookmark', 'updated bookmarks'],
-  iguais: ['already identical, no change', 'already identical, no change'],
-  ignorar: ['kept as is', 'kept as is'],
-  remover: ['removed from the vault', 'removed from the vault'],
+const LABELS = {
+  create: ['new bookmark', 'new bookmarks'],
+  update: ['updated bookmark', 'updated bookmarks'],
+  same: ['already identical, no change', 'already identical, no change'],
+  skip: ['kept as is', 'kept as is'],
+  remove: ['removed from the vault', 'removed from the vault'],
 };
 
-function renderPlano(plano) {
-  io.plano = plano;
-  const r = plano.resumo;
+function renderPlan(plan) {
+  io.plan = plan;
+  const r = plan.summary;
   const ul = $('#io-summary');
   ul.innerHTML = '';
 
-  for (const chave of ['criar', 'atualizar', 'ignorar', 'iguais', 'remover']) {
-    const n = r[chave];
+  for (const key of ['create', 'update', 'skip', 'same', 'remove']) {
+    const n = r[key];
     if (!n) continue;
     const li = document.createElement('li');
-    li.className = `io-line io-${chave}`;
-    const exemplos = (plano.exemplos[chave] || []).slice(0, 3).join(' · ');
-    li.innerHTML = `<b>${n}</b> ${ROTULOS[chave][n === 1 ? 0 : 1]}`;
-    if (exemplos) li.innerHTML += `<em>${exemplos}${n > 3 ? ' …' : ''}</em>`;
+    li.className = `io-line io-${key}`;
+    const count = document.createElement('b');
+    count.textContent = n;
+    li.append(count, ` ${LABELS[key][n === 1 ? 0 : 1]}`);
+
+    // Titles coming from the imported file: textContent, never innerHTML.
+    const examples = (plan.examples[key] || []).slice(0, 3).join(' · ');
+    if (examples) {
+      const sample = document.createElement('em');
+      sample.textContent = examples + (n > 3 ? ' …' : '');
+      li.append(sample);
+    }
     ul.append(li);
   }
 
   if (!ul.children.length) {
-    ul.innerHTML = '<li class="io-line">nothing to do — the file already matches the vault</li>';
+    ul.innerHTML = '<li class="io-line">nothing to do, the file already matches the vault</li>';
   }
 
-  const aviso = $('#io-warn');
-  if (r.remover) {
-    aviso.textContent = `Heads up: ${r.remover} bookmark(s) in the vault are not in the file and will be removed.`;
-    aviso.classList.remove('hidden');
+  const warning = $('#io-warn');
+  if (r.remove) {
+    warning.textContent = `Heads up: ${r.remove} bookmark(s) in the vault are not in the file and will be removed.`;
+    warning.classList.remove('hidden');
   } else {
-    aviso.classList.add('hidden');
+    warning.classList.add('hidden');
   }
 
-  $('#io-apply').disabled = !(r.criar || r.atualizar || r.remover);
-  $('#io-apply').textContent = r.remover ? 'replace vault' : 'import';
+  $('#io-apply').disabled = !(r.create || r.update || r.remove);
+  $('#io-apply').textContent = r.remove ? 'replace vault' : 'import';
   $('#io-plan').classList.remove('hidden');
 }
 
-async function previsualizar() {
-  if (!io.conteudo) return;
+async function previewFile() {
+  if (!io.content) return;
   $('#io-error').textContent = '';
   try {
-    renderPlano(await pedirPlano({ apply: false }));
+    renderPlan(await requestPlan({ apply: false }));
   } catch (err) {
     $('#io-error').textContent = err.message;
     $('#io-plan').classList.add('hidden');
@@ -853,10 +861,10 @@ async function previsualizar() {
   }
 }
 
-function abrirIo() {
-  io.conteudo = '';
-  io.nome = '';
-  io.plano = null;
+function openIo() {
+  io.content = '';
+  io.name = '';
+  io.plan = null;
   $('#io-file').value = '';
   $('#io-filename').textContent = 'no file chosen';
   $('#io-error').textContent = '';
@@ -865,27 +873,27 @@ function abrirIo() {
   $('#io-modal').classList.remove('hidden');
 }
 
-function fecharIo() {
+function closeIo() {
   $('#io-modal').classList.add('hidden');
   $('#q').focus();
 }
 
 document.querySelectorAll('[data-export]').forEach((b) => {
-  b.onclick = () => exportar(b.dataset.export);
+  b.onclick = () => exportVault(b.dataset.export);
 });
 
 $('#io-file').onchange = async (e) => {
   const file = e.target.files[0];
   if (!file) return;
-  io.nome = file.name;
+  io.name = file.name;
   $('#io-filename').textContent = file.name;
-  io.conteudo = await file.text();
-  await previsualizar();
+  io.content = await file.text();
+  await previewFile();
 };
 
 document.querySelectorAll('input[name="io-mode"]').forEach((r) => {
-  // Trocar o modo recalcula o plano: o número muda na frente do usuário.
-  r.onchange = previsualizar;
+  // Switching the mode recomputes the plan: the numbers change in front of the user.
+  r.onchange = previewFile;
 });
 
 $('#io-apply').onclick = async () => {
@@ -894,11 +902,11 @@ $('#io-apply').onclick = async () => {
   btn.textContent = 'importando…';
   setSync('importando…', 'saving');
   try {
-    const r = await pedirPlano({ apply: true });
+    const r = await requestPlan({ apply: true });
     await loadAll();
     setSync('synced');
-    fecharIo();
-    const n = r.resumo.criar + r.resumo.atualizar + r.resumo.remover;
+    closeIo();
+    const n = r.summary.create + r.summary.update + r.summary.remove;
     setSync(`${n} bookmark(s) changed`);
     setTimeout(() => setSync('synced'), 4000);
   } catch (err) {
@@ -909,11 +917,11 @@ $('#io-apply').onclick = async () => {
   }
 };
 
-$('#btn-io').onclick = abrirIo;
-$('#io-close').onclick = fecharIo;
+$('#btn-io').onclick = openIo;
+$('#io-close').onclick = closeIo;
 
 /* ---------------- pwa ---------------- */
-// A tela do celular corta o placeholder longo no meio de uma palavra.
+// A phone screen cuts the long placeholder in the middle of a word.
 function fitPlaceholder() {
   $('#q').placeholder = window.matchMedia('(max-width: 640px)').matches
     ? 'search…  #tag  @cat  /folder'
@@ -922,16 +930,16 @@ function fitPlaceholder() {
 
 function registerServiceWorker() {
   if (!('serviceWorker' in navigator)) return;
-  // Service worker so existe em contexto seguro: https ou localhost. Em
-  // http://<ip-da-lan> o navegador ignora — por isso o compose poe TLS.
+  // A service worker only exists in a secure context: https or localhost. On
+  // http://<lan-ip> the browser ignores it, which is why the compose adds TLS.
   if (!window.isSecureContext) return;
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('/sw.js').catch(() => {});
   });
 }
 
-// Compartilhar uma pagina do navegador do celular cai aqui (share_target do
-// manifest): /?url=...&title=... abre o modal ja preenchido.
+// Sharing a page from the phone browser lands here (the manifest's
+// share_target): /?url=...&title=... opens the modal already filled in.
 function pendingShare() {
   const p = new URLSearchParams(location.search);
   const url = p.get('url') || '';
@@ -939,7 +947,7 @@ function pendingShare() {
   const title = p.get('title') || '';
   if (!url && !text && !title) return null;
 
-  // Android costuma mandar a URL dentro de `text` em vez de `url`.
+  // Android usually sends the URL inside `text` instead of `url`.
   const fromText = /https?:\/\/\S+/.exec(text);
   return {
     url: url || (fromText ? fromText[0] : ''),
@@ -948,7 +956,7 @@ function pendingShare() {
 }
 
 /* ---------------- boot ---------------- */
-// Permite abrir direto numa busca: /#q=%23devops
+// Allows opening straight into a search: /#q=%23devops
 function queryFromHash() {
   const m = /^#q=(.*)$/.exec(location.hash);
   return m ? decodeURIComponent(m[1]) : '';
@@ -964,9 +972,9 @@ async function enterApp() {
     openModal();
     $('#b-url').value = shared.url;
     $('#b-title').value = shared.title;
-    // Limpa a query string pra um F5 nao reabrir o modal.
+    // Clears the query string so an F5 does not reopen the modal.
     history.replaceState(null, '', location.pathname);
-  } else if (location.hash === '#novo') {
+  } else if (location.hash === '#new') {
     openModal();
     history.replaceState(null, '', location.pathname);
   }
@@ -983,7 +991,7 @@ function showLogin() {
   $('#app').classList.add('hidden');
   $('#auth').classList.remove('hidden');
   $('#f-login').focus();
-  checarServidor();
+  checkServer();
 }
 
 (async function boot() {
@@ -991,18 +999,18 @@ function showLogin() {
   fitPlaceholder();
   window.addEventListener('resize', fitPlaceholder);
   renderAuthMode();
-  // No celular o painel abre fechado: la ele empurra os resultados para baixo.
-  const escolha = localStorage.getItem('vm_browse');
-  setBrowseAberto(escolha === null ? window.innerWidth >= 900 : escolha === '1');
+  // On a phone the panel starts closed: there it pushes the results down.
+  const choice = localStorage.getItem('vm_browse');
+  setBrowseOpen(choice === null ? window.innerWidth >= 900 : choice === '1');
   if (!state.token) return showLogin();
 
-  // So o token invalido derruba a sessao. Servidor fora do ar nao: apagar o
-  // token ali obrigaria a digitar a senha de novo por causa de um restart.
+  // Only an invalid token ends the session. A server that is down does not:
+  // clearing the token there would force retyping the password over a restart.
   try {
     await api('/api/me');
   } catch (err) {
-    const rede = err instanceof TypeError || /failed to fetch|networkerror|load failed/i.test(err.message || '');
-    if (!rede) {
+    const network = err instanceof TypeError || /failed to fetch|networkerror|load failed/i.test(err.message || '');
+    if (!network) {
       localStorage.removeItem('vm_token');
       state.token = '';
     }

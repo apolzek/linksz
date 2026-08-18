@@ -1,17 +1,17 @@
-/* Service worker do Vaultmarks.
+/* Service worker.
  *
- * Objetivo: a casca do app (HTML/CSS/JS/icones) abrir instantaneamente e
- * funcionar sem rede. Os dados continuam vindo da API — favorito e informacao
- * que muda e nao pode ser servida velha sem o usuario saber.
+ * Goal: the app shell (HTML/CSS/JS/icons) opens instantly and works with no
+ * network. Data still comes from the API, because a bookmark is information
+ * that changes and must not be served stale without the user knowing.
  *
- * Estrategias:
- *   navegacao   network-first  -> pega a versao nova; sem rede, cai no cache
- *   assets      stale-while-revalidate -> pinta na hora, atualiza atras
- *   /api/*      network-only   -> nunca cacheia resposta autenticada
+ * Strategies:
+ *   navigation  network-first          -> takes the new version; offline, falls back to cache
+ *   assets      stale-while-revalidate -> paints at once, refreshes behind
+ *   /api/*      network-only           -> never caches an authenticated response
  */
 'use strict';
 
-// Suba esta versao ao mudar qualquer arquivo da casca.
+// Bump this version whenever a shell file changes.
 const VERSION = 'v2';
 const SHELL_CACHE = `vaultmarks-shell-${VERSION}`;
 
@@ -30,7 +30,7 @@ const SHELL = [
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(SHELL_CACHE)
-      // addAll e tudo-ou-nada; individual evita que um 404 derrube a instalacao.
+      // addAll is all-or-nothing; going one by one keeps a 404 from failing the install.
       .then((cache) => Promise.all(SHELL.map((url) => cache.add(url).catch(() => null))))
       .then(() => self.skipWaiting()),
   );
@@ -75,10 +75,10 @@ async function staleWhileRevalidate(request) {
     })
     .catch(() => null);
 
-  // Sem cache, espera a rede; com cache, responde ja e atualiza atras.
+  // With no cache, wait for the network; with cache, answer now and refresh behind.
   return cached || network.then((res) => {
     if (res) return res;
-    throw new Error('offline e sem cache');
+    throw new Error('offline and not cached');
   });
 }
 
@@ -87,8 +87,8 @@ self.addEventListener('fetch', (event) => {
   if (request.method !== 'GET') return;
 
   const url = new URL(request.url);
-  if (url.origin !== self.location.origin) return;  // favicons de terceiros
-  if (isApi(url)) return;                            // dados sempre da rede
+  if (url.origin !== self.location.origin) return;  // third-party favicons
+  if (isApi(url)) return;                            // data always from the network
 
   if (request.mode === 'navigate') {
     event.respondWith(networkFirst(request));
@@ -97,7 +97,7 @@ self.addEventListener('fetch', (event) => {
   event.respondWith(staleWhileRevalidate(request));
 });
 
-// A pagina manda isso depois de atualizar, para nao esperar o proximo boot.
+// The page sends this after updating, so it does not wait for the next boot.
 self.addEventListener('message', (event) => {
   if (event.data === 'skip-waiting') self.skipWaiting();
 });

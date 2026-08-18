@@ -1,22 +1,22 @@
 #!/usr/bin/env python3
-"""Vaultmarks — barra de busca estilo Spotlight.
+"""Spotlight-style bookmark search bar.
 
-Escolhe sozinho a view conforme o sistema:
+Picks the view for the system on its own:
 
-    Linux   GTK3 (python3-gi, ja vem no GNOME)   -> vmbar_gtk.py
-    macOS   Tkinter (vem junto com o Python)     -> vmbar_tk.py
+    Linux   GTK3 (python3-gi, ships with GNOME)  -> vmbar_gtk.py
+    macOS   Tkinter (comes with Python)          -> vmbar_tk.py
 
-Em ambos, a primeira instancia fica residente e escondida; o atalho global roda
-o script de novo, que so "acorda" a que ja esta rodando — por isso a barra
-aparece instantaneamente em vez de subir um Python a cada vez.
+On both, the first instance stays resident and hidden; the global shortcut runs
+the script again, which only wakes the running one, so the bar shows up
+instantly instead of starting a Python process every time.
 
-Uso:
-    vaultmarks_bar.py            abre a barra (ou acorda a instancia existente)
-    vaultmarks_bar.py --daemon   inicia residente e escondido (autostart)
+Usage:
+    vaultmarks_bar.py            opens the bar (or wakes the existing instance)
+    vaultmarks_bar.py --daemon   starts resident and hidden (autostart)
 
-Variaveis:
-    VAULTMARKS_UI=gtk|tk         força um toolkit
-    VAULTMARKS_NO_AUTOHIDE=1     nao esconde ao perder o foco
+Variables:
+    VAULTMARKS_UI=gtk|tk         forces a toolkit
+    VAULTMARKS_NO_AUTOHIDE=1     does not hide when focus is lost
 """
 
 import os

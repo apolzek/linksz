@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
-# Instala o Vaultmarks no macOS (Intel ou Apple Silicon):
-#   1. LaunchAgent do backend (sobe no login)
-#   2. LaunchAgent do daemon da barra (residente = abre instantanea)
-#   3. Vaultmarks Bar.app  — acorda a barra (e o que voce liga ao atalho)
-#   4. Vaultmarks.app      — abre o vault em janela propria (a PWA)
+# Installs on macOS (Intel or Apple Silicon):
+#   1. backend LaunchAgent (starts at login)
+#   2. bar daemon LaunchAgent (resident, so it opens instantly)
+#   3. Vaultmarks Bar.app  wakes the bar (this is what you bind the key to)
+#   4. Vaultmarks.app      opens the vault in its own window (the PWA)
 #
-# O macOS nao deixa um processo qualquer registrar atalho global, entao o
-# ultimo passo (ligar a tecla) e manual — o script explica como no fim.
+# macOS does not let an arbitrary process register a global shortcut, so the
+# last step (binding the key) is manual; the script explains how at the end.
 #
-# Uso:  bash desktop/install-macos.sh
+# Usage:  bash desktop/install-macos.sh
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -24,16 +24,16 @@ warn() { printf '\033[1;33m!\033[0m %s\n' "$*"; }
 
 mkdir -p "$AGENTS" "$APPS" "$LOGS"
 
-# ---------- 0. checagens ----------
+# ---------- 0. checks ----------
 if ! "$PYTHON" -c 'import tkinter' 2>/dev/null; then
-  warn "este Python nao tem Tkinter — a barra nao vai abrir."
-  warn "conserto:  brew install python-tk        (Homebrew)"
-  warn "ou use o Python do sistema:  /usr/bin/python3"
+  warn "this Python has no Tkinter: the bar will not open."
+  warn "fix:  brew install python-tk        (Homebrew)"
+  warn "or use the system Python:  /usr/bin/python3"
 fi
-[[ -z "$NODE" ]] && warn "node nao encontrado no PATH — o backend nao vai subir"
+[[ -z "$NODE" ]] && warn "node not found in PATH: the backend will not start"
 
-# Cria um .app bundle minimo: pasta + Info.plist + um executavel shell.
-# LSUIElement=1 esconde o icone do Dock (a barra nao e um app comum).
+# Creates a minimal .app bundle: folder + Info.plist + a shell executable.
+# LSUIElement=1 hides the Dock icon (the bar is not an ordinary app).
 make_app() {
   local name="$1" ident="$2" exec_line="$3" ui_element="$4"
   local app="$APPS/$name.app"
@@ -62,10 +62,10 @@ EOF
 
   printf '#!/bin/bash\n%s\n' "$exec_line" > "$app/Contents/MacOS/$bin"
   chmod +x "$app/Contents/MacOS/$bin"
-  say "criado $app"
+  say "created $app"
 }
 
-# ---------- 1. LaunchAgent do backend ----------
+# ---------- 1. backend LaunchAgent ----------
 if [[ -n "$NODE" ]]; then
   cat > "$AGENTS/dev.vaultmarks.server.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
@@ -90,11 +90,11 @@ EOF
   launchctl bootout "gui/$(id -u)/dev.vaultmarks.server" 2>/dev/null || true
   launchctl bootstrap "gui/$(id -u)" "$AGENTS/dev.vaultmarks.server.plist" 2>/dev/null \
     || launchctl load -w "$AGENTS/dev.vaultmarks.server.plist" 2>/dev/null \
-    || warn "nao consegui carregar o LaunchAgent do backend"
-  say "backend registrado no login ($URL)"
+    || warn "could not load the backend LaunchAgent"
+  say "backend registered at login ($URL)"
 fi
 
-# ---------- 2. LaunchAgent do daemon da barra ----------
+# ---------- 2. bar daemon LaunchAgent ----------
 cat > "$AGENTS/dev.vaultmarks.bar.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -117,15 +117,15 @@ EOF
 launchctl bootout "gui/$(id -u)/dev.vaultmarks.bar" 2>/dev/null || true
 launchctl bootstrap "gui/$(id -u)" "$AGENTS/dev.vaultmarks.bar.plist" 2>/dev/null \
   || launchctl load -w "$AGENTS/dev.vaultmarks.bar.plist" 2>/dev/null \
-  || warn "nao consegui carregar o LaunchAgent da barra"
-say "daemon da barra registrado no login"
+  || warn "could not load the bar LaunchAgent"
+say "bar daemon registered at login"
 
-# ---------- 3. app que acorda a barra ----------
-# Roda o mesmo script: ele detecta o daemon pelo socket e so manda "show".
+# ---------- 3. the app that wakes the bar ----------
+# Runs the same script: it finds the daemon over the socket and only sends "show".
 make_app "Vaultmarks Bar" "dev.vaultmarks.bar.launcher" \
   "exec \"$PYTHON\" \"$ROOT/desktop/vaultmarks_bar.py\" \"\$@\"" "true"
 
-# ---------- 4. app da janela web (PWA) ----------
+# ---------- 4. web window app (PWA) ----------
 CHROME=""
 for candidate in \
   "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
@@ -138,29 +138,29 @@ done
 if [[ -n "$CHROME" ]]; then
   make_app "Vaultmarks" "dev.vaultmarks.web" \
     "exec \"$CHROME\" --app=$URL" "false"
-  say "janela web usando $(basename "$(dirname "$(dirname "$CHROME")")")"
+  say "web window using $(basename "$(dirname "$(dirname "$CHROME")")")"
 else
-  warn "nenhum navegador Chromium encontrado."
-  warn "no Safari 17+: abra $URL e use Arquivo > Adicionar ao Dock"
+  warn "no Chromium browser found."
+  warn "on Safari 17+: open $URL and use File > Add to Dock"
 fi
 
 cat <<EOF
 
-$(printf '\033[1;32m✔\033[0m') instalado.
+$(printf '\033[1;32m✔\033[0m') installed.
 
-Falta so o atalho global — o macOS nao deixa o app registrar sozinho.
-Escolha um caminho:
+Only the global shortcut is left: macOS does not let the app register it alone.
+Pick one path:
 
-  Shortcuts.app (nativo, sem instalar nada)
-    1. Abra o app Atalhos > novo atalho
-    2. Acao "Abrir app" > $APPS/Vaultmarks Bar.app
-    3. No painel de detalhes, defina uma Tecla de Atalho (ex.: ⌘Espaco)
+  Shortcuts.app (native, nothing to install)
+    1. Open the Shortcuts app > new shortcut
+    2. Action "Open app" > $APPS/Vaultmarks Bar.app
+    3. In the details panel, set a Keyboard Shortcut (e.g. Cmd+Space)
 
-  skhd (se voce ja usa)
+  skhd (if you already use it)
     echo 'cmd - space : open -a "Vaultmarks Bar"' >> ~/.skhdrc && skhd --restart-service
 
   Raycast / Alfred
-    aponte um hotkey para o app "Vaultmarks Bar"
+    point a hotkey at the "Vaultmarks Bar" app
 
 Web: $URL
 Logs: $LOGS

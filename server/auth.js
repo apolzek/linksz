@@ -1,11 +1,11 @@
-// Senha e token de sessão, só com `node:crypto`.
+// Password hashing and session tokens, with `node:crypto` alone.
 //
-// scrypt em vez de bcrypt/argon2 porque vem embutido no Node e o projeto não
-// tem dependências. Os parâmetros abaixo são os recomendados para uso
-// interativo; subir N deixa o login mais lento na mesma proporção.
+// scrypt instead of bcrypt/argon2 because it ships with Node and this project
+// has no dependencies. The parameters below are the recommended ones for
+// interactive use; raising N slows login down in the same proportion.
 //
-// O hash guarda o sal junto, no formato `scrypt$<sal-hex>$<chave-hex>` — assim
-// dá para trocar os parâmetros no futuro sem perder quem já tem conta.
+// The hash stores the salt with it, as `scrypt$<salt-hex>$<key-hex>`, so the
+// parameters can change later without locking out existing accounts.
 'use strict';
 
 const crypto = require('node:crypto');
@@ -30,7 +30,7 @@ function newToken() {
   return crypto.randomBytes(32).toString('hex');
 }
 
-// Sem validacao de email por design (pedido do usuario): so checa formato minimo.
+// No email validation by design: it only checks the minimum shape.
 function looksLikeEmail(s) {
   return typeof s === 'string' && /^[^\s@]+@[^\s@]+$/.test(s.trim());
 }

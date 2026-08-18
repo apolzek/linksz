@@ -1,18 +1,18 @@
-"""Motor de busca da barra desktop — espelho exato de web/search.js.
+"""Search engine of the desktop bar: an exact mirror of web/search.js.
 
-Sintaxe:
-    texto            substring em titulo, url, tags, categoria, pasta, notas
-    "duas palavras"  substring com espaco (frase literal)
-    #tag             so em tags
-    @categoria       so em categoria
-    /pasta           so em pasta
-    campo:valor      so no campo (title, url, description, tag/tags, cat/category, folder)
-    -termo           exclui (funciona com qualquer forma acima)
+Syntax:
+    text             substring in title, url, tags, category, folder, description
+    "two words"      substring with a space (literal phrase)
+    #tag             tags only
+    @category        category only
+    /folder          folder only
+    field:value      that field only (title, url, description, tag/tags, cat/category, folder)
+    -term            excludes (works with any of the forms above)
 
-Termos combinam com AND. Tudo e substring, case-insensitive e sem acentos.
+Terms combine with AND. Everything is substring, case- and accent-insensitive.
 
-Qualquer mudanca aqui precisa acontecer tambem em web/search.js:
-tests/test_desktop.py roda as duas implementacoes e exige resultado identico.
+Any change here has to happen in web/search.js too: tests/test_desktop.py runs
+both implementations and requires identical results.
 """
 
 import re
@@ -21,7 +21,7 @@ from collections import namedtuple
 
 FIELDS = ("title", "url", "tags", "category", "folder", "description")
 
-# Peso de cada campo na busca livre: onde casou importa mais que quantas vezes.
+# Weight of each field in free search: where it matched matters more than how often.
 ANY_WEIGHTS = (
     ("title", 60),
     ("url", 50),
@@ -39,7 +39,7 @@ FIELD_ALIASES = {
     "link": "url",
     "desc": "description",
     "description": "description",
-    # O campo se chamava `notes`; quem digita `notes:algo` continua achando.
+    # The field used to be called `notes`; typing `notes:something` still works.
     "note": "description",
     "notes": "description",
     "tag": "tags",
@@ -52,9 +52,9 @@ FIELD_ALIASES = {
 
 QUOTES = "\"'"
 
-# Espaco definido na unha (em vez de /\s/ e isspace()) porque as duas
-# linguagens discordam em cantos como U+0085 e U+FEFF — e a paridade
-# JS <-> Python precisa valer para qualquer entrada.
+# Whitespace spelled out by hand (instead of /\s/ and isspace()) because the
+# two languages disagree on corners like U+0085 and U+FEFF, and JS <-> Python
+# parity has to hold for any input.
 WHITESPACE = (
     " \t\n\v\f\r\u00a0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006"
     "\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000\ufeff"
@@ -62,7 +62,7 @@ WHITESPACE = (
 
 FIELD_PREFIX_RE = re.compile(r"^([a-zA-Z]+):(.*)$", re.DOTALL)
 
-# Compara igual a uma tupla (field, value, negate) — conveniente nos testes.
+# Compares equal to a (field, value, negate) tuple, which is handy in the tests.
 Term = namedtuple("Term", "field value negate")
 
 
@@ -72,9 +72,9 @@ def norm(s):
 
 
 def tokenize(q):
-    """Quebra por espaco, mantendo junto o que estiver entre aspas.
+    """Splits on whitespace, keeping quoted runs together.
 
-    As aspas seguem no token — quem remove e strip_quotes, depois dos prefixos.
+    The quotes stay in the token; strip_quotes removes them after the prefixes.
     """
     tokens = []
     cur = ""
@@ -101,10 +101,10 @@ def tokenize(q):
 
 
 def components(hay):
-    """Quebra um campo em componentes (tags sao csv, titulos tem espaco).
+    """Splits a field into components (tags are csv, titles have spaces).
 
-    Escrito na mao pelo mesmo motivo de WHITESPACE: split(/[,\\s]+/) e
-    str.split() nao concordam em todos os caracteres.
+    Hand-written for the same reason as WHITESPACE: split(/[,\\s]+/) and
+    str.split() do not agree on every character.
     """
     out = []
     cur = ""
@@ -121,7 +121,7 @@ def components(hay):
 
 
 def strip_quotes(s):
-    """Aspas nao fechadas ainda contam: `"foo bar` vira `foo bar`."""
+    """An unclosed quote still counts: `"foo bar` becomes `foo bar`."""
     if s and s[0] in QUOTES:
         q = s[0]
         s = s[1:]
@@ -133,9 +133,9 @@ def strip_quotes(s):
 def parse_token(raw):
     text = raw
 
-    # Sigilo sem valor (`#`, `-`, `@`) vira termo vazio e e descartado por
-    # parse_query — enquanto se digita `#devops`, o `#` sozinho nao pode zerar
-    # a lista.
+    # A sigil with no value (`#`, `-`, `@`) becomes an empty term and is dropped
+    # by parse_query: while `#devops` is being typed, a lone `#` must not empty
+    # the list.
     negate = text[:1] == "-"
     if negate:
         text = text[1:]
@@ -145,8 +145,8 @@ def parse_token(raw):
         field = SIGILS[text[0]]
         text = text[1:]
     else:
-        # `campo:valor` — so para campos conhecidos, senao `https://x` viraria
-        # um filtro pelo campo "https".
+        # `field:value`, but only for known fields, otherwise `https://x` would
+        # become a filter on a "https" field.
         m = FIELD_PREFIX_RE.match(text)
         if m and m.group(1).lower() in FIELD_ALIASES:
             field = FIELD_ALIASES[m.group(1).lower()]
@@ -159,7 +159,7 @@ def parse_query(q):
     terms = []
     for raw in tokenize(q):
         term = parse_token(raw)
-        # Sobrou nada depois dos prefixos (ex.: `#`, `""`, `-`): ignora.
+        # Nothing left after the prefixes (e.g. `#`, `""`, `-`): ignore it.
         if term.value:
             terms.append(term)
     return terms
@@ -170,7 +170,7 @@ def _fields_of(b):
 
 
 def _score_term(f, term):
-    """None se nao casa, senao pontuacao (maior = melhor)."""
+    """None when it does not match, otherwise a score (higher is better)."""
     value = term.value
 
     if term.field != "any":
@@ -178,7 +178,7 @@ def _score_term(f, term):
         i = hay.find(value)
         if i < 0:
             return None
-        # Componente inteiro (tag `go` em `go,golang`) vale mais que substring.
+        # A whole component (tag `go` in `go,golang`) is worth more than a substring.
         exact = value in components(hay)
         return 100 if exact else (70 if i == 0 else 50)
 
@@ -227,7 +227,7 @@ def search(bookmarks, q, limit=50):
         if ok:
             out.append((total, _updated_at(b), b))
 
-    # Empate desempata pelo mais recente. Alem disso o sort e estavel nas duas
-    # linguagens, entao a ordem de entrada decide o resto — e a paridade se mantem.
+    # Ties break by recency. Beyond that the sort is stable in both languages, so
+    # input order decides the rest and parity holds.
     out.sort(key=lambda r: (-r[0], -r[1]))
     return [b for _, _, b in out[:limit]]

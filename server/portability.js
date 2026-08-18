@@ -1,26 +1,26 @@
 'use strict';
 
-// Import e export do vault.
+// Vault import and export.
 //
-// Formatos:
-//   yaml   nativo — legível, editável à mão, guarda tudo (tags, pasta, notas)
-//   html   Netscape Bookmark File — o que Chrome/Firefox/Edge/Safari
-//          exportam e importam. É a ponte com o mundo.
-//   json   despejo cru, para script
+// Formats:
+//   yaml   native: readable, hand-editable, keeps everything (tags, folder, description)
+//   html   Netscape Bookmark File, what Chrome/Firefox/Edge/Safari export and
+//          import. This is the bridge to the rest of the world.
+//   json   raw dump, for scripts
 //
-// A parte que exige cuidado é o import. Importar não é "adicionar tudo":
-// o mesmo favorito pode já existir, com outro título, ou ter sido editado dos
-// dois lados. Por isso o import é sempre **plano primeiro, aplicação depois** —
-// planImport() diz exatamente o que vai acontecer e a UI mostra antes de gravar.
+// The delicate part is the import. Importing is not "add everything": the same
+// bookmark may already exist under another title, or have been edited on both
+// sides. So the import is always **plan first, apply second**: planImport()
+// says exactly what will happen and the UI shows it before anything is written.
 
 const yaml = require('./yaml');
 
-const MODES = ['adicionar', 'atualizar', 'mais-recente', 'substituir'];
+const MODES = ['add', 'update', 'newest', 'replace'];
 
-/* ======================= identidade ======================= */
+/* ======================= identity ======================= */
 
-// Duas entradas são "a mesma" se têm o mesmo id, ou a mesma URL normalizada.
-// A URL é o que permite reimportar um arquivo do browser sem duplicar tudo.
+// Two entries are "the same" when they share an id, or a normalized URL.
+// The URL is what allows reimporting a browser file without duplicating it all.
 function urlKey(url) {
   const raw = String(url || '').trim();
   if (!raw) return '';
@@ -28,7 +28,7 @@ function urlKey(url) {
     const u = new URL(raw.includes('://') ? raw : `https://${raw}`);
     const host = u.hostname.replace(/^www\./, '').toLowerCase();
     const path = u.pathname.replace(/\/+$/, '');
-    // Fragmento fora: `#secao` é o mesmo documento. Query fica: muda a página.
+    // Fragment dropped: `#section` is the same document. Query kept: it changes the page.
     return `${host}${path}${u.search}`.toLowerCase();
   } catch {
     return raw.toLowerCase().replace(/\/+$/, '');
@@ -41,7 +41,7 @@ function sameContent(a, b) {
   return FIELDS.every((f) => String(a[f] ?? '') === String(b[f] ?? ''));
 }
 
-/* ======================= exportar ======================= */
+/* ======================= export ======================= */
 
 function toYaml(bookmarks, { user = '' } = {}) {
   const doc = {
@@ -56,7 +56,7 @@ function toYaml(bookmarks, { user = '' } = {}) {
       };
       if (b.folder) item.folder = b.folder;
       if (b.category) item.category = b.category;
-      // Lista em vez de csv: no arquivo isso é bem mais legível e editável.
+      // A list instead of csv: in the file that is far more readable and editable.
       if (b.tags) item.tags = String(b.tags).split(',').filter(Boolean);
       if (b.description) item.description = b.description;
       item.created_at = b.created_at;
@@ -66,12 +66,12 @@ function toYaml(bookmarks, { user = '' } = {}) {
   };
 
   const header = [
-    'Vaultmarks — export do vault',
-    user ? `usuario: ${user}` : '',
+    'Bookmarks vault export',
+    user ? `user: ${user}` : '',
     '',
-    'Pode editar este arquivo a mao e importar de volta.',
-    'O campo id e o que liga cada linha ao favorito ja existente:',
-    'apagando o id, o favorito entra como novo.',
+    'You can edit this file by hand and import it back.',
+    'The id field is what links each entry to an existing bookmark:',
+    'delete the id and the entry comes in as a new bookmark.',
   ].filter((l) => l !== null).join('\n');
 
   return yaml.stringify(doc, { header });
@@ -85,9 +85,9 @@ function escapeHtml(s) {
     .replace(/"/g, '&quot;');
 }
 
-// Netscape Bookmark File: formato de 1990 que todo navegador ainda fala.
-// A hierarquia de pastas vira <DL> aninhado; tags cabem no atributo TAGS
-// (convenção do Firefox) e a categoria vira uma pasta de primeiro nível.
+// Netscape Bookmark File: a format from 1990 that every browser still speaks.
+// The folder hierarchy becomes nested <DL>; tags fit in the TAGS attribute
+// (a Firefox convention) and the category becomes a top-level folder.
 function toNetscapeHtml(bookmarks) {
   const tree = new Map();
   for (const b of bookmarks) {
@@ -120,17 +120,17 @@ function toNetscapeHtml(bookmarks) {
     return out;
   };
 
-  // Ordena pela chave, nao pelo par: o sort padrao converte o elemento inteiro
-  // em string, e as linhas vindas do node:sqlite tem prototipo nulo — nao
-  // sobrevivem a String().
-  const pastas = [...tree.entries()].sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
+  // Sort by the key, not by the pair: the default sort stringifies the whole
+  // element, and rows coming from node:sqlite have a null prototype, so they do
+  // not survive String().
+  const folders = [...tree.entries()].sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
 
-  for (const [folder, items] of pastas) {
+  for (const [folder, items] of folders) {
     if (!folder) {
       for (const b of items) lines.push(...entry(b, 1));
       continue;
     }
-    // Cada nível da pasta vira um <DL> — é assim que o browser mostra a árvore.
+    // Every folder level becomes a <DL>: that is how the browser shows the tree.
     const parts = folder.split('/').filter(Boolean);
     parts.forEach((part, i) => {
       const pad = '    '.repeat(i + 1);
@@ -148,7 +148,7 @@ function toJson(bookmarks) {
   return JSON.stringify({ version: 1, count: bookmarks.length, bookmarks }, null, 2);
 }
 
-/* ======================= importar: ler ======================= */
+/* ======================= import: read ======================= */
 
 function decodeHtml(s) {
   return String(s ?? '')
@@ -159,7 +159,7 @@ function decodeHtml(s) {
     .replace(/&nbsp;/g, ' ')
     .replace(/&#(\d+);/g, (m, n) => String.fromCodePoint(Number(n)))
     .replace(/&#x([0-9a-f]+);/gi, (m, n) => String.fromCodePoint(parseInt(n, 16)))
-    .replace(/&amp;/g, '&');   // por último, senão &amp;lt; vira <
+    .replace(/&amp;/g, '&');   // last, otherwise &amp;lt; would turn into <
 }
 
 function normTagList(value) {
@@ -180,7 +180,7 @@ function normalizeIncoming(raw) {
     folder: String(raw.folder ?? '').trim().replace(/^\/+|\/+$/g, '').slice(0, 300),
     category: String(raw.category ?? '').replace(/^@/, '').trim().toLowerCase().slice(0, 200),
     tags: normTagList(raw.tags),
-    // `notes` e o nome antigo do campo: arquivo velho continua importando.
+    // `notes` is the field's old name: older files still import.
     description: String(raw.description ?? raw.notes ?? '').trim().slice(0, 5000),
     created_at: Number(raw.created_at) > 0 ? Number(raw.created_at) : null,
     updated_at: Number(raw.updated_at) > 0 ? Number(raw.updated_at) : null,
@@ -193,15 +193,15 @@ function parseYamlExport(text) {
 
   const list = Array.isArray(doc) ? doc : doc.bookmarks;
   if (!Array.isArray(list)) {
-    throw new Error('YAML sem a lista "bookmarks" — confira o arquivo');
+    throw new Error('YAML without a "bookmarks" list, check the file');
   }
   return list
     .filter((item) => item && typeof item === 'object')
     .map(normalizeIncoming);
 }
 
-// Lê o HTML do navegador sem parser de HTML: o formato é rígido o suficiente
-// (uma linha por <DT>) e regex aqui é mais previsível que meio parser.
+// Reads the browser HTML without an HTML parser: the format is rigid enough
+// (one line per <DT>) and a regex here is more predictable than half a parser.
 function parseNetscapeHtml(text) {
   const out = [];
   const stack = [];
@@ -227,7 +227,7 @@ function parseNetscapeHtml(text) {
         return m ? decodeHtml(m[1]) : '';
       };
       const href = attr('HREF');
-      // Bookmarklets e separadores não são favoritos.
+      // Bookmarklets and separators are not bookmarks.
       if (!href || /^(javascript|place):/i.test(href)) { last = null; continue; }
 
       const seconds = (v) => (Number(v) > 0 ? Number(v) * 1000 : null);
@@ -243,7 +243,7 @@ function parseNetscapeHtml(text) {
       continue;
     }
 
-    // <DD> traz a descrição do favorito anterior.
+    // <DD> carries the description of the previous bookmark.
     const dd = /<DD>(.*)$/i.exec(line);
     if (dd && last) last.description = decodeHtml(dd[1]).trim().slice(0, 5000);
   }
@@ -254,7 +254,7 @@ function parseNetscapeHtml(text) {
 function parseJsonExport(text) {
   const doc = JSON.parse(text);
   const list = Array.isArray(doc) ? doc : doc.bookmarks;
-  if (!Array.isArray(list)) throw new Error('JSON sem a lista "bookmarks"');
+  if (!Array.isArray(list)) throw new Error('JSON without a "bookmarks" list');
   return list.filter((i) => i && typeof i === 'object').map(normalizeIncoming);
 }
 
@@ -270,79 +270,79 @@ function parseImport(text, format = 'auto') {
   const chosen = format === 'auto' ? detectFormat(text) : format;
   const parsers = { yaml: parseYamlExport, html: parseNetscapeHtml, json: parseJsonExport };
   const parser = parsers[chosen];
-  if (!parser) throw new Error(`formato desconhecido: ${chosen}`);
+  if (!parser) throw new Error(`unknown format: ${chosen}`);
 
   const items = parser(text);
-  // Sem url e sem título não dá pra fazer nada com a linha.
+  // With neither url nor title there is nothing to do with the entry.
   return { format: chosen, items: items.filter((b) => b.url || b.title) };
 }
 
-/* ======================= importar: planejar ======================= */
+/* ======================= import: plan ======================= */
 
 /**
- * Decide o destino de cada entrada do arquivo, sem gravar nada.
+ * Decides what happens to each entry of the file, without writing anything.
  *
- * Modos:
- *   adicionar     só cria o que não existe. Nunca toca no que já está.
- *   atualizar     cria os novos e sobrescreve os existentes com o arquivo.
- *   mais-recente  vence quem tem updated_at maior (merge de dois vaults).
- *   substituir    o arquivo passa a ser a verdade: o que não está nele é removido.
+ * Modes:
+ *   add      only creates what is missing. Never touches what is already there.
+ *   update   creates the new ones and overwrites the existing ones with the file.
+ *   newest   the larger updated_at wins (merging two vaults).
+ *   replace  the file becomes the truth: whatever is not in it is removed.
  */
-function planImport(existing, incoming, mode = 'adicionar') {
-  if (!MODES.includes(mode)) throw new Error(`modo invalido: ${mode}`);
+function planImport(existing, incoming, mode = 'add') {
+  if (!MODES.includes(mode)) throw new Error(`invalid mode: ${mode}`);
 
   const byId = new Map();
   const byUrl = new Map();
   for (const b of existing) {
     byId.set(b.id, b);
     const key = urlKey(b.url);
-    // O primeiro ganha o índice: duplicata local não rouba o par do outro.
+    // The first one wins the index: a local duplicate does not steal the other's match.
     if (key && !byUrl.has(key)) byUrl.set(key, b);
   }
 
-  const plan = { criar: [], atualizar: [], iguais: [], ignorar: [], remover: [] };
-  const casados = new Set();
+  const plan = { create: [], update: [], same: [], skip: [], remove: [] };
+  const matched = new Set();
 
   for (const item of incoming) {
-    const atual = (item.id && byId.get(item.id)) || byUrl.get(urlKey(item.url)) || null;
+    const current = (item.id && byId.get(item.id)) || byUrl.get(urlKey(item.url)) || null;
 
-    if (!atual) {
-      plan.criar.push({ incoming: item });
+    if (!current) {
+      plan.create.push({ incoming: item });
       continue;
     }
-    casados.add(atual.id);
+    matched.add(current.id);
 
-    // Mantém o id do vault: o do arquivo pode vir de outra instalação.
-    const merged = { ...item, id: atual.id, created_at: atual.created_at };
+    // Keeps the vault's id: the one in the file may come from another install.
+    const merged = { ...item, id: current.id, created_at: current.created_at };
 
-    if (sameContent(atual, item)) {
-      plan.iguais.push({ atual, incoming: item });
+    if (sameContent(current, item)) {
+      plan.same.push({ current, incoming: item });
       continue;
     }
 
-    if (mode === 'adicionar') {
-      plan.ignorar.push({ atual, incoming: item, motivo: 'ja existe' });
-    } else if (mode === 'mais-recente' && Number(item.updated_at) <= Number(atual.updated_at)) {
-      plan.ignorar.push({ atual, incoming: item, motivo: 'a versao do vault e mais nova' });
+    if (mode === 'add') {
+      plan.skip.push({ current, incoming: item, reason: 'already exists' });
+    } else if (mode === 'newest' && Number(item.updated_at) <= Number(current.updated_at)) {
+      plan.skip.push({ current, incoming: item, reason: 'the vault version is newer' });
     } else {
-      plan.atualizar.push({ atual, incoming: merged });
+      plan.update.push({ current, incoming: merged });
     }
   }
 
-  if (mode === 'substituir') {
+  if (mode === 'replace') {
     for (const b of existing) {
-      if (!casados.has(b.id)) plan.remover.push({ atual: b });
+      if (!matched.has(b.id)) plan.remove.push({ current: b });
     }
   }
 
-  plan.resumo = {
-    modo: mode,
-    lidos: incoming.length,
-    criar: plan.criar.length,
-    atualizar: plan.atualizar.length,
-    iguais: plan.iguais.length,
-    ignorar: plan.ignorar.length,
-    remover: plan.remover.length,
+  plan.summary = {
+    mode,
+    read: incoming.length,
+    create: plan.create.length,
+    update: plan.update.length,
+    same: plan.same.length,
+    skip: plan.skip.length,
+    remove: plan.remove.length,
   };
   return plan;
 }

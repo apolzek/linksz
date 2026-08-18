@@ -1,8 +1,8 @@
-"""Cliente Vaultmarks: cache SQLite local + sync com o backend.
+"""Client: local SQLite cache + sync with the backend.
 
-A barra sempre le do cache local (busca instantanea, funciona offline).
-O sync roda em background: empurra o que foi criado/editado localmente
-e puxa o que mudou no servidor (incluindo edicoes feitas na web).
+The bar always reads from the local cache (instant search, works offline).
+The sync runs in the background: it pushes what was created/edited locally and
+pulls what changed on the server (including edits made on the web).
 """
 
 import json
@@ -41,22 +41,22 @@ class Client:
         self.db = self._open_cache()
 
     # ---------------- config ----------------
-    def _parse_yaml(self, texto):
-        """YAML de config: `chave: valor`, comentario com # e aspas opcionais.
+    def _parse_yaml(self, text):
+        """Config YAML: `key: value`, # comments and optional quotes.
 
-        Nao e um parser de YAML completo de proposito — este arquivo tem cinco
-        chaves planas, e o projeto nao carrega dependencia.
+        Deliberately not a full YAML parser: this file has five flat keys and
+        the project carries no dependency.
         """
         cfg = {}
-        for linha in texto.split("\n"):
-            linha = linha.split("#", 1)[0].strip() if not linha.strip().startswith("#") else ""
-            if not linha or ":" not in linha:
+        for line in text.split("\n"):
+            line = line.split("#", 1)[0].strip() if not line.strip().startswith("#") else ""
+            if not line or ":" not in line:
                 continue
-            chave, valor = linha.split(":", 1)
-            valor = valor.strip()
-            if len(valor) >= 2 and valor[0] == valor[-1] and valor[0] in "\"'":
-                valor = valor[1:-1]
-            cfg[chave.strip()] = valor
+            key, value = line.split(":", 1)
+            value = value.strip()
+            if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+                value = value[1:-1]
+            cfg[key.strip()] = value
         return cfg
 
     def _load_config(self):
@@ -65,8 +65,8 @@ class Client:
             with open(self.config_path, encoding="utf-8") as fh:
                 cfg = self._parse_yaml(fh.read())
         except OSError:
-            # config.json e o formato antigo: se existir, e lido uma vez e
-            # regravado como YAML no primeiro save.
+            # config.json is the old format: when present it is read once and
+            # rewritten as YAML on the first save.
             try:
                 with open(LEGACY_CONFIG_PATH, encoding="utf-8") as fh:
                     cfg = json.load(fh)
@@ -81,15 +81,15 @@ class Client:
 
     def save_config(self):
         os.makedirs(os.path.dirname(self.config_path), exist_ok=True)
-        linhas = [
-            "# Vaultmarks — desktop bar.",
+        lines = [
+            "# Vaultmarks desktop bar.",
             "#",
             "# The bar is just a search front-end: every bookmark comes from the",
             "# backend below, the same vault the web UI shows. Point `server` at it",
             "# and authenticate with either `token` or `username` + `password`.",
             "#",
             "# With username/password filled in, the bar logs in by itself and stores",
-            "# the token here — you can delete the password afterwards.",
+            "# the token here, so you can delete the password afterwards.",
             "",
             "server: %s" % self.config.get("server", DEFAULT_SERVER),
             "username: %s" % self.config.get("username", ""),
@@ -98,31 +98,31 @@ class Client:
             "",
         ]
         with open(self.config_path, "w", encoding="utf-8") as fh:
-            fh.write("\n".join(linhas))
-        os.chmod(self.config_path, 0o600)  # guarda token e, se houver, senha
+            fh.write("\n".join(lines))
+        os.chmod(self.config_path, 0o600)  # holds the token and, if set, the password
 
     @property
     def authenticated(self):
         return bool(self.config.get("token"))
 
     def ensure_session(self):
-        """Garante sessao valida antes de sincronizar.
+        """Ensures a valid session before syncing.
 
-        Ordem: token que ja funciona > usuario e senha do YAML > nada (a barra
-        abre o dialogo de login). E o que faz a barra mostrar exatamente o mesmo
-        vault que a web, sem ninguem digitar senha duas vezes.
+        Order: a token that already works > username and password from the YAML >
+        nothing (the bar opens the login dialog). This is what makes the bar show
+        exactly the same vault as the web, without typing a password twice.
         """
         if self.config.get("token"):
             try:
                 self._request("/api/me")
                 return True
             except ApiError:
-                self.config["token"] = ""   # expirado ou de outro servidor
+                self.config["token"] = ""   # expired, or from another server
 
-        usuario = (self.config.get("username") or "").strip()
-        senha = self.config.get("password") or ""
-        if usuario and senha:
-            self.login(usuario, senha)
+        username = (self.config.get("username") or "").strip()
+        password = self.config.get("password") or ""
+        if username and password:
+            self.login(username, password)
             return True
         return False
 
@@ -139,15 +139,15 @@ class Client:
               folder TEXT DEFAULT '', category TEXT DEFAULT '', tags TEXT DEFAULT '',
               description TEXT DEFAULT '', created_at INTEGER, updated_at INTEGER,
               deleted INTEGER DEFAULT 0,
-              dirty INTEGER DEFAULT 0   -- 1 = precisa ser empurrado pro servidor
+              dirty INTEGER DEFAULT 0   -- 1 = still has to be pushed to the server
             );
             CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT);
             """
         )
-        # O campo se chamava `notes`: cache criado antes disso mantem a coluna
-        # antiga, e o CREATE TABLE acima nao a renomeia sozinho.
-        colunas = [c["name"] for c in db.execute("PRAGMA table_info(bookmarks)")]
-        if "notes" in colunas and "description" not in colunas:
+        # The field used to be called `notes`: a cache created before that keeps
+        # the old column, and the CREATE TABLE above does not rename it.
+        columns = [c["name"] for c in db.execute("PRAGMA table_info(bookmarks)")]
+        if "notes" in columns and "description" not in columns:
             db.execute("ALTER TABLE bookmarks RENAME COLUMN notes TO description")
         db.commit()
         return db
@@ -179,7 +179,7 @@ class Client:
         )
         self.db.commit()
 
-    # ---------------- escritas locais ----------------
+    # ---------------- local writes ----------------
     def add(self, url="", title="", folder="", category="", tags="", description=""):
         ts = now_ms()
         b = {
@@ -231,9 +231,9 @@ class Client:
                 body = json.loads(err.read().decode())
             except Exception:
                 pass
-            raise ApiError(body.get("error") or f"erro HTTP {err.code}") from err
+            raise ApiError(body.get("error") or f"HTTP error {err.code}") from err
         except urllib.error.URLError as err:
-            raise ApiError(f"servidor inacessivel ({self.config['server']})") from err
+            raise ApiError(f"server unreachable ({self.config['server']})") from err
         except (TimeoutError, OSError) as err:
             raise ApiError(str(err)) from err
 
@@ -258,9 +258,9 @@ class Client:
 
     # ---------------- sync ----------------
     def sync(self):
-        """Empurra locais sujos, puxa mudancas do servidor. Retorna nº aplicado."""
+        """Pushes dirty local rows, pulls server changes. Returns how many applied."""
         if not self.authenticated:
-            raise ApiError("nao autenticado")
+            raise ApiError("not authenticated")
 
         dirty = [dict(r) for r in self.db.execute("SELECT * FROM bookmarks WHERE dirty = 1").fetchall()]
         changes = [{k: d[k] for k in COLUMNS} for d in dirty]
@@ -275,7 +275,7 @@ class Client:
         applied = 0
         for c in r.get("changes", []):
             local = self.db.execute("SELECT updated_at, dirty FROM bookmarks WHERE id = ?", (c["id"],)).fetchone()
-            # Nao sobrescreve alteracao local mais recente ainda nao empurrada.
+            # Does not overwrite a newer local change that has not been pushed yet.
             if local and local["dirty"] and local["updated_at"] > c["updated_at"]:
                 continue
             self._upsert_local(c, dirty=0)
@@ -299,7 +299,7 @@ def normalize_tags(v):
 
 
 def parse_quick_add(text):
-    """'https://x.com titulo #go #cli @studies /dev' -> dict pronto pro add()."""
+    """'https://x.com title #go #cli @studies /dev' -> dict ready for add()."""
     url, tags, category, folder, words = "", [], "", "", []
     for tok in text.split():
         if tok.startswith("#") and len(tok) > 1:

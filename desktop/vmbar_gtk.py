@@ -1,6 +1,6 @@
-"""View GTK3 da barra — Linux/GNOME.
+"""GTK3 view of the bar, for Linux/GNOME.
 
-So desenha e traduz teclas: toda a decisao esta em vmbar_core.BarCore.
+It only draws and translates keys: every decision lives in vmbar_core.BarCore.
 """
 
 import os
@@ -18,7 +18,7 @@ from vmclient import ApiError, Client  # noqa: E402
 
 APP_ID = "dev.vaultmarks.Bar"
 WIDTH = 680
-# Com 1, a barra nao se esconde ao perder o foco (util pra depurar e pra print).
+# With 1, the bar does not hide when it loses focus (handy for debugging and screenshots).
 NO_AUTOHIDE = os.environ.get("VAULTMARKS_NO_AUTOHIDE") == "1"
 
 CSS = b"""
@@ -64,7 +64,7 @@ class Bar(Gtk.Application):
         self.add_main_option("daemon", 0, GLib.OptionFlags.NONE, GLib.OptionArg.NONE,
                              "Inicia residente e escondido", None)
 
-    # ---------------- ciclo de vida ----------------
+    # ---------------- lifecycle ----------------
     def do_command_line(self, command_line):
         daemon = "--daemon" in command_line.get_arguments()
         if daemon:
@@ -141,9 +141,9 @@ class Bar(Gtk.Application):
         self.window = win
 
     def place_on_active_monitor(self):
-        """Centraliza no monitor do cursor, a ~22% do topo.
+        """Centres on the monitor holding the cursor, about 22% from the top.
 
-        Com varios monitores, WindowPosition.CENTER cairia na emenda entre eles.
+        With several monitors, WindowPosition.CENTER would land on the seam.
         """
         screen = self.window.get_screen()
         display = screen.get_display()
@@ -167,7 +167,7 @@ class Bar(Gtk.Application):
         self.place_on_active_monitor()
         self.window.present_with_time(Gdk.CURRENT_TIME)
         self.entry.grab_focus()
-        # Ignora o focus-out espurio que o WM dispara enquanto a janela sobe.
+        # Ignores the spurious focus-out the WM fires while the window comes up.
         self.ignore_focus_out = True
         GLib.timeout_add(400, self.arm_focus_out)
         self.sync_async()
@@ -188,8 +188,8 @@ class Bar(Gtk.Application):
 
     # ---------------- login ----------------
     def needs_login(self):
-        # O YAML de config manda: com token valido ou usuario/senha ali, a barra
-        # entra sozinha na mesma conta que a web usa, sem dialogo nenhum.
+        # The config YAML rules: with a valid token, or username/password in it,
+        # the bar signs in by itself to the same account the web uses, no dialog.
         try:
             if self.client.ensure_session():
                 return False
@@ -199,7 +199,7 @@ class Bar(Gtk.Application):
         return True
 
     def show_login_dialog(self):
-        dlg = Gtk.Dialog(title="Vaultmarks — sign in", modal=True)
+        dlg = Gtk.Dialog(title="Vaultmarks: sign in", modal=True)
         dlg.set_default_size(360, -1)
         dlg.add_buttons("Cancel", Gtk.ResponseType.CANCEL, "Sign in", Gtk.ResponseType.OK)
         dlg.set_default_response(Gtk.ResponseType.OK)
@@ -282,7 +282,7 @@ class Bar(Gtk.Application):
         if row:
             self.core.select(row.get_index())
 
-    # ---------------- acoes ----------------
+    # ---------------- actions ----------------
     def run_selected(self, index=None):
         action, payload = self.core.activate(index)
         if action == OPEN:
@@ -348,7 +348,7 @@ class Bar(Gtk.Application):
 
         def work():
             try:
-                # Conexao SQLite propria: sqlite3 nao e thread-safe entre threads.
+                # Its own SQLite connection: sqlite3 is not thread-safe across threads.
                 applied = Client().sync()
                 GLib.idle_add(self.on_synced, applied, None)
             except ApiError as err:

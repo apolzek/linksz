@@ -1,6 +1,6 @@
-"""Diferencas entre Linux e macOS num lugar so.
+"""Linux and macOS differences in a single place.
 
-O resto do codigo do desktop nao deve olhar para sys.platform: pergunta aqui.
+The rest of the desktop code should never look at sys.platform: it asks here.
 """
 
 import os
@@ -14,12 +14,12 @@ IS_LINUX = sys.platform.startswith("linux")
 
 APP = "vaultmarks"
 
-# macOS junta config e dados em Application Support; Linux segue o XDG.
+# macOS puts config and data together in Application Support; Linux follows XDG.
 _MAC_SUPPORT = "~/Library/Application Support"
 
 
 def _dir(env_var, mac_default, linux_default):
-    """Env var (se houver) > convencao do SO. XDG vale nos dois para os testes."""
+    """Env var (when set) > OS convention. XDG applies to both, for the tests."""
     base = os.environ.get(env_var)
     if not base:
         base = mac_default if IS_MAC else linux_default
@@ -35,10 +35,10 @@ def data_dir():
 
 
 def runtime_dir():
-    """Onde vive o socket de instancia unica. Precisa ser local e privado."""
+    """Where the single-instance socket lives. It has to be local and private."""
     base = os.environ.get("XDG_RUNTIME_DIR")
     if not base:
-        # macOS nao tem XDG_RUNTIME_DIR; /tmp por usuario resolve nos dois.
+        # macOS has no XDG_RUNTIME_DIR; a per-user /tmp works on both.
         base = os.path.join(tempfile.gettempdir(), f"{APP}-{os.getuid()}")
     path = os.path.join(base, APP)
     os.makedirs(path, mode=0o700, exist_ok=True)
@@ -50,7 +50,7 @@ def socket_path():
 
 
 def open_url_command(url):
-    """Comando que abre uma URL no navegador padrao."""
+    """The command that opens a URL in the default browser."""
     if not url:
         return None
     if not url.startswith(("http://", "https://")):
@@ -70,7 +70,7 @@ def open_url(url):
 
 
 def copy_command():
-    """Fallback de clipboard para quando o toolkit nao da conta."""
+    """Clipboard fallback for when the toolkit cannot do it."""
     if IS_MAC:
         return ["pbcopy"]
     for cmd in (["wl-copy"], ["xclip", "-selection", "clipboard"], ["xsel", "--clipboard", "--input"]):
@@ -91,10 +91,10 @@ def copy_to_clipboard(text):
 
 
 def available_toolkits():
-    """Quais toolkits de UI existem nesta maquina, em ordem de preferencia."""
+    """Which UI toolkits exist on this machine, in order of preference."""
     found = []
-    # No Linux o GTK3 ja vem com o GNOME e integra melhor com o tema.
-    # No macOS o Tk vem no proprio Python e o GTK praticamente nunca existe.
+    # On Linux GTK3 ships with GNOME and matches the theme better.
+    # On macOS Tk comes with Python itself and GTK is almost never there.
     order = ("tk", "gtk") if IS_MAC else ("gtk", "tk")
     for name in order:
         try:
@@ -112,7 +112,7 @@ def available_toolkits():
 
 
 def pick_toolkit():
-    """VAULTMARKS_UI força um toolkit; senao usa o melhor disponivel."""
+    """VAULTMARKS_UI forces a toolkit; otherwise the best available one is used."""
     forced = os.environ.get("VAULTMARKS_UI", "").strip().lower()
     if forced in ("gtk", "tk"):
         return forced
@@ -121,7 +121,7 @@ def pick_toolkit():
     if found:
         return found[0]
 
-    hint = ("instale o Tk:  brew install python-tk"
+    hint = ("install Tk:  brew install python-tk"
             if IS_MAC else
-            "instale um toolkit:  sudo apt install python3-gi   (ou python3-tk)")
-    raise RuntimeError(f"nenhum toolkit de UI disponivel — {hint}")
+            "install a toolkit:  sudo apt install python3-gi   (or python3-tk)")
+    raise RuntimeError(f"no UI toolkit available: {hint}")

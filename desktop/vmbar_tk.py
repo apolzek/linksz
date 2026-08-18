@@ -1,12 +1,13 @@
-"""View Tkinter da barra — macOS (e fallback no Linux sem GTK).
+"""Tkinter view of the bar, for macOS (and as a fallback on Linux without GTK).
 
-Tk vem junto com o Python, entao o macOS nao precisa de dependencia nenhuma.
-Como no GTK, a logica toda esta em vmbar_core.BarCore; aqui so tem desenho,
-teclado e as manhas de janela do macOS.
+Tk comes with Python, so macOS needs no dependency at all. As with GTK, all the
+logic lives in vmbar_core.BarCore; this file only has drawing, keyboard handling
+and the macOS window tricks.
 
-macOS nao deixa um processo qualquer registrar atalho global, entao quem abre
-a barra e o launcher (Shortcuts.app / skhd / Raycast) rodando este script de
-novo: a segunda instancia so manda "show" pelo socket e sai. Ver vmipc.py.
+macOS does not let an arbitrary process register a global shortcut, so what
+opens the bar is the launcher (Shortcuts.app / skhd / Raycast) running this
+script again: the second instance only sends "show" over the socket and exits.
+See vmipc.py.
 """
 
 import os
@@ -22,11 +23,11 @@ from vmclient import ApiError, Client
 WIDTH = 680
 ROW_HEIGHT = 46
 MAX_VISIBLE = 9
-# Com 1, a barra nao se esconde ao perder o foco (util pra depurar e pra print).
+# With 1, the bar does not hide when it loses focus (handy for debugging and screenshots).
 NO_AUTOHIDE = os.environ.get("VAULTMARKS_NO_AUTOHIDE") == "1"
 
-# Paleta escura fixa: o Tk nao tem tema do sistema como o GTK, e a barra
-# aparece por cima de qualquer coisa — melhor ter contraste previsivel.
+# Fixed dark palette: Tk has no system theme like GTK, and the bar shows up on
+# top of anything, so predictable contrast is better.
 BG = "#1e1f24"
 BG_SEL = "#2f3540"
 FG = "#e8e9ed"
@@ -51,10 +52,10 @@ class Bar:
         if not daemon:
             self.show()
 
-    # ---------------- construcao ----------------
+    # ---------------- construction ----------------
     def _build(self):
         self.root.configure(bg=BG)
-        # Sem barra de titulo: e uma barra de spotlight, nao uma janela.
+        # No title bar: this is a spotlight bar, not a window.
         self.root.overrideredirect(True)
         self.root.attributes("-topmost", True)
 
@@ -92,9 +93,9 @@ class Bar:
 
         self.root.bind("<FocusOut>", self.on_focus_out)
 
-    # ---------------- janela ----------------
+    # ---------------- window ----------------
     def place(self):
-        """Centraliza horizontalmente, a ~22% do topo da tela."""
+        """Centres horizontally, about 22% from the top of the screen."""
         self.root.update_idletasks()
         sw = self.root.winfo_screenwidth()
         sh = self.root.winfo_screenheight()
@@ -105,8 +106,8 @@ class Bar:
 
     def show(self):
         if not self.client.authenticated:
-            # O YAML de config manda: com token valido ou usuario/senha ali, a
-            # barra entra sozinha na mesma conta que a web usa.
+            # The config YAML rules: with a valid token, or username/password in
+            # it, the bar signs in by itself to the same account the web uses.
             try:
                 self.client.ensure_session()
             except ApiError:
@@ -123,7 +124,7 @@ class Bar:
         self.place()
         self.root.lift()
         self.root.attributes("-topmost", True)
-        # No macOS uma janela overrideredirect nao recebe foco sozinha.
+        # On macOS an overrideredirect window does not take focus by itself.
         self.root.focus_force()
         self.entry.focus_set()
         self.visible = True
@@ -140,7 +141,7 @@ class Bar:
     # ---------------- login ----------------
     def ask_login(self):
         dlg = tk.Toplevel(self.root, bg=BG)
-        dlg.title("Vaultmarks — sign in")
+        dlg.title("Vaultmarks: sign in")
         dlg.attributes("-topmost", True)
         dlg.geometry("380x210")
 
@@ -218,7 +219,7 @@ class Bar:
                 tk.Label(meta, text=label, bg=BADGE.get(kind, BADGE["tag"]), fg=FG,
                          font=self.f_badge, padx=6).pack(side="left", padx=2)
 
-        # Clique tambem seleciona e abre.
+        # A click also selects and opens.
         for widget in (holder, text, *text.winfo_children()):
             widget.bind("<Button-1>", lambda _e, i=index: self.select_and_run(i))
 
@@ -226,7 +227,7 @@ class Bar:
         self.core.select(index)
         self.activate()
 
-    # ---------------- acoes ----------------
+    # ---------------- actions ----------------
     def activate(self, index=None):
         action, payload = self.core.activate(index)
         if action == OPEN:
@@ -289,7 +290,7 @@ class Bar:
 
         def work():
             try:
-                # Conexao SQLite propria: sqlite3 nao e thread-safe entre threads.
+                # Its own SQLite connection: sqlite3 is not thread-safe across threads.
                 applied = Client().sync()
                 self.root.after(0, self.on_synced, applied, None)
             except ApiError as err:
@@ -303,7 +304,7 @@ class Bar:
 
     # ---------------- daemon ----------------
     def serve(self, path):
-        """Escuta o socket para o launcher poder acordar a barra."""
+        """Listens on the socket so the launcher can wake the bar."""
         self.listener = vmipc.Listener(path, lambda msg: self.root.after(0, self.show))
         self.listener.start()
 
@@ -319,7 +320,7 @@ def run(argv):
     daemon = "--daemon" in argv
     path = vmplatform.socket_path()
 
-    # Ja tem daemon? So pede pra ele aparecer e sai — e o caminho rapido.
+    # A daemon already there? Just ask it to show up and exit: the fast path.
     if vmipc.send(path, vmipc.SHOW):
         return 0
 
@@ -327,6 +328,6 @@ def run(argv):
     try:
         bar.serve(path)
     except OSError:
-        pass  # corrida com outro daemon: segue como instancia solta
+        pass  # raced with another daemon: carry on as a loose instance
     bar.run()
     return 0

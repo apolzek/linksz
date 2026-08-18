@@ -2,8 +2,8 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<!-- viewport-fit=cover + safe-area no CSS: sem isso a barra some atras do
-     notch e da barra de gestos do iPhone quando instalado. -->
+<!-- viewport-fit=cover + safe-area in the CSS: without it the bar hides behind
+     the iPhone notch and gesture bar once installed. -->
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Vaultmarks</title>
 <meta name="description" content="Your bookmarks with instant substring search, on mobile and desktop.">
@@ -16,7 +16,7 @@
 <meta name="theme-color" content="#f6f7f9" media="(prefers-color-scheme: light)">
 <meta name="color-scheme" content="dark light">
 
-<!-- iOS ainda nao le tudo do manifest na tela de inicio. -->
+<!-- iOS still does not read everything from the manifest on the home screen. -->
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Vaultmarks">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -32,8 +32,8 @@
     <h1 class="logo">🔖 vaultmarks</h1>
     <p class="sub">your bookmarks, instant search</p>
 
-    <!-- Estado do backend, checado ao abrir a tela: quem esta logando nao
-         deveria ter que adivinhar se o servidor esta de pe. -->
+    <!-- Backend status, checked when the screen opens: whoever is signing in
+         should not have to guess whether the server is up. -->
     <div id="auth-status" class="status checking">
       <span class="dot"></span><span id="auth-status-text">checking the backend…</span>
     </div>
@@ -69,8 +69,9 @@
       <p id="auth-error" class="error" role="alert"></p>
     </form>
 
-    <!-- Servidor fora do ar e o erro mais comum aqui, e "Failed to fetch" nao
-         explica nada: este bloco diz qual endereco falhou e deixa tentar de novo. -->
+    <!-- A server that is down is the most common error here, and "Failed to
+         fetch" explains nothing: this block names the address that failed and
+         offers a retry. -->
     <div id="auth-offline" class="offline hidden">
       <b>The backend is not responding</b>
       <p>Nothing answered at <code id="auth-origin"></code>.</p>
@@ -79,8 +80,9 @@
       <button type="button" id="auth-retry" class="ghost">check again</button>
     </div>
 
-    <!-- So aparece quando o backend anuncia a conta de teste (seed ligado com
-         a senha padrao). Em producao o /api/health nao manda nada e some. -->
+    <!-- Only shown when the backend announces the test account (seed on with
+         the default password). In production /api/health sends nothing and it
+         disappears. -->
     <button type="button" id="auth-demo" class="demo hidden"></button>
   </div>
 </section>
@@ -99,8 +101,8 @@
 
   <div class="layout">
 
-  <!-- Pastas, categorias e tags do vault inteiro: o inverso da busca, para
-       quando voce nao lembra o termo mas lembra onde guardou. -->
+  <!-- Folders, categories and tags of the whole vault: the inverse of search,
+       for when you do not remember the term but remember where you put it. -->
   <aside id="browse" class="browse">
     <div class="browse-head">
       <span>browse</span>
@@ -127,7 +129,7 @@
   </div><!-- /content -->
   </div><!-- /layout -->
 
-  <!-- No celular nao ha teclado: o botao flutuante e como se adiciona. -->
+  <!-- On phones there is no keyboard: the floating button is how you add. -->
   <button id="fab" class="fab" title="New bookmark" aria-label="New bookmark">+</button>
 </main>
 
@@ -188,19 +190,19 @@
         <fieldset class="io-modes">
           <legend>If the bookmark already exists in the vault</legend>
           <label>
-            <input type="radio" name="io-mode" value="adicionar" checked>
+            <input type="radio" name="io-mode" value="add" checked>
             <span><b>Keep what is here</b><em>only adds what is missing</em></span>
           </label>
           <label>
-            <input type="radio" name="io-mode" value="atualizar">
+            <input type="radio" name="io-mode" value="update">
             <span><b>Use the file</b><em>overwrites the existing ones</em></span>
           </label>
           <label>
-            <input type="radio" name="io-mode" value="mais-recente">
+            <input type="radio" name="io-mode" value="newest">
             <span><b>Keep the newest</b><em>last edited wins</em></span>
           </label>
           <label>
-            <input type="radio" name="io-mode" value="substituir">
+            <input type="radio" name="io-mode" value="replace">
             <span><b>Replace everything</b><em>anything not in the file is removed</em></span>
           </label>
         </fieldset>
