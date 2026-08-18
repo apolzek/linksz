@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<!-- viewport-fit=cover + safe-area no CSS: sem isso a barra some atras do
+     notch e da barra de gestos do iPhone quando instalado. -->
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Vaultmarks</title>
+<meta name="description" content="Your bookmarks with instant substring search, on mobile and desktop.">
+
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.webmanifest">
+
+<meta name="theme-color" content="#0f1115" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#f6f7f9" media="(prefers-color-scheme: light)">
+<meta name="color-scheme" content="dark light">
+
+<!-- iOS ainda nao le tudo do manifest na tela de inicio. -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Vaultmarks">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="mobile-web-app-capable" content="yes">
+
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+
+<!-- ---------- LOGIN ---------- -->
+<section id="auth" class="auth hidden">
+  <div class="auth-card">
+    <h1 class="logo">🔖 vaultmarks</h1>
+    <p class="sub">your bookmarks, instant search</p>
+
+    <!-- Estado do backend, checado ao abrir a tela: quem esta logando nao
+         deveria ter que adivinhar se o servidor esta de pe. -->
+    <div id="auth-status" class="status checking">
+      <span class="dot"></span><span id="auth-status-text">checking the backend…</span>
+    </div>
+
+    <div class="tabs">
+      <button class="tab active" data-mode="login">Sign in</button>
+      <button class="tab" data-mode="register">Create account</button>
+    </div>
+
+    <form id="auth-form" autocomplete="on">
+      <label class="field" id="w-login">
+        <span>Username or email</span>
+        <input id="f-login" name="username" placeholder="username" autocomplete="username" required>
+      </label>
+      <label class="field hidden" id="w-email">
+        <span>Email</span>
+        <input id="f-email" name="email" type="email" placeholder="you@example.com" autocomplete="email">
+      </label>
+      <label class="field hidden" id="w-username">
+        <span>Username</span>
+        <input id="f-username" name="new-username" placeholder="lowercase, 2-60 characters" autocomplete="username">
+      </label>
+      <label class="field">
+        <span>Password</span>
+        <span class="pw">
+          <input id="f-password" name="password" type="password" placeholder="••••••" autocomplete="current-password" required>
+          <button type="button" id="pw-toggle" class="pw-eye" title="Show password" aria-label="Show password">👁</button>
+        </span>
+        <em id="pw-hint" class="field-hint hidden">at least 6 characters</em>
+      </label>
+
+      <button type="submit" class="primary" id="auth-submit">Sign in</button>
+      <p id="auth-error" class="error" role="alert"></p>
+    </form>
+
+    <!-- Servidor fora do ar e o erro mais comum aqui, e "Failed to fetch" nao
+         explica nada: este bloco diz qual endereco falhou e deixa tentar de novo. -->
+    <div id="auth-offline" class="offline hidden">
+      <b>The backend is not responding</b>
+      <p>Nothing answered at <code id="auth-origin"></code>.</p>
+      <p class="dim">Start it with <code>systemctl --user start vaultmarks</code> or
+        <code>mise run server</code>. If you opened another port, check the address.</p>
+      <button type="button" id="auth-retry" class="ghost">check again</button>
+    </div>
+
+    <!-- So aparece quando o backend anuncia a conta de teste (seed ligado com
+         a senha padrao). Em producao o /api/health nao manda nada e some. -->
+    <button type="button" id="auth-demo" class="demo hidden"></button>
+  </div>
+</section>
+
+<!-- ---------- APP ---------- -->
+<main id="app" class="hidden">
+  <header class="topbar">
+    <span class="brand">🔖 vaultmarks</span>
+    <div class="spacer"></div>
+    <span id="sync-state" class="sync">synced</span>
+    <button id="btn-browse" class="ghost" title="Folders, categories and tags (b)" aria-expanded="true">☰ browse</button>
+    <button id="btn-io" class="ghost" title="Import and export">⇅ data</button>
+    <button id="btn-new" class="ghost" title="New bookmark (n)">+ new</button>
+    <button id="btn-logout" class="ghost" title="Sign out">sign out</button>
+  </header>
+
+  <div class="layout">
+
+  <!-- Pastas, categorias e tags do vault inteiro: o inverso da busca, para
+       quando voce nao lembra o termo mas lembra onde guardou. -->
+  <aside id="browse" class="browse">
+    <div class="browse-head">
+      <span>browse</span>
+      <button id="browse-clear" class="linkish hidden" title="Clear filters">clear</button>
+    </div>
+    <div id="browse-body"></div>
+  </aside>
+
+  <div class="content">
+  <div class="searchwrap">
+    <div class="searchbar">
+      <span class="icon">⌕</span>
+      <input id="q" placeholder="search…  #tag  @category  /folder  -exclude" autocomplete="off" spellcheck="false" autofocus>
+      <button id="q-clear" class="clear hidden" title="Clear">×</button>
+    </div>
+    <div id="chips" class="chips"></div>
+    <p class="hint"><kbd>↑</kbd><kbd>↓</kbd> move · <kbd>Enter</kbd> open · <kbd>Ctrl</kbd>+<kbd>Enter</kbd> new tab · <kbd>e</kbd> edit · <kbd>Del</kbd> delete · <kbd>b</kbd> browse</p>
+    <p class="hint syntax"><code>#tag</code> <code>@category</code> <code>/folder</code> <code>title:something</code> <code>"exact phrase"</code> <code>-exclude</code></p>
+  </div>
+
+  <p id="count" class="count"></p>
+  <ul id="results" class="results"></ul>
+  <p id="empty" class="empty hidden"></p>
+  </div><!-- /content -->
+  </div><!-- /layout -->
+
+  <!-- No celular nao ha teclado: o botao flutuante e como se adiciona. -->
+  <button id="fab" class="fab" title="New bookmark" aria-label="New bookmark">+</button>
+</main>
+
+<!-- ---------- MODAL ---------- -->
+<div id="modal" class="modal hidden">
+  <form id="bm-form" class="modal-card">
+    <h2 id="modal-title">New bookmark</h2>
+    <label>URL<input id="b-url" placeholder="https://example.com" autocomplete="off"></label>
+    <label>Title<input id="b-title" placeholder="Bookmark name" autocomplete="off"></label>
+    <div class="row">
+      <label>Folder<input id="b-folder" placeholder="dev/linux" autocomplete="off" list="dl-folders"></label>
+      <label>Category<input id="b-category" placeholder="studies" autocomplete="off" list="dl-categories"></label>
+    </div>
+    <label>Tags<input id="b-tags" placeholder="kubernetes, go, cli" autocomplete="off"></label>
+    <label>Description<textarea id="b-description" rows="3" placeholder="what this link is for (optional)"></textarea></label>
+    <datalist id="dl-folders"></datalist>
+    <datalist id="dl-categories"></datalist>
+    <div class="modal-actions">
+      <button type="button" id="bm-delete" class="danger hidden">delete</button>
+      <div class="spacer"></div>
+      <button type="button" id="bm-cancel" class="ghost">cancel</button>
+      <button type="submit" class="primary">save</button>
+    </div>
+    <p id="bm-error" class="error"></p>
+  </form>
+</div>
+
+<!-- ---------- IMPORTAR / EXPORTAR ---------- -->
+<div id="io-modal" class="modal hidden">
+  <div class="modal-card io-card">
+    <h2>Import and export</h2>
+
+    <section class="io-section">
+      <h3>Export</h3>
+      <p class="io-hint">Downloads every bookmark in this vault.</p>
+      <div class="io-buttons">
+        <button type="button" class="ghost" data-export="yaml">YAML</button>
+        <button type="button" class="ghost" data-export="html">Browser HTML</button>
+        <button type="button" class="ghost" data-export="json">JSON</button>
+      </div>
+      <p class="io-hint dim">YAML keeps everything and is editable by hand · HTML is what browsers import</p>
+    </section>
+
+    <section class="io-section">
+      <h3>Import</h3>
+      <p class="io-hint">Takes the YAML from here and the file your browser exports.</p>
+      <label class="io-file">
+        <input type="file" id="io-file" accept=".yaml,.yml,.html,.htm,.json,application/json,text/html">
+        <span class="io-file-btn">choose file…</span>
+        <span class="io-file-name" id="io-filename">no file chosen</span>
+      </label>
+
+      <div id="io-plan" class="hidden">
+        <p class="io-hint io-label">What will happen</p>
+        <ul id="io-summary" class="io-summary"></ul>
+        <p id="io-warn" class="io-warn hidden"></p>
+
+        <fieldset class="io-modes">
+          <legend>If the bookmark already exists in the vault</legend>
+          <label>
+            <input type="radio" name="io-mode" value="adicionar" checked>
+            <span><b>Keep what is here</b><em>only adds what is missing</em></span>
+          </label>
+          <label>
+            <input type="radio" name="io-mode" value="atualizar">
+            <span><b>Use the file</b><em>overwrites the existing ones</em></span>
+          </label>
+          <label>
+            <input type="radio" name="io-mode" value="mais-recente">
+            <span><b>Keep the newest</b><em>last edited wins</em></span>
+          </label>
+          <label>
+            <input type="radio" name="io-mode" value="substituir">
+            <span><b>Replace everything</b><em>anything not in the file is removed</em></span>
+          </label>
+        </fieldset>
+      </div>
+
+      <p id="io-error" class="error"></p>
+    </section>
+
+    <div class="modal-actions">
+      <div class="spacer"></div>
+      <button type="button" id="io-close" class="ghost">close</button>
+      <button type="button" id="io-apply" class="primary" disabled>import</button>
+    </div>
+  </div>
+</div>
+
+<script src="/search.js"></script>
+<script src="/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,420 @@
+:root {
+  --bg: #0f1115;
+  --panel: #171a21;
+  --panel-2: #1e222b;
+  --line: #2a2f3a;
+  --text: #e6e9ef;
+  --muted: #8b93a7;
+  --accent: #6ea8fe;
+  --accent-soft: rgba(110, 168, 254, .14);
+  --danger: #ff6b6b;
+  --radius: 0;
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg: #f6f7f9;
+    --panel: #ffffff;
+    --panel-2: #f0f2f6;
+    --line: #dfe3ea;
+    --text: #14171d;
+    --muted: #666f81;
+    --accent: #2563eb;
+    --accent-soft: rgba(37, 99, 235, .10);
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+.hidden { display: none !important; }
+.spacer { flex: 1; }
+
+/* ---------- login ---------- */
+.auth { min-height: 100vh; display: grid; place-items: center; padding: 24px; }
+.auth-card { width: 100%; max-width: 360px; background: var(--panel); border: 1px solid var(--line); border-radius: 0; padding: 28px; }
+.logo { margin: 0; font-size: 24px; letter-spacing: -.02em; }
+.sub { margin: 4px 0 20px; color: var(--muted); font-size: 13px; }
+.tabs { display: flex; gap: 4px; background: var(--panel-2); padding: 4px; border-radius: 0; margin-bottom: 16px; }
+.tab { flex: 1; padding: 8px; border: 0; border-radius: 0; background: transparent; color: var(--muted); font: inherit; font-size: 14px; cursor: pointer; }
+.tab.active { background: var(--panel); color: var(--text); box-shadow: 0 1px 3px rgba(0,0,0,.2); }
+/* Semaforo do backend: cor + texto, porque so a cor nao serve para daltonico. */
+.status {
+  display: flex; align-items: center; gap: 7px;
+  margin: 0 0 16px; padding: 7px 11px; border-radius: 0;
+  font-size: 12.5px; background: var(--panel-2); border: 1px solid var(--line);
+  color: var(--muted); overflow-wrap: anywhere;
+}
+.status .dot { flex: none; width: 7px; height: 7px; background: var(--muted); }
+.status.up { color: #4fbf7b; border-color: rgba(79,191,123,.35); }
+.status.up .dot { background: #4fbf7b; }
+.status.down { color: var(--danger); border-color: rgba(255,107,107,.4); }
+.status.down .dot { background: var(--danger); }
+.status.checking .dot { animation: pulse 1s ease-in-out infinite; }
+@keyframes pulse { 50% { opacity: .25; } }
+
+#auth-form { display: flex; flex-direction: column; gap: 12px; }
+.field { display: flex; flex-direction: column; gap: 5px; }
+.field > span { font-size: 12.5px; color: var(--muted); }
+.field-hint { font-style: normal; font-size: 11.5px; color: var(--muted); opacity: .8; }
+
+/* Campo de senha com o olho por cima, sem empurrar o layout. */
+.pw { position: relative; display: block; }
+.pw-eye {
+  position: absolute; right: 6px; top: 50%; transform: translateY(-50%);
+  background: transparent; border: 0; padding: 4px 6px; font-size: 14px;
+  opacity: .5; line-height: 1;
+}
+.pw-eye:hover, .pw-eye.on { opacity: 1; }
+.pw input { padding-right: 38px; }
+
+.offline {
+  margin-top: 14px; padding: 12px 14px; border-radius: 0;
+  background: var(--panel-2); border: 1px solid var(--danger);
+  font-size: 12.5px; color: var(--muted);
+}
+.offline b { display: block; color: var(--danger); font-size: 13px; margin-bottom: 4px; }
+.offline p { margin: 0 0 6px; }
+.offline p.dim { opacity: .8; }
+.offline code {
+  background: var(--panel); border: 1px solid var(--line); border-radius: 0;
+  padding: 1px 5px; font: 11.5px ui-monospace, monospace; color: var(--text);
+  overflow-wrap: anywhere;
+}
+.offline .ghost { margin-top: 4px; padding: 6px 12px; font-size: 12.5px; }
+
+.demo {
+  width: 100%; margin-top: 14px; padding: 9px 12px;
+  background: transparent; border: 1px dashed var(--line); color: var(--muted);
+  font-size: 12.5px; border-radius: 0;
+}
+.demo:hover { border-color: var(--accent); color: var(--accent); border-style: solid; }
+
+input, textarea, button { font: inherit; }
+
+input, textarea {
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  color: var(--text);
+  padding: 10px 12px;
+  border-radius: 0;
+  outline: none;
+  width: 100%;
+}
+input:focus, textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+
+button { cursor: pointer; border-radius: 0; border: 1px solid transparent; padding: 9px 14px; }
+.primary { background: var(--accent); color: #fff; font-weight: 600; }
+.primary:hover { filter: brightness(1.08); }
+.ghost { background: transparent; color: var(--muted); border-color: var(--line); }
+.ghost:hover { color: var(--text); border-color: var(--accent); }
+.danger { background: transparent; color: var(--danger); border-color: var(--danger); }
+.danger:hover { background: var(--danger); color: #fff; }
+.error { color: var(--danger); font-size: 13px; min-height: 18px; margin: 4px 0 0; }
+
+/* ---------- topbar ---------- */
+.topbar { display: flex; align-items: center; gap: 10px; padding: 12px 20px; border-bottom: 1px solid var(--line); }
+.brand { font-weight: 600; letter-spacing: -.01em; }
+.sync { font-size: 12px; color: var(--muted); }
+.sync.saving { color: var(--accent); }
+.sync.err { color: var(--danger); }
+
+/* ---------- layout ---------- */
+.layout { display: flex; gap: 8px; max-width: 1060px; margin: 0 auto; align-items: flex-start; }
+.content { flex: 1; min-width: 0; }
+
+/* ---------- painel de pastas/categorias/tags ---------- */
+.browse {
+  flex: none; width: 232px; position: sticky; top: 12px;
+  max-height: calc(100vh - 24px); overflow-y: auto;
+  padding: 30px 4px 20px 16px;
+}
+.browse.off { display: none; }
+.browse-head {
+  display: flex; align-items: baseline; gap: 8px;
+  font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted);
+  padding: 0 6px 6px;
+}
+.linkish { background: transparent; border: 0; color: var(--accent); font-size: 12px; padding: 0; text-transform: none; letter-spacing: 0; }
+.facet { margin-bottom: 18px; }
+.facet h3 { margin: 0 0 6px; padding: 0 6px; font-size: 12.5px; font-weight: 600; color: var(--muted); }
+.facet-empty { margin: 0 0 4px; padding: 0 6px; font-size: 12px; color: var(--muted); opacity: .7; }
+.facet-row {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  background: transparent; border: 1px solid transparent; color: var(--text);
+  padding: 5px 8px; border-radius: 0; font-size: 13px; text-align: left;
+}
+.facet-row:hover { background: var(--panel); }
+.facet-row.on { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+.facet-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.facet-count { flex: none; font-size: 11.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.facet-row.on .facet-count { color: inherit; }
+
+/* Arvore de pastas: indentacao por --nivel, seta so em quem tem filho. */
+.tree-row { display: flex; align-items: center; gap: 2px; padding-left: calc(var(--nivel, 0) * 13px); }
+.tree-toggle {
+  flex: none; width: 16px; padding: 0; background: transparent; border: 0;
+  color: var(--muted); font-size: 10px; line-height: 1; border-radius: 0;
+}
+.tree-toggle:hover { color: var(--text); }
+.tree-toggle.vazio { visibility: hidden; }
+.tree-item { min-width: 0; }
+
+/* Mini busca de cada secao do painel. */
+.facet-search { padding: 0 6px 6px; }
+.facet-search input {
+  padding: 5px 9px; font-size: 12.5px; border-radius: 0;
+  background: var(--bg); border: 1px solid var(--line);
+}
+.facet-search input::-webkit-search-cancel-button { cursor: pointer; }
+
+/* ---------- busca ---------- */
+.searchwrap { max-width: 720px; margin: 0 auto; padding: 34px 20px 8px; }
+.searchbar {
+  display: flex; align-items: center; gap: 10px;
+  background: var(--panel); border: 1px solid var(--line);
+  border-radius: 0; padding: 4px 16px;
+  box-shadow: 0 2px 10px rgba(0,0,0,.12);
+  transition: border-color .12s, box-shadow .12s;
+}
+.searchbar:focus-within { border-color: var(--accent); box-shadow: 0 0 0 4px var(--accent-soft); }
+.searchbar .icon { color: var(--muted); font-size: 20px; }
+#q { border: 0; background: transparent; padding: 12px 0; font-size: 17px; }
+#q:focus { box-shadow: none; }
+.clear { background: transparent; color: var(--muted); border: 0; font-size: 22px; line-height: 1; padding: 0 4px; }
+
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+.chip {
+  background: var(--panel-2); border: 1px solid var(--line); color: var(--muted);
+  border-radius: 0; padding: 4px 11px; font-size: 12.5px;
+}
+.chip:hover { color: var(--accent); border-color: var(--accent); }
+.chip.on { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+
+.hint { text-align: center; color: var(--muted); font-size: 12px; margin: 14px 0 0; }
+.hint.syntax { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; margin-top: 8px; }
+.hint.syntax code {
+  background: var(--panel-2); border: 1px solid var(--line); border-radius: 0;
+  padding: 1px 6px; font: 11px ui-monospace, monospace;
+}
+kbd { background: var(--panel-2); border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 0; padding: 1px 5px; font: 11px ui-monospace, monospace; margin: 0 1px; }
+
+/* ---------- resultados ---------- */
+.count { max-width: 720px; margin: 18px auto 0; padding: 0 22px; font-size: 12px; color: var(--muted); }
+.results { list-style: none; max-width: 720px; margin: 6px auto 60px; padding: 0 20px; }
+.item {
+  display: flex; align-items: center; gap: 12px;
+  padding: 11px 14px; border: 1px solid transparent; border-radius: 0;
+  cursor: pointer;
+}
+.item:hover { background: var(--panel); }
+.item.sel { background: var(--panel); border-color: var(--accent); }
+.favicon { width: 18px; height: 18px; flex: none; border-radius: 0; }
+.item-main { min-width: 0; flex: 1; }
+.item-title { font-weight: 550; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.item-url { color: var(--muted); font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.item-meta { display: flex; gap: 6px; flex: none; align-items: center; }
+.badge { font-size: 11.5px; padding: 2px 8px; border-radius: 0; border: 1px solid var(--line); color: var(--muted); white-space: nowrap; }
+.badge.cat { color: #f0b86e; border-color: rgba(240,184,110,.35); }
+.badge.tag { color: var(--accent); border-color: rgba(110,168,254,.35); }
+.badge.folder { color: #7ee0a1; border-color: rgba(126,224,161,.35); }
+.item-actions { display: flex; gap: 2px; flex: none; margin-left: 2px; }
+.icon-btn {
+  background: transparent; border: 0; color: var(--muted);
+  padding: 4px 6px; border-radius: 0; font-size: 13px; line-height: 1;
+  opacity: 0; transition: opacity .1s;
+}
+.item:hover .icon-btn, .item.sel .icon-btn, .icon-btn:focus-visible { opacity: 1; }
+.icon-btn:hover { background: var(--panel-2); color: var(--text); }
+/* Sem hover no touch, os botoes ficariam invisiveis para sempre. */
+@media (hover: none) { .icon-btn { opacity: 1; } }
+
+mark { background: var(--accent-soft); color: inherit; border-radius: 0; padding: 0 1px; }
+.empty { text-align: center; color: var(--muted); margin-top: 40px; }
+
+/* ---------- modal ---------- */
+.modal { position: fixed; inset: 0; background: rgba(0,0,0,.55); display: grid; place-items: center; padding: 20px; z-index: 10; }
+.modal-card { width: 100%; max-width: 440px; background: var(--panel); border: 1px solid var(--line); border-radius: 0; padding: 22px; display: flex; flex-direction: column; gap: 12px; max-height: 90vh; overflow: auto; }
+.modal-card h2 { margin: 0 0 4px; font-size: 17px; }
+.modal-card label { display: flex; flex-direction: column; gap: 5px; font-size: 12.5px; color: var(--muted); }
+.row { display: flex; gap: 12px; }
+.row label { flex: 1; }
+.modal-actions { display: flex; gap: 8px; align-items: center; margin-top: 4px; }
+textarea { resize: vertical; }
+
+/* ---------- importar / exportar ---------- */
+.io-card { max-width: 520px; gap: 0; }
+.io-section { border-top: 1px solid var(--line); padding: 16px 0 4px; }
+.io-section:first-of-type { border-top: 0; padding-top: 4px; }
+.io-section h3 { margin: 0 0 4px; font-size: 14px; }
+.io-hint { margin: 0 0 10px; font-size: 12.5px; color: var(--muted); }
+.io-hint.dim { margin-top: 10px; opacity: .75; }
+.io-buttons { display: flex; gap: 8px; flex-wrap: wrap; }
+
+/* O seletor nativo tem rotulo em ingles e nao estiliza; escondo e uso o label. */
+.io-file {
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center; gap: 10px;
+  padding: 9px 10px; cursor: pointer;
+  background: var(--panel-2); border: 1px dashed var(--line); border-radius: 0;
+}
+.io-file input { display: none; }
+.io-file-btn {
+  flex: none; padding: 5px 11px; font-size: 12.5px;
+  background: var(--panel); color: var(--text);
+  border: 1px solid var(--line); border-radius: 0;
+}
+.io-file:hover .io-file-btn { border-color: var(--accent); color: var(--accent); }
+.io-file-name {
+  font-size: 12.5px; color: var(--muted);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+.io-label { margin: 14px 0 6px; font-weight: 600; color: var(--text); font-size: 12.5px; }
+
+.io-modes { border: 0; margin: 14px 0 4px; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+.io-modes legend { padding: 0 0 6px; font-size: 12.5px; color: var(--muted); }
+/* flex-direction explicito: .modal-card label empilha por padrao. */
+.io-modes label {
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: baseline; gap: 9px;
+  padding: 6px 9px; border-radius: 0; cursor: pointer;
+  border: 1px solid transparent;
+}
+.io-modes label:hover { background: var(--panel-2); }
+.io-modes label:has(input:checked) { background: var(--accent-soft); border-color: var(--accent); }
+.io-modes input { width: auto; margin: 0; flex: none; accent-color: var(--accent); }
+.io-modes span { display: block; min-width: 0; }
+.io-modes b { font-size: 13px; font-weight: 600; color: var(--text); }
+.io-modes em { font-style: normal; font-size: 11.5px; color: var(--muted); }
+.io-modes em::before { content: ' — '; }
+
+.io-summary { list-style: none; margin: 4px 0 0; padding: 0; display: flex; flex-direction: column; gap: 5px; }
+.io-line {
+  font-size: 12.5px; padding: 6px 10px; border-radius: 0;
+  background: var(--panel-2); border-left: 3px solid var(--line);
+}
+.io-line b { font-size: 13px; }
+.io-line em {
+  display: block; font-style: normal; font-size: 11px; color: var(--muted);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.io-criar { border-left-color: #7ee0a1; }
+.io-atualizar { border-left-color: var(--accent); }
+.io-remover { border-left-color: var(--danger); }
+
+.io-warn {
+  margin: 10px 0 0; padding: 9px 11px; border-radius: 0; font-size: 12.5px;
+  background: rgba(255, 107, 107, .12); border: 1px solid rgba(255, 107, 107, .35);
+  color: var(--danger);
+}
+
+/* ---------- botao flutuante (celular) ---------- */
+.fab {
+  position: fixed;
+  right: max(18px, env(safe-area-inset-right));
+  bottom: calc(18px + env(safe-area-inset-bottom));
+  width: 56px; height: 56px;
+  border-radius: 0;
+  background: var(--accent); color: #fff;
+  font-size: 30px; line-height: 1; padding: 0;
+  border: 0;
+  box-shadow: 0 6px 20px rgba(0,0,0,.35);
+  display: none;               /* so aparece no layout de celular */
+  z-index: 5;
+}
+.fab:active { filter: brightness(.92); }
+
+/* ---------- celular ---------- */
+/* Estreito demais para uma coluna lateral: o painel vira uma faixa de pills
+   acima dos resultados, sem empurrar a busca para fora da tela. */
+@media (max-width: 900px) {
+  .layout { flex-direction: column; gap: 0; }
+  .browse {
+    width: 100%; position: static; max-height: none;
+    padding: 14px 18px 0; order: 2;
+  }
+  .content { order: 1; width: 100%; }
+  .facet { margin-bottom: 12px; }
+  .facet h3 { padding: 0; }
+  .facet-row {
+    display: inline-flex; width: auto; margin: 0 5px 5px 0;
+    border-color: var(--line); background: var(--panel-2); border-radius: 0;
+    padding: 4px 11px; font-size: 12.5px;
+  }
+  .facet-name { max-width: 40vw; }
+}
+
+@media (max-width: 640px) {
+  /* Sem teclado fisico, as dicas de atalho so ocupam espaco. */
+  .hint:not(.syntax) { display: none; }
+  .fab { display: block; }
+  #btn-new { display: none; }
+  /* Espaco curto na topbar: o rotulo sai, o icone fica. */
+  #btn-io { font-size: 0; padding: 9px 11px; }
+  #btn-io::before { content: '⇅'; font-size: 15px; }
+
+  /* dvh acompanha a barra de endereco recolhendo; vh nao. */
+  .auth { min-height: 100dvh; }
+
+  .topbar {
+    padding: 10px 14px;
+    padding-top: calc(10px + env(safe-area-inset-top));
+    position: sticky; top: 0; z-index: 4;
+    background: var(--bg);
+  }
+
+  .searchwrap { padding: 14px 14px 4px; }
+  .searchbar { position: sticky; top: 0; }
+  /* Abaixo de 16px o iOS da zoom no campo ao focar. */
+  #q { font-size: 16px; }
+
+  .results { padding: 0 10px; margin-bottom: 20px; }
+  .count { padding: 0 12px; margin-top: 12px; }
+  .browse { padding: 10px 12px calc(90px + env(safe-area-inset-bottom)); }
+  #btn-browse { font-size: 0; padding: 9px 11px; }
+  #btn-browse::before { content: '☰'; font-size: 15px; }
+
+  .item {
+    align-items: flex-start;
+    padding: 12px;
+    min-height: 44px;          /* alvo de toque confortavel */
+    flex-wrap: wrap;
+  }
+  .item-meta { width: 100%; flex-wrap: wrap; margin-top: 6px; }
+  .item-title { white-space: normal; }
+  .item-url { white-space: nowrap; }
+
+  .chips { overflow-x: auto; flex-wrap: nowrap; padding-bottom: 4px; -webkit-overflow-scrolling: touch; }
+  .chip { flex: none; }
+
+  /* Uma faixa rolavel em vez de duas linhas empilhadas. */
+  .hint.syntax {
+    overflow-x: auto; flex-wrap: nowrap; justify-content: flex-start;
+    padding-bottom: 4px; -webkit-overflow-scrolling: touch;
+  }
+  .hint.syntax code { flex: none; }
+
+  /* Modal vira folha subindo de baixo — mais natural no toque. */
+  .modal { place-items: end center; padding: 0; }
+  .modal-card {
+    max-width: none; border-radius: 0;
+    max-height: 92dvh;
+    padding-bottom: calc(22px + env(safe-area-inset-bottom));
+  }
+  .row { flex-direction: column; gap: 12px; }
+}
+
+/* Instalado como app: nao ha barra do navegador, entao o topo sobe. */
+@media (display-mode: standalone) {
+  .topbar { padding-top: calc(12px + env(safe-area-inset-top)); }
+}

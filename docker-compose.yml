@@ -1,0 +1,59 @@
+# Vaultmarks para o celular.
+#
+#   1. descubra o IP desta maquina na rede:  ip route get 1 | awk '{print $7; exit}'
+#   2. VAULTMARKS_SITE=192.168.0.10 docker compose up -d
+#   3. no celular, abra http://192.168.0.10/root.crt e instale o certificado
+#   4. abra https://192.168.0.10 e use "Adicionar a tela de inicio"
+#
+# Sem o passo 3 o navegador do celular recusa o HTTPS e a PWA nao instala.
+# Detalhes de cada plataforma estao no README.
+
+services:
+  vaultmarks:
+    build: .
+    image: vaultmarks:local
+    restart: unless-stopped
+    environment:
+      VAULTMARKS_HOST: 0.0.0.0
+      VAULTMARKS_PORT: "8787"
+      VAULTMARKS_DB: /data/vault.db
+      # Conta de teste criada a cada boot (padrao: teste / teste123).
+      # A stack aqui fica exposta na rede local — troque a senha, ou desligue
+      # com VAULTMARKS_SEED=0, antes de deixar isso de pe.
+      VAULTMARKS_SEED_PASSWORD: ${VAULTMARKS_SEED_PASSWORD:-teste123}
+    volumes:
+      - vault-data:/data
+    # Sem ports: quem fala com a rede e o Caddy. Para acessar o backend direto
+    # (debug), descomente:
+    # ports:
+    #   - "8787:8787"
+    networks:
+      - vaultmarks
+
+  caddy:
+    build: ./caddy          # o Caddyfile vai embutido — veja caddy/Dockerfile
+    image: vaultmarks-caddy:local
+    restart: unless-stopped
+    depends_on:
+      vaultmarks:
+        condition: service_healthy
+    environment:
+      # Hostname ou IP pelo qual voce acessa. O certificado e emitido para ele.
+      VAULTMARKS_SITE: ${VAULTMARKS_SITE:-vaultmarks.local}
+    ports:
+      - "${VAULTMARKS_HTTP_PORT:-80}:80"
+      - "${VAULTMARKS_HTTPS_PORT:-443}:443"
+    volumes:
+      - caddy-data:/data       # guarda a CA: apagar aqui = recertificar tudo
+      - caddy-config:/config
+    networks:
+      - vaultmarks
+
+volumes:
+  vault-data:
+  caddy-data:
+  caddy-config:
+
+networks:
+  vaultmarks:
+    driver: bridge
