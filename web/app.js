@@ -899,8 +899,8 @@ document.querySelectorAll('input[name="io-mode"]').forEach((r) => {
 $('#io-apply').onclick = async () => {
   const btn = $('#io-apply');
   btn.disabled = true;
-  btn.textContent = 'importando…';
-  setSync('importando…', 'saving');
+  btn.textContent = 'importing…';
+  setSync('importing…', 'saving');
   try {
     const r = await requestPlan({ apply: true });
     await loadAll();
