@@ -375,8 +375,8 @@ select.ghost option { background: var(--panel); color: var(--text); }
    section lights up as a whole, which is also what says the drop will land
    there and not on the row under the pointer. */
 .facet-folders.drop-into {
-  outline: 1px dashed var(--accent); outline-offset: 2px;
-  background: color-mix(in srgb, var(--accent) 5%, transparent);
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
+  box-shadow: inset 2px 0 0 var(--accent);
 }
 .facet-folders.drop-into > .facet-head .facet-toggle { color: var(--accent); }
 /* Room under the last folder, so "empty space" is a real place to aim at. */
