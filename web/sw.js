@@ -12,7 +12,7 @@
 'use strict';
 
 // Bump this version whenever a shell file changes.
-const VERSION = 'v2';
+const VERSION = 'v3';
 const SHELL_CACHE = `vaultmarks-shell-${VERSION}`;
 
 const SHELL = [

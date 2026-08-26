@@ -191,7 +191,7 @@ function createApp(dbPath) {
     'GET /api/bookmarks': async (req, res, user, url) => {
       const all = q.allBookmarks.all(user.id);
       const query = url.searchParams.get('q') || '';
-      const limit = Math.min(Number(url.searchParams.get('limit')) || 200, 500);
+      const limit = Math.min(Number(url.searchParams.get('limit')) || 200, 5000);
       const items = query.trim() ? search(all, query, limit) : all.slice(0, limit);
       return json(res, 200, { items, total: all.length });
     },

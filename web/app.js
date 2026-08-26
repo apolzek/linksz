@@ -178,7 +178,7 @@ $('#btn-logout').onclick = async () => {
 
 /* ---------------- data ---------------- */
 async function loadAll() {
-  const r = await api('/api/bookmarks?limit=500');
+  const r = await api('/api/bookmarks?limit=5000');
   state.items = r.items;
   state.lastSync = Date.now();
   refreshDatalists();
