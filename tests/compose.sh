@@ -81,7 +81,7 @@ st=\$(curl -s \$R -o /dev/null -w '%{http_code}' http://$SITE/)
 # 5. manifest type: wrong here and the browser never offers to install
 ct=\$(\$C -o /dev/null -w '%{content_type}' https://$SITE/manifest.webmanifest)
 case \"\$ct\" in
-  application/manifest+json*) echo 'PASS content-type do manifest' ;;
+  application/manifest+json*) echo 'PASS manifest content-type' ;;
   *) echo \"FAIL manifest content-type (\$ct)\" ;;
 esac
 

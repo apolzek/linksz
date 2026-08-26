@@ -136,7 +136,7 @@ test('special characters are literal, not regex', () => {
   assert.deepEqual(t('['), []);
 });
 
-/* ---------------- busca por campo ---------------- */
+/* ---------------- search by field ---------------- */
 
 test('#tag searches tags only', () => {
   assert.deepEqual(sorted('#devops'), ['Grafana', 'Kubernetes Docs']);

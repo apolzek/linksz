@@ -146,8 +146,8 @@ test('a folder: line on an entry wins over the key it sits under', () => {
 });
 
 test('a key that does not exist yet simply becomes a folder', () => {
-  const { items } = p.parseImport('folders:\n  pasta/nova/em/folha:\n  - title: Novo\n    url: https://novo.example\n');
-  assert.equal(items[0].folder, 'pasta/nova/em/folha');
+  const { items } = p.parseImport('folders:\n  brand/new/deep/path:\n  - title: New\n    url: https://new.example\n');
+  assert.equal(items[0].folder, 'brand/new/deep/path');
 });
 
 test('the root can be written as / or as unfiled', () => {

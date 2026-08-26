@@ -164,7 +164,7 @@ test('editing a missing id gives 404', async () => {
   assert.equal((await call('DELETE', '/api/bookmarks/does-not-exist', { token })).status, 404);
 });
 
-/* ---------------- busca via API ---------------- */
+/* ---------------- search over the API ---------------- */
 
 async function q(query) {
   const r = await call('GET', `/api/bookmarks?q=${encodeURIComponent(query)}`, { token });
@@ -673,7 +673,7 @@ async function makeIn(folder, title) {
 test('moving a folder takes everything under it', async () => {
   const rust = await makeIn('rust', 'rust raiz');
   const nested = await makeIn('rust/async', 'rust async');
-  const other = await makeIn('rustico', 'nao e a mesma pasta');
+  const other = await makeIn('rustico', 'a different folder');
 
   const r = await call('POST', '/api/folders/move', { token, body: { from: 'rust', to: 'programming' } });
   assert.equal(r.status, 200);
@@ -702,7 +702,7 @@ test('moving to the root pulls the folder out', async () => {
 });
 
 test('moving an empty folder changes nothing and does not fail', async () => {
-  const r = await call('POST', '/api/folders/move', { token, body: { from: 'pasta-vazia', to: 'destino' } });
+  const r = await call('POST', '/api/folders/move', { token, body: { from: 'empty-folder', to: 'somewhere' } });
   assert.equal(r.status, 200);
   assert.equal(r.body.moved, 0);
 });

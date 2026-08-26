@@ -891,7 +891,7 @@ function wireFolderDrag(row, path) {
   row.onpointercancel = () => { if (drag.row === row) endDrag(false); };
 }
 
-function treeRows(level, depth, destino, filter) {
+function treeRows(level, depth, into, filter) {
   for (const node of [...level.values()].sort((a, b) => (b.total - a.total) || a.name.localeCompare(b.name))) {
     // A node stays visible when it matches the filter, or when a descendant does.
     const selfMatch = !filter || BookmarksSearch.norm(node.name).includes(filter);
@@ -903,9 +903,9 @@ function treeRows(level, depth, destino, filter) {
     const token = '/' + node.path;
     const isOpen = !state.closedFolders.has(node.path);
 
-    const linha = document.createElement('div');
-    linha.className = 'tree-row';
-    linha.style.setProperty('--level', depth);
+    const row = document.createElement('div');
+    row.className = 'tree-row';
+    row.style.setProperty('--level', depth);
 
     if (node.children.size) {
       const arrow = document.createElement('button');
@@ -918,11 +918,11 @@ function treeRows(level, depth, destino, filter) {
         saveClosedFolders();
         renderBrowse();
       };
-      linha.append(arrow);
+      row.append(arrow);
     } else {
       const emptyText = document.createElement('span');
       emptyText.className = 'tree-toggle emptyText';
-      linha.append(emptyText);
+      row.append(emptyText);
     }
 
     // A <div role="button">, not a <button>: Chrome refuses to start a drag on a
@@ -946,13 +946,13 @@ function treeRows(level, depth, destino, filter) {
       toggleToken(token);
     };
     b.title = '/' + node.path;
-    linha.append(b);
-    wireFolderDrag(linha, node.path);
+    row.append(b);
+    wireFolderDrag(row, node.path);
 
-    branch.append(linha);
+    branch.append(row);
     // With a filter on, collapsing the branch would hide exactly what matched.
     if (isOpen || filter) branch.append(children);
-    destino.append(branch);
+    into.append(branch);
   }
 }
 
@@ -1021,7 +1021,7 @@ function treeSection(root, total, filter) {
 
 // A filter over the list itself: it does not touch the bookmark search, it only
 // shortens the panel when there are too many categories/tags to scan by eye.
-function filterField(id, placeholder, aoMudar) {
+function filterField(id, placeholder, onChange) {
   const wrap = document.createElement('div');
   wrap.className = 'facet-search';
   const input = document.createElement('input');
@@ -1030,7 +1030,7 @@ function filterField(id, placeholder, aoMudar) {
   input.placeholder = placeholder;
   input.autocomplete = 'off';
   input.value = state.panelFilter[id] || '';
-  input.oninput = () => { state.panelFilter[id] = input.value; aoMudar(); };
+  input.oninput = () => { state.panelFilter[id] = input.value; onChange(); };
   wrap.append(input);
   return wrap;
 }

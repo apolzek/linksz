@@ -89,7 +89,7 @@ class TestSubstringSearch(unittest.TestCase):
         self.assertEqual(t("kubernetes.io/docs"), ["Kubernetes Docs"])
 
 
-class TestBuscaPorCampo(unittest.TestCase):
+class TestFieldSearch(unittest.TestCase):
     def test_tag(self):
         self.assertEqual(sorted(t("#devops")), ["Grafana", "Kubernetes Docs"])
         self.assertEqual(t("#k8s"), ["Kubernetes Docs"])
@@ -117,11 +117,11 @@ class TestBuscaPorCampo(unittest.TestCase):
         self.assertEqual(parse_query("https://go.dev")[0].field, "any")
 
 
-class TestBuscaFrasesENegacao(unittest.TestCase):
+class TestPhrasesAndNegation(unittest.TestCase):
     def test_quoted_phrase(self):
         self.assertEqual(t('"hacker news"'), ["Hacker News"])
         self.assertEqual(t('"news hacker"'), [], "ordem importa dentro da frase")
-        self.assertEqual(t("hacker news"), ["Hacker News"], "sem aspas sao dois termos com AND")
+        self.assertEqual(t("hacker news"), ["Hacker News"], "without quotes those are two terms joined by AND")
         self.assertEqual(t('title:"go blog"'), ["The Go Blog"])
 
     def test_single_quotes_count_too(self):
@@ -171,7 +171,7 @@ class TestRanking(unittest.TestCase):
         self.assertEqual(len(search(itens, "igual")), 3)
 
 
-class TestParserEBordas(unittest.TestCase):
+class TestParserAndEdges(unittest.TestCase):
     def test_tokenize(self):
         self.assertEqual(tokenize("a b  c"), ["a", "b", "c"])
         self.assertEqual(tokenize('"duas words" solta'), ['"duas words"', "solta"])
@@ -257,7 +257,7 @@ class TestParityWithJS(unittest.TestCase):
         expected = self.run_js(FIXTURES, self.QUERIES)
         for query, js_ids in zip(self.QUERIES, expected):
             py_ids = [b["id"] for b in search(FIXTURES, query, 50)]
-            self.assertEqual(py_ids, js_ids, f"divergencia na query {query!r}")
+            self.assertEqual(py_ids, js_ids, f"the two engines disagree on {query!r}")
 
     def test_fuzz(self):
         """Generates random queries and vaults: catches what the fixed list misses."""
@@ -293,10 +293,10 @@ class TestParityWithJS(unittest.TestCase):
         expected = self.run_js(vault, queries)
         for query, js_ids in zip(queries, expected):
             py_ids = [b["id"] for b in search(vault, query, 50)]
-            self.assertEqual(py_ids, js_ids, f"divergencia na query {query!r}")
+            self.assertEqual(py_ids, js_ids, f"the two engines disagree on {query!r}")
 
 
-class TestRankingDeUso(unittest.TestCase):
+class TestUsageRanking(unittest.TestCase):
     """The Python side of the usage ranking. The JS twin is in search.test.js."""
 
     RANKED = [
@@ -337,7 +337,7 @@ class TestRankingDeUso(unittest.TestCase):
             self.assertEqual(self.ids(items, "x"), ["a", "b"], f"opens = {opens!r}")
 
 
-class TestNormalizacao(unittest.TestCase):
+class TestNormalization(unittest.TestCase):
     def test_normalize_tags(self):
         self.assertEqual(normalize_tags("#Go, #CLI  kubernetes"), "go,cli,kubernetes")
         self.assertEqual(normalize_tags(["#a", "A", "b"]), "a,b")
@@ -401,13 +401,13 @@ class TestPlatform(unittest.TestCase):
                 self.assertEqual(bookmarks_platform.available_toolkits()[0], "tk")
 
 
-class TestIPCInstanciaUnica(unittest.TestCase):
+class TestSingleInstanceIPC(unittest.TestCase):
     """The global shortcut runs the script again; it only wakes the daemon."""
 
     def setUp(self):
         self.dir = tempfile.mkdtemp(prefix="bookmarks-ipc-")
         self.path = os.path.join(self.dir, "bar.sock")
-        self.recebidas = []
+        self.received = []
 
     def tearDown(self):
         shutil.rmtree(self.dir, ignore_errors=True)
@@ -417,47 +417,47 @@ class TestIPCInstanciaUnica(unittest.TestCase):
         self.assertFalse(bookmarks_ipc.is_running(self.path))
 
     def test_daemon_receives_messages(self):
-        listener = bookmarks_ipc.Listener(self.path, self.recebidas.append).start()
+        listener = bookmarks_ipc.Listener(self.path, self.received.append).start()
         try:
             self.assertTrue(bookmarks_ipc.is_running(self.path))
             self.assertTrue(bookmarks_ipc.send(self.path, bookmarks_ipc.SHOW))
             self.assertTrue(bookmarks_ipc.send(self.path, bookmarks_ipc.SHOW))
             for _ in range(50):
-                if len(self.recebidas) >= 2:
+                if len(self.received) >= 2:
                     break
                 time.sleep(0.02)
-            self.assertEqual(self.recebidas, [bookmarks_ipc.SHOW, bookmarks_ipc.SHOW])
+            self.assertEqual(self.received, [bookmarks_ipc.SHOW, bookmarks_ipc.SHOW])
         finally:
             listener.close()
 
     def test_ping_does_not_become_a_message(self):
-        listener = bookmarks_ipc.Listener(self.path, self.recebidas.append).start()
+        listener = bookmarks_ipc.Listener(self.path, self.received.append).start()
         try:
             bookmarks_ipc.is_running(self.path)
             time.sleep(0.15)
-            self.assertEqual(self.recebidas, [], "ping so checa se esta vivo")
+            self.assertEqual(self.received, [], "ping only asks whether it is alive")
         finally:
             listener.close()
 
     def test_two_daemons_do_not_coexist(self):
-        listener = bookmarks_ipc.Listener(self.path, self.recebidas.append).start()
+        listener = bookmarks_ipc.Listener(self.path, self.received.append).start()
         try:
             with self.assertRaises(OSError):
-                bookmarks_ipc.Listener(self.path, self.recebidas.append).start()
+                bookmarks_ipc.Listener(self.path, self.received.append).start()
         finally:
             listener.close()
 
     def test_orphan_socket_is_taken_over(self):
         """A daemon that died without cleaning up leaves the file; the next one has to take over."""
         open(self.path, "w").close()
-        listener = bookmarks_ipc.Listener(self.path, self.recebidas.append).start()
+        listener = bookmarks_ipc.Listener(self.path, self.received.append).start()
         try:
             self.assertTrue(bookmarks_ipc.send(self.path, bookmarks_ipc.SHOW))
         finally:
             listener.close()
 
     def test_close_removes_the_socket(self):
-        listener = bookmarks_ipc.Listener(self.path, self.recebidas.append).start()
+        listener = bookmarks_ipc.Listener(self.path, self.received.append).start()
         listener.close()
         self.assertFalse(os.path.exists(self.path))
 
@@ -575,8 +575,8 @@ class TestBarCore(unittest.TestCase):
         self.assertIn("copied", self.core.status())
 
     def test_sync_error_warns_and_keeps_the_cache(self):
-        mudou = self.core.on_sync_result(0, "servidor inacessivel")
-        self.assertTrue(mudou)
+        changed = self.core.on_sync_result(0, "servidor inacessivel")
+        self.assertTrue(changed)
         self.assertIn("offline", self.core.status())
         self.assertEqual(len(self.core.rows), 5, "continua listando do cache")
 
@@ -633,7 +633,7 @@ class TestViewTk(unittest.TestCase):
         return bar, bookmarks_tk
 
     @staticmethod
-    def _evento(keysym, state=0):
+    def _event(keysym, state=0):
         ev = mock.MagicMock()
         ev.keysym = keysym
         ev.state = state
@@ -641,68 +641,68 @@ class TestViewTk(unittest.TestCase):
 
     def test_arrows_navigate(self):
         bar, _ = self._bar()
-        bar.on_key(self._evento("Down"))
+        bar.on_key(self._event("Down"))
         self.assertEqual(bar.core.sel, 1)
-        bar.on_key(self._evento("Up"))
+        bar.on_key(self._event("Up"))
         self.assertEqual(bar.core.sel, 0)
 
     def test_control_n_and_p_navigate(self):
         bar, _ = self._bar()
-        bar.on_key(self._evento("n", state=0x4))     # Control
+        bar.on_key(self._event("n", state=0x4))     # Control
         self.assertEqual(bar.core.sel, 1)
-        bar.on_key(self._evento("p", state=0x4))
+        bar.on_key(self._event("p", state=0x4))
         self.assertEqual(bar.core.sel, 0)
 
     def test_command_navigates_on_macos(self):
         bar, _ = self._bar()
-        bar.on_key(self._evento("n", state=0x8))     # Command
+        bar.on_key(self._event("n", state=0x8))     # Command
         self.assertEqual(bar.core.sel, 1, "no Mac o modificador natural e Command")
 
     def test_escape_clears_then_closes(self):
         bar, _ = self._bar()
         bar.var.get.return_value = "algo"
-        bar.on_key(self._evento("Escape"))
+        bar.on_key(self._event("Escape"))
         bar.var.set.assert_called_with("")
         bar.hide.assert_not_called()
 
         bar.var.get.return_value = ""
-        bar.on_key(self._evento("Escape"))
+        bar.on_key(self._event("Escape"))
         bar.hide.assert_called_once()
 
     def test_enter_opens_and_hides(self):
         bar, bookmarks_tk = self._bar()
         with mock.patch.object(bookmarks_tk.bookmarks_platform, "open_url") as abrir:
-            bar.on_key(self._evento("Return"))
+            bar.on_key(self._event("Return"))
             abrir.assert_called_once()
             self.assertTrue(abrir.call_args[0][0].startswith("http"))
         bar.hide.assert_called_once()
 
     def test_ctrl_c_copies_to_the_clipboard(self):
         bar, _ = self._bar()
-        bar.on_key(self._evento("c", state=0x4))
+        bar.on_key(self._event("c", state=0x4))
         bar.root.clipboard_clear.assert_called_once()
         bar.root.clipboard_append.assert_called_once()
 
     def test_ctrl_d_does_nothing(self):
         # Deleting lives in the web UI: the key is free and must not be handled.
         bar, _ = self._bar()
-        self.assertIsNone(bar.on_key(self._evento("d", state=0x4)),
+        self.assertIsNone(bar.on_key(self._event("d", state=0x4)),
                           "the key falls through to the entry")
         self.assertEqual(bar.client.deleted, [])
         bar.sync_async.assert_not_called()
 
     def test_ctrl_r_syncs(self):
         bar, _ = self._bar()
-        bar.on_key(self._evento("r", state=0x4))
+        bar.on_key(self._event("r", state=0x4))
         bar.sync_async.assert_called_once()
 
     def test_unknown_key_passes_through(self):
         bar, _ = self._bar()
-        self.assertIsNone(bar.on_key(self._evento("a")), "digitar letra tem que chegar no campo")
+        self.assertIsNone(bar.on_key(self._event("a")), "digitar letra tem que chegar no campo")
 
     def test_handled_keys_do_not_propagate(self):
         bar, _ = self._bar()
-        self.assertEqual(bar.on_key(self._evento("Down")), "break")
+        self.assertEqual(bar.on_key(self._event("Down")), "break")
 
 
 def free_port():
@@ -857,7 +857,7 @@ class TestSyncWithServer(unittest.TestCase):
         c.sync()
         antes = len(c.all_bookmarks())
 
-        c.config["server"] = "http://127.0.0.1:1"  # porta morta
+        c.config["server"] = "http://127.0.0.1:1"  # a port with nothing on it
         c.add(url="https://offline.com", title="Offline")
         with self.assertRaises(ApiError):
             c.sync()
