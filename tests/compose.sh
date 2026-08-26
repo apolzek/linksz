@@ -17,7 +17,9 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
 PROJECT="bookmarks-test-$$"
 SITE="localhost"
-COMPOSE=(docker compose -p "$PROJECT")
+# The proxy is behind a profile: this test is precisely the phone flow, so it
+# asks for it explicitly.
+COMPOSE=(docker compose -p "$PROJECT" --profile tls)
 FAILS=0
 
 ok()   { printf '  \033[32m✔\033[0m %s\n' "$*"; }

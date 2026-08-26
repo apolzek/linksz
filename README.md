@@ -94,7 +94,7 @@ skipped.
     mise run server    backend + web UI on http://127.0.0.1:8787
     mise run bar       opens the bar
     mise run test      the whole suite
-    mise run up        docker stack with TLS, for reaching it from a phone
+    mise run up        docker stack (add --profile tls for the phone)
 
 ## Layout
 
@@ -130,8 +130,19 @@ touched it, so a frontend release leaves the other two on the tag they had:
     nochaos/bookmarks-web      nginx: the PWA, and /api proxied to the api
     nochaos/bookmarks-proxy    caddy: TLS in front, for the phone
 
-`docker compose up -d --build` wires the three together. `mise run up` is the
-same thing.
+`docker compose up -d --build` brings up api and web on http://localhost:8080.
+That is the whole stack for normal use: nginx serves the PWA and proxies /api
+to the backend, which is the same origin the service worker needs.
+
+The proxy is the exception, and it is behind a profile:
+
+    BOOKMARKS_SITE=192.168.0.10 docker compose --profile tls up -d --build
+
+It exists for one thing. A PWA only installs, and a service worker only
+registers, in a secure context: https or localhost. From a phone over the LAN
+you have neither, so caddy issues a certificate from its own CA and serves that
+CA at http://<ip>/root.crt for the phone to trust. With a real domain, or a
+tunnel that already terminates TLS, you do not need it.
 
 ## CI
 
