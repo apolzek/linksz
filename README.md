@@ -1,140 +1,126 @@
 # Bookmarks
 
-Bookmark manager with instant substring search, in two frontends over the same vault:
+Your bookmarks, one keystroke away.
 
-* **Bar**: a Spotlight-style launcher for your bookmarks, opened by a global shortcut (Linux, GTK3).
-* **Web UI**: the whole vault in the browser, served by the backend.
+Self-hosted bookmark manager with instant substring search. Two frontends over
+the same vault: a Spotlight-style launcher bar on Linux, and a PWA in the
+browser served by the same backend. No dependencies, no accounts anywhere but
+your own machine.
 
 ## Requirements
 
-* Node 24
-* Python 3 with GTK3 (`python3-gi`)
-* `mise` (optional, pins the versions)
+Node 24 and Python 3 with GTK3 (`python3-gi`). `mise` is optional and pins both.
 
 ## Install
 
-```bash
-git clone git@github.com:nochaosio/bookmarks.nochaos.io.git
-cd bookmarks.nochaos.io
-mise install
-bash desktop/install.sh
-```
+    git clone git@github.com:nochaosio/bookmarks.nochaos.io.git
+    cd bookmarks.nochaos.io
+    mise install
+    bash desktop/install.sh
 
-This sets up a systemd user service for the backend on `http://127.0.0.1:8787`,
-the bar daemon on autostart, and the global shortcut `Super+Space`.
+That installs a systemd user service for the backend on http://127.0.0.1:8787,
+the bar on autostart, and Super+Space as the global shortcut. Pass another one
+to change it: `bash desktop/install.sh '<Super>b'`.
 
-Another shortcut:
+Open http://127.0.0.1:8787 and sign in with the test account `teste` /
+`teste123`, or register your own.
 
-```bash
-bash desktop/install.sh '<Super>b'
-```
+## The bar
 
-## Bar
+Super+Space, type, Enter opens the link. Up and down or Tab navigate, Ctrl+C
+copies the URL, Ctrl+R forces a sync, Esc clears the search and closes when the
+search is already empty.
 
-Press `Super+Space` to open the bar, type, press `Enter` to open the link.
+The bar reads and never writes: creating, editing and deleting live in the web
+UI. It connects to the account in `~/.config/bookmarks/config.json`, so it never
+asks anyone to sign in:
 
-### Bar keys
+    server: http://127.0.0.1:8787
+    username: your-user
+    password: your-password
 
-| Key | Action |
-|---|---|
-| `↑` `↓` / `Tab` | navigate |
-| `Enter` | open in the browser |
-| `Ctrl+C` | copy the URL |
-| `Ctrl+R` | force sync |
-| `Esc` | clear the search, close when empty |
+After the first run the token is stored there and the password can go.
 
-The bar reads and never writes. Creating, editing and deleting live in the web
-UI; the bar is the launcher. The account it connects to comes from
-`~/.config/bookmarks/config.json`, so it never asks anyone to sign in:
+## The web UI
 
-```yaml
-server: http://127.0.0.1:8787
-username: your-user
-password: your-password     # after the first run the token below is enough
-token: ...
-```
+Up and down navigate, Enter opens, Ctrl+Enter opens in a new tab, `e` edits,
+Del deletes, `n` creates, `b` toggles the panel, `/` focuses the search,
+Ctrl+C clears it. Type `help` for the rest.
 
-### Web keys
+The left panel lists every folder, category and tag in the vault. Sections fold
+by clicking their heading. Dragging a folder onto another one nests it, and
+dropping it on the Folders heading or on the empty space below the list moves it
+back to the root.
 
-`↑` `↓` navigate, `Enter` open, `e` edit, `Del` delete, `n` new, `b` panel, `/` focus search,
-`Ctrl+C` clear the search, `Esc` close what is open. Type `help` (or click **help**)
-for the whole list without leaving the page.
+Every open counts. The most opened links climb the results, the counter shows
+next to the URL, and `insights` in the topbar has opens per day, the most opened
+links and the access log for the last 7, 14 or 30 days.
 
-### Panel
+The theme picker carries the four Catppuccin flavours, a matrix one, and
+`system`, which follows the desktop.
 
-The left panel lists every folder, category and tag in the vault. Each section
-folds by clicking its heading, folders expand and collapse in bulk, and
-**dragging a folder onto another nests it**, rewriting the path of everything
-below it.
+## Search
 
-### Usage ranking
+The same syntax in the bar, the web UI and the API. Everything is substring,
+case and accent insensitive, and terms combine with AND.
 
-Every time a bookmark is opened (`Enter`, `Ctrl+Enter`, a click, or the bar) the
-count goes up and the link climbs the results. The counter shows next to the URL,
-and **insights** in the topbar has the opens per day, the most opened links and
-the access log for the last 7, 14 or 30 days.
+    kuber              title, URL, tags, category, folder or description
+    #devops            tags only
+    @work              category only
+    /dev/infra         folder only
+    title:grafana      that field only, also url:, description:, cat:, folder:
+    "hacker news"      literal phrase
+    -grafana           excludes matches
 
-### Themes
+## Import and export
 
-The topbar picker carries the four Catppuccin flavours (latte, frappé,
-macchiato, mocha), a matrix one and `system`, which follows the desktop.
-The choice is per browser and survives a reload.
+YAML, browser HTML and JSON, in both directions. The YAML groups entries by
+folder, so the file is the tree written down:
 
-### Search
+    folders:
+      technology/infrastructure/observability:
+      - id: 94b2b47a-...
+        title: Grafana
+        url: https://grafana.com
 
-Same syntax in the bar, the web UI and the API. Everything is substring,
-case and accent insensitive.
+Renaming a key renames that folder for everything under it, moving an entry is
+a `folder:` line on it, and a key that does not exist yet is created on import.
+When importing a file you edited by hand, choose "Use the file": with equal
+dates the other modes keep what the vault already has and your edits are
+skipped.
 
-| Query | Matches |
-|---|---|
-| `kuber` | title, URL, tags, category, folder or description |
-| `#devops` | tags only |
-| `@work` | category only |
-| `/dev/infra` | folder only |
-| `title:grafana` | title only |
-| `url:ycombinator` | URL only |
-| `"hacker news"` | literal phrase |
-| `-grafana` | excludes matches |
+## Run it by hand
 
-Terms combine with AND: `#devops @work -grafana`.
-
-## Run manually
-
-```bash
-mise run server    # backend + web UI on http://127.0.0.1:8787
-mise run bar       # open the bar
-mise run test      # the whole suite
-```
+    mise run server    backend + web UI on http://127.0.0.1:8787
+    mise run bar       opens the bar
+    mise run test      the whole suite
+    mise run up        docker stack with TLS, for reaching it from a phone
 
 ## Layout
 
-```
-api/        backend: HTTP, SQLite, import/export. Node built-ins only, no deps
-web/        the PWA the backend serves on the same port
-desktop/    the GTK/Tk bar and the installers
-tests/      one suite for all three: bash tests/run.sh
-```
+    api/        backend: HTTP, SQLite, import/export. Node built-ins only
+    web/        the PWA the backend serves on the same port
+    desktop/    the GTK/Tk bar and its installers
+    tests/      one suite for all three: bash tests/run.sh
 
-The search engine is written twice on purpose, `web/search.js` and
+The search engine is written twice, `web/search.js` and
 `desktop/bookmarks_search.py`, so the bar answers offline exactly like the web
 does. A parity test compares them on random vaults and queries.
 
 ## Where things live
 
-| What | Where |
-|---|---|
-| Vault (api) | `~/.local/share/bookmarks/bookmarks.db` |
-| Bar cache | `~/.local/share/bookmarks/cache.db` |
-| Bar config | `~/.config/bookmarks/config.json` |
-| Backend service | `systemctl --user status bookmarks` |
+    ~/.local/share/bookmarks/bookmarks.db    the vault
+    ~/.local/share/bookmarks/cache.db        the bar's local copy
+    ~/.config/bookmarks/config.json          the bar's config
+    systemctl --user status bookmarks        the backend
 
-Environment: `BOOKMARKS_PORT`, `BOOKMARKS_HOST`, `BOOKMARKS_DB`, `BOOKMARKS_SEED=0`
-to skip the test account, and `BOOKMARKS_COMMIT` / `BOOKMARKS_DEPLOYED_AT` for a
-pipeline to stamp the build shown next to the sync light.
+Environment: `BOOKMARKS_PORT`, `BOOKMARKS_HOST`, `BOOKMARKS_DB`,
+`BOOKMARKS_SEED=0` to skip the test account, and `BOOKMARKS_COMMIT` /
+`BOOKMARKS_DEPLOYED_AT` for a pipeline to stamp the build shown next to the
+sync light.
 
 ## CI
 
 `.github/workflows/docker.yml` runs the suite, builds the image, scans it with
-trivy and stamps the commit into it. Publishing is opt in: the workflow pushes
-to Docker Hub and ghcr.io only when dispatched with `push` checked, so a run on
-`master` is a build and a scan and nothing else.
+trivy and logs into both registries so a stale credential surfaces on an
+ordinary push. Publishing is opt in: dispatch the workflow with `push` checked.

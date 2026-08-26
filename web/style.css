@@ -307,6 +307,11 @@ select.ghost option { background: var(--panel); color: var(--text); }
 .facet { margin-bottom: 18px; }
 .facet h3 { margin: 0 0 6px; padding: 0 6px; font-size: 12.5px; font-weight: 600; color: var(--muted); }
 .facet-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 6px; }
+/* Mid-drag the heading is a drop target, and a target you have to scroll back
+   to is not one: it stays in view while the gesture lasts. */
+#browse-body.dragging .facet-folders > .facet-head {
+  position: sticky; top: 0; z-index: 2; background: var(--bg); padding-block: 2px;
+}
 .facet-head h3 { margin: 0; white-space: nowrap; padding: 0; }
 /* The whole heading is the fold button, so the click target is the obvious one. */
 .facet-toggle {
@@ -364,23 +369,18 @@ select.ghost option { background: var(--panel); color: var(--text); }
 /* No text selection while dragging across the panel. */
 #browse-body.dragging { user-select: none; }
 .tree-row.drop-into { outline: 1px solid var(--accent); background: var(--accent-soft); }
-/* The root as the top of the tree, where it belongs. The gap is always there,
-   so a drag changes nothing about the layout: the zone only becomes visible,
-   and the whole strip is the target, label included. */
-.tree-root-zone {
-  height: 18px; margin: 0 6px 2px; display: flex; align-items: center;
-  border-top: 1px dashed transparent;
+/* Dropping on the root. There is no widget for it: the folders section is the
+   root folder, so its empty space and its heading are the target, the way
+   dropping on a file manager's empty space means "into this folder". The
+   section lights up as a whole, which is also what says the drop will land
+   there and not on the row under the pointer. */
+.facet-folders.drop-into {
+  outline: 1px dashed var(--accent); outline-offset: 2px;
+  background: color-mix(in srgb, var(--accent) 5%, transparent);
 }
-.tree-root-zone span {
-  font-family: var(--font-mono); font-size: 10.5px; letter-spacing: .06em;
-  text-transform: uppercase; color: var(--muted); opacity: 0;
-}
-#browse-body.dragging .tree-root-zone { border-top-color: var(--line); }
-#browse-body.dragging .tree-root-zone span { opacity: .7; }
-.tree-root-zone.drop-into {
-  border-top-color: var(--accent); background: var(--accent-soft); outline: none;
-}
-.tree-root-zone.drop-into span { opacity: 1; color: var(--accent); }
+.facet-folders.drop-into > .facet-head .facet-toggle { color: var(--accent); }
+/* Room under the last folder, so "empty space" is a real place to aim at. */
+.tree { padding-bottom: 10px; }
 #browse-body.dragging .tree-root-drop { display: block; }
 
 /* Mini search for each section of the panel. */

@@ -709,8 +709,11 @@ const drag = {
   row: null,         // its row
   from: null,        // where the gesture started, to measure the threshold
   active: false,     // past the threshold: it is a drag, not a click
-  target: null,      // row currently under the pointer, or the root strip
+  target: null,      // row currently under the pointer, or the folders section
   ghost: null,       // the label following the pointer
+  at: null,          // last pointer position, for the autoscroll to re-aim
+  scroll: 0,         // px per frame while the pointer sits near an edge
+  scrolling: false,
 };
 
 const DRAG_THRESHOLD = 5;   // px before a click becomes a drag
@@ -750,11 +753,19 @@ async function moveFolder(from, to) {
 function dropTargetAt(x, y) {
   const el = document.elementFromPoint(x, y);
   if (!el) return null;
-  const root = el.closest('.tree-root-zone');
-  if (root) return canDropFolder(drag.path, '') ? { el: root, to: '' } : null;
+
+  // A folder row is the obvious target: dropping on it puts the folder inside.
   const row = el.closest('.tree-row');
-  if (!row || !row.dataset.path) return null;
-  return canDropFolder(drag.path, row.dataset.path) ? { el: row, to: row.dataset.path } : null;
+  if (row?.dataset.path) {
+    return canDropFolder(drag.path, row.dataset.path) ? { el: row, to: row.dataset.path } : null;
+  }
+
+  // Everything else in the folders section means the root, the same way a file
+  // manager reads a drop on empty space as "into the folder you are looking
+  // at". The heading is that folder's name, so it answers too.
+  const section = el.closest('.facet-folders');
+  if (section) return canDropFolder(drag.path, '') ? { el: section, to: '' } : null;
+  return null;
 }
 
 function highlightTarget(next) {
@@ -762,6 +773,35 @@ function highlightTarget(next) {
   drag.target?.el.classList.remove('drop-into');
   next?.el.classList.add('drop-into');
   drag.target = next;
+}
+
+// Dragging to a folder that is not on screen has to be possible, so the panel
+// scrolls when the pointer sits near its edges, the way a file manager does.
+// Speed grows towards the edge instead of being a single step.
+const SCROLL_EDGE = 48;      // px from the edge where it starts
+const SCROLL_MAX = 14;       // px per frame at the very edge
+
+function autoScroll(y) {
+  const panel = $('#browse');
+  const box = panel.getBoundingClientRect();
+  let step = 0;
+  if (y < box.top + SCROLL_EDGE) step = -(SCROLL_EDGE - (y - box.top));
+  else if (y > box.bottom - SCROLL_EDGE) step = SCROLL_EDGE - (box.bottom - y);
+  if (!step) { drag.scroll = 0; return; }
+
+  drag.scroll = Math.max(-SCROLL_MAX, Math.min(SCROLL_MAX, step / 3));
+  if (drag.scrolling) return;
+  drag.scrolling = true;
+
+  const tick = () => {
+    if (!drag.active || !drag.scroll) { drag.scrolling = false; return; }
+    panel.scrollTop += drag.scroll;
+    // The rows moved under a pointer that did not: the target is whatever is
+    // under it now, not what was there when the frame started.
+    if (drag.at) highlightTarget(dropTargetAt(drag.at.x, drag.at.y));
+    requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
 }
 
 function beginDrag(pointerId) {
@@ -785,7 +825,8 @@ function endDrag(drop) {
   drag.row?.classList.remove('dragging');
   drag.target?.el.classList.remove('drop-into');
   $('#browse-body').classList.remove('dragging');
-  Object.assign(drag, { path: null, row: null, from: null, active: false, target: null, ghost: null });
+  Object.assign(drag, { path: null, row: null, from: null, active: false, target: null,
+                        ghost: null, at: null, scroll: 0 });
   if (drop && active && target) moveFolder(path, target.to);
   return active;
 }
@@ -810,9 +851,11 @@ function wireFolderDrag(row, path) {
       beginDrag(e.pointerId);
     }
     drag.ghost.style.transform = `translate(${e.clientX + 12}px, ${e.clientY + 10}px)`;
+    drag.at = { x: e.clientX, y: e.clientY };
     // The row under the pointer is the dragged one otherwise, since the capture
     // keeps the events here: .dragging turns off its pointer events.
     highlightTarget(dropTargetAt(e.clientX, e.clientY));
+    autoScroll(e.clientY);
   };
 
   row.onpointerup = (e) => {
@@ -906,7 +949,7 @@ function allButton(label, title, noop, apply) {
 
 function treeSection(root, total, filter) {
   const sec = document.createElement('section');
-  sec.className = 'facet';
+  sec.className = 'facet facet-folders';
 
   const { head, isOpen } = sectionHead('folders', 'Folders', total);
   sec.append(head);
@@ -941,16 +984,8 @@ function treeSection(root, total, filter) {
   const tree = document.createElement('div');
   tree.className = 'tree';
 
-  // The root, as a place. It is the gap that already sits between the buttons
-  // above and the first folder, so it costs no layout and nothing moves when a
-  // drag starts: mid-drag it just becomes visible and says what it is.
-  const rootZone = document.createElement('div');
-  rootZone.className = 'tree-root-zone';
-  rootZone.innerHTML = '<span>root</span>';
-  tree.append(rootZone);
-
   treeRows(root, 0, tree, filter);
-  if (tree.childElementCount === 1) {
+  if (!tree.childElementCount) {
     const p = document.createElement('p');
     p.className = 'facet-empty';
     p.textContent = 'no folder matches the filter';
