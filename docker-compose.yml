@@ -6,11 +6,20 @@
 #   4. open https://192.168.0.10 and use "Add to home screen"
 #
 # Without step 3 the phone browser refuses the HTTPS and the PWA does not install.
+#
+# Three images, each versioned on its own: api is the backend, web is the PWA
+# and the /api proxy in front of it, proxy is the TLS hop the phone needs. A
+# local install (systemd, mise run server) runs none of this: there the backend
+# serves the PWA itself on 8787.
+
+name: bookmarks
 
 services:
-  bookmarks:
-    build: .
-    image: bookmarks:local
+  api:
+    build:
+      context: .
+      dockerfile: api/Dockerfile
+    image: bookmarks-api:local
     restart: unless-stopped
     environment:
       BOOKMARKS_HOST: 0.0.0.0
@@ -22,19 +31,31 @@ services:
       BOOKMARKS_SEED_PASSWORD: ${BOOKMARKS_SEED_PASSWORD:-teste123}
     volumes:
       - bookmarks-data:/data
-    # No ports: Caddy is what talks to the network. To reach the backend
+    # No ports: the web container is what talks to it. To reach the API
     # directly (debugging), uncomment:
     # ports:
     #   - "8787:8787"
     networks:
       - bookmarks
 
-  caddy:
-    build: ./caddy          # the Caddyfile is baked in, see caddy/Dockerfile
-    image: bookmarks-caddy:local
+  web:
+    build:
+      context: .
+      dockerfile: web/Dockerfile
+    image: bookmarks-web:local
     restart: unless-stopped
     depends_on:
-      bookmarks:
+      api:
+        condition: service_healthy
+    networks:
+      - bookmarks
+
+  proxy:
+    build: ./proxy          # the Caddyfile is baked in, see proxy/Dockerfile
+    image: bookmarks-proxy:local
+    restart: unless-stopped
+    depends_on:
+      web:
         condition: service_healthy
     environment:
       # The hostname or IP you use to reach it. The certificate is issued for it.

@@ -1,5 +1,9 @@
-# Backend image. No `npm install`: the server uses only Node built-in modules
+# The API. No `npm install`: the server uses only Node built-in modules
 # (node:sqlite included), so the image is the runtime plus the code.
+#
+# Built from the repository root, not from api/, because the server shares the
+# search engine with the browser and that file lives in web/. Writing the engine
+# twice to keep the contexts tidy would be the wrong trade.
 FROM node:24-alpine
 
 # Which commit this image was built from, and when. The pipeline fills them in;
@@ -7,7 +11,7 @@ FROM node:24-alpine
 ARG BOOKMARKS_COMMIT=""
 ARG BOOKMARKS_DEPLOYED_AT=""
 
-LABEL org.opencontainers.image.title="Bookmarks" \
+LABEL org.opencontainers.image.title="Bookmarks API" \
       org.opencontainers.image.description="Your bookmarks, one keystroke away" \
       org.opencontainers.image.source="https://github.com/nochaosio/bookmarks.nochaos.io" \
       org.opencontainers.image.revision="${BOOKMARKS_COMMIT}" \
@@ -16,7 +20,8 @@ LABEL org.opencontainers.image.title="Bookmarks" \
 WORKDIR /app
 
 COPY api ./api
-COPY web ./web
+# The one file the API needs from the frontend: the shared search engine.
+COPY web/search.js ./web/search.js
 
 # Unprivileged user + /data as the database mount point.
 #

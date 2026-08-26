@@ -39,19 +39,19 @@ info "starting the stack (the first build can take a while)"
 BOOKMARKS_SITE="$SITE" BOOKMARKS_HTTP_PORT=0 BOOKMARKS_HTTPS_PORT=0 \
   "${COMPOSE[@]}" up -d --build >/dev/null 2>&1
 
-# Waits for the backend to become healthy (Caddy depends on it to start).
+# Waits for the API to become healthy (web waits on it, and the proxy on web).
 for _ in $(seq 60); do
-  status=$("${COMPOSE[@]}" ps --format '{{.Service}} {{.Status}}' 2>/dev/null | grep '^bookmarks' || true)
+  status=$("${COMPOSE[@]}" ps --format '{{.Service}} {{.Status}}' 2>/dev/null | grep '^api' || true)
   [[ "$status" == *healthy* ]] && break
   sleep 1
 done
-[[ "$status" == *healthy* ]] && ok "backend healthy" || bad "backend never became healthy: $status"
+[[ "$status" == *healthy* ]] && ok "api healthy" || bad "api never became healthy: $status"
 
-NET=$("${COMPOSE[@]}" ps -q caddy | xargs -r docker inspect --format \
+NET=$("${COMPOSE[@]}" ps -q proxy | xargs -r docker inspect --format \
   '{{range $k, $v := .NetworkSettings.Networks}}{{$k}}{{end}}')
-IP=$("${COMPOSE[@]}" ps -q caddy | xargs -r docker inspect --format \
+IP=$("${COMPOSE[@]}" ps -q proxy | xargs -r docker inspect --format \
   '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}')
-[[ -n "$IP" ]] && ok "caddy up at $IP" || { bad "caddy did not start"; exit 1; }
+[[ -n "$IP" ]] && ok "proxy up at $IP" || { bad "proxy did not start"; exit 1; }
 
 info "testing the phone flow from inside the network"
 output=$(docker run --rm --network "$NET" --entrypoint sh curlimages/curl:latest -c "
@@ -86,8 +86,9 @@ case \"\$ct\" in
 esac
 
 # 6. the full API through the proxy, advanced search included.
-# The account is `composetest`, not `teste`: the stack seeds a `teste` user on
-# every boot and registering it again is a 409, not a test failure.
+# The account is composetest, not teste: the stack seeds a teste user on every
+# boot and registering it again is a 409, not a test failure. No backticks in
+# here, the whole block is a double-quoted string for sh -c.
 TOKEN=\$(\$C -X POST https://$SITE/api/auth/register -H 'content-type: application/json' \
   -d '{\"email\":\"compose@t.com\",\"username\":\"composetest\",\"password\":\"secret123\"}' \
   | sed -n 's/.*\"token\":\"\([^\"]*\)\".*/\1/p')
@@ -112,8 +113,8 @@ while IFS= read -r line; do
   esac
 done <<< "$output"
 
-info "restarting the backend to check persistence in the volume"
-"${COMPOSE[@]}" restart bookmarks >/dev/null 2>&1
+info "restarting the api to check persistence in the volume"
+"${COMPOSE[@]}" restart api >/dev/null 2>&1
 sleep 4
 
 persist=$(docker run --rm --network "$NET" --entrypoint sh curlimages/curl:latest -c "

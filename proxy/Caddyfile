@@ -29,7 +29,9 @@
 		-Server
 	}
 
-	reverse_proxy bookmarks:8787
+	# The web container serves the PWA and already proxies /api to the API,
+	# so everything the browser needs is behind this one hop.
+	reverse_proxy web:80
 }
 
 # HTTP is only there to hand out the root CA: before trusting it, the phone

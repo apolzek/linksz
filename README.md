@@ -99,9 +99,10 @@ skipped.
 ## Layout
 
     api/        backend: HTTP, SQLite, import/export. Node built-ins only
-    web/        the PWA the backend serves on the same port
+    web/        the PWA, and the nginx image that serves it in Docker
+    proxy/      caddy with TLS, so a phone can install the PWA
     desktop/    the GTK/Tk bar and its installers
-    tests/      one suite for all three: bash tests/run.sh
+    tests/      one suite for all of it: bash tests/run.sh
 
 The search engine is written twice, `web/search.js` and
 `desktop/bookmarks_search.py`, so the bar answers offline exactly like the web
@@ -119,8 +120,22 @@ Environment: `BOOKMARKS_PORT`, `BOOKMARKS_HOST`, `BOOKMARKS_DB`,
 `BOOKMARKS_DEPLOYED_AT` for a pipeline to stamp the build shown next to the
 sync light.
 
+## Images
+
+Locally the backend serves the PWA itself on 8787 and there is no proxy. In
+Docker the parts are split, and each one is versioned by the last commit that
+touched it, so a frontend release leaves the other two on the tag they had:
+
+    nochaos/bookmarks-api      the backend
+    nochaos/bookmarks-web      nginx: the PWA, and /api proxied to the api
+    nochaos/bookmarks-proxy    caddy: TLS in front, for the phone
+
+`docker compose up -d --build` wires the three together. `mise run up` is the
+same thing.
+
 ## CI
 
-`.github/workflows/docker.yml` runs the suite, builds the image, scans it with
-trivy and logs into both registries so a stale credential surfaces on an
-ordinary push. Publishing is opt in: dispatch the workflow with `push` checked.
+`.github/workflows/docker.yml` runs the suite, builds the three images, scans
+each with trivy and logs into both registries so a stale credential surfaces on
+an ordinary push. Publishing is opt in: dispatch the workflow with `push`
+checked.

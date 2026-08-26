@@ -5,9 +5,9 @@ desktop
 mise.toml
 README.md
 docker-compose.yml
-caddy
-Dockerfile
+proxy
 .dockerignore
+.github
 **/__pycache__
 **/*.pyc
 **/*.db

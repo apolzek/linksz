@@ -49,45 +49,116 @@ jobs:
       packages: write   # required to push to ghcr.io
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Per-image tags ask when each part last changed, and the default
+          # one-commit clone cannot answer that.
+          fetch-depth: 0
 
       - name: Collect the build stamp
         id: stamp
         run: |
-          # Image tag: date and the first five characters of the commit, so a
-          # tag says when it was built and exactly what it was built from
-          echo "tag=$(date -u +%Y-%m-%d)-$(git rev-parse --short=5 HEAD)" >> "$GITHUB_OUTPUT"
-          echo "sha=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
-          echo "time=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+          set -eu
+          # One tag per image, from the last commit that touched what goes into
+          # it: date and the first five characters of that commit. A release
+          # that only changes the frontend leaves the api and the proxy on the
+          # tag they already had, which is what versioning them apart means.
+          #
+          # The api carries the search engine from web/, so it moves with it.
+          # Falls back to the head commit: a path with no history of its own
+          # (a fresh checkout of a new directory) still gets a real tag.
+          tag_for() {
+            date=$(git log -1 --format=%cs -- "$@")
+            sha=$(git log -1 --format=%h --abbrev=5 -- "$@")
+            if [ -z "$sha" ]; then
+              date=$(git log -1 --format=%cs)
+              sha=$(git log -1 --format=%h --abbrev=5)
+            fi
+            echo "$date-$sha"
+          }
+          {
+            echo "api=$(tag_for api web/search.js)"
+            echo "web=$(tag_for web)"
+            echo "proxy=$(tag_for proxy)"
+            echo "sha=$(git rev-parse --short HEAD)"
+            echo "time=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          } >> "$GITHUB_OUTPUT"
 
       - uses: docker/setup-buildx-action@v3
 
-      # One image: unlike a split frontend, this backend serves the PWA itself,
-      # and that single port is what makes the app installable from a phone.
+      # Three images: the api, the PWA behind nginx, and the TLS hop a phone
+      # needs. The api and the web share a build context (the repository root)
+      # because the search engine is one file used by both sides.
       #
       # Built into the local daemon first, so trivy scans the exact bits that
       # will be pushed later, not a rebuild of them
-      - name: Build the image
+      - name: Build the api image
         uses: docker/build-push-action@v6
         with:
           context: .
+          file: ./api/Dockerfile
           load: true
           pull: true   # always start from the freshest base image
-          tags: bookmarks:candidate
+          tags: bookmarks-api:candidate
           # The stamp reaches the UI through /api/health, next to the sync light
           build-args: |
             BOOKMARKS_COMMIT=${{ steps.stamp.outputs.sha }}
             BOOKMARKS_DEPLOYED_AT=${{ steps.stamp.outputs.time }}
-          cache-from: type=gha,scope=bookmarks
-          cache-to: type=gha,mode=max,scope=bookmarks
+          cache-from: type=gha,scope=api
+          cache-to: type=gha,mode=max,scope=api
 
-      - name: Scan the image
+      - name: Build the web image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./web/Dockerfile
+          load: true
+          pull: true
+          tags: bookmarks-web:candidate
+          build-args: |
+            BOOKMARKS_COMMIT=${{ steps.stamp.outputs.sha }}
+            BOOKMARKS_DEPLOYED_AT=${{ steps.stamp.outputs.time }}
+          cache-from: type=gha,scope=web
+          cache-to: type=gha,mode=max,scope=web
+
+      - name: Build the proxy image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./proxy
+          load: true
+          pull: true
+          tags: bookmarks-proxy:candidate
+          build-args: |
+            BOOKMARKS_COMMIT=${{ steps.stamp.outputs.sha }}
+            BOOKMARKS_DEPLOYED_AT=${{ steps.stamp.outputs.time }}
+          cache-from: type=gha,scope=proxy
+          cache-to: type=gha,mode=max,scope=proxy
+
+      - name: Scan the api image
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: bookmarks:candidate
+          image-ref: bookmarks-api:candidate
           format: table
           severity: CRITICAL,HIGH
           # Nothing to do about a vulnerability with no fix available yet, so
           # it is reported by the next step instead of blocking the release
+          ignore-unfixed: true
+          exit-code: '1'
+
+      - name: Scan the web image
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: bookmarks-web:candidate
+          format: table
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: '1'
+
+      - name: Scan the proxy image
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: bookmarks-proxy:candidate
+          format: table
+          severity: CRITICAL,HIGH
           ignore-unfixed: true
           exit-code: '1'
 
@@ -110,28 +181,40 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       # The only step that actually publishes, and the only one still gated
-      - name: Publish to both registries
+      - name: Publish the three images to both registries
         if: ${{ inputs.push == true }}
         env:
-          TAG: ${{ steps.stamp.outputs.tag }}
+          TAG_API: ${{ steps.stamp.outputs.api }}
+          TAG_WEB: ${{ steps.stamp.outputs.web }}
+          TAG_PROXY: ${{ steps.stamp.outputs.proxy }}
         run: |
           set -eu
-          for target in "$NAMESPACE/bookmarks" "$GHCR/bookmarks"; do
-            docker tag bookmarks:candidate "$target:$TAG"
-            docker tag bookmarks:candidate "$target:latest"
-            docker push "$target:$TAG"
-            docker push "$target:latest"
-          done
+          publish() {
+            image=$1 tag=$2
+            for target in "$NAMESPACE/bookmarks-$image" "$GHCR/bookmarks-$image"; do
+              docker tag "bookmarks-$image:candidate" "$target:$tag"
+              docker tag "bookmarks-$image:candidate" "$target:latest"
+              docker push "$target:$tag"
+              docker push "$target:latest"
+            done
+          }
+          publish api "$TAG_API"
+          publish web "$TAG_WEB"
+          publish proxy "$TAG_PROXY"
 
       - name: Say what happened
         env:
-          TAG: ${{ steps.stamp.outputs.tag }}
+          TAG_API: ${{ steps.stamp.outputs.api }}
+          TAG_WEB: ${{ steps.stamp.outputs.web }}
+          TAG_PROXY: ${{ steps.stamp.outputs.proxy }}
         run: |
           if [ "${{ inputs.push }}" = "true" ]; then
-            echo "Scanned and published, tags $TAG and latest"
-            echo "  $NAMESPACE/bookmarks and $GHCR/bookmarks"
+            echo "Scanned and published to $NAMESPACE and $GHCR:"
           else
-            echo "Dry run: image built, scanned clean and both registries accepted"
-            echo "the credentials. Nothing was pushed"
-            echo "The tag it would have used is $TAG"
+            echo "Dry run: the three images built, scanned clean and both"
+            echo "registries accepted the credentials. Nothing was pushed."
+            echo "The tags it would have used:"
           fi
+          echo "  bookmarks-api    $TAG_API"
+          echo "  bookmarks-web    $TAG_WEB"
+          echo "  bookmarks-proxy  $TAG_PROXY"
