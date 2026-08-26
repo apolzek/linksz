@@ -38,8 +38,8 @@ os.makedirs(os.environ["XDG_RUNTIME_DIR"], mode=0o700, exist_ok=True)
 
 import bookmarks_ipc  # noqa: E402
 import bookmarks_platform  # noqa: E402
-from bookmarks_core import ADDED, ERROR, NOTHING, OPEN, BarCore  # noqa: E402
-from bookmarks_client import ApiError, Client, normalize_tags, parse_quick_add  # noqa: E402
+from bookmarks_core import NOTHING, OPEN, BarCore  # noqa: E402
+from bookmarks_client import ApiError, Client, normalize_tags  # noqa: E402
 from bookmarks_search import components, parse_query, search, tokenize  # noqa: E402
 
 FIXTURES = [
@@ -344,22 +344,6 @@ class TestNormalizacao(unittest.TestCase):
         self.assertEqual(normalize_tags(""), "")
         self.assertEqual(normalize_tags(None), "")
 
-    def test_quick_add(self):
-        p = parse_quick_add("https://zed.dev editor rapido #rust #editor @dev /ferramentas")
-        self.assertEqual(p["url"], "https://zed.dev")
-        self.assertEqual(p["title"], "editor rapido")
-        self.assertEqual(p["tags"], "rust,editor")
-        self.assertEqual(p["category"], "dev")
-        self.assertEqual(p["folder"], "ferramentas")
-
-    def test_quick_add_infers_https(self):
-        self.assertEqual(parse_quick_add("go.dev #go")["url"], "https://go.dev")
-
-    def test_quick_add_without_url(self):
-        p = parse_quick_add("just a title #tag")
-        self.assertEqual(p["url"], "")
-        self.assertEqual(p["title"], "just a title")
-
 
 class TestPlatform(unittest.TestCase):
     """Linux and macOS differ in paths and in how a URL is opened."""
@@ -529,10 +513,11 @@ class TestBarCore(unittest.TestCase):
         self.core.set_query('"hacker news"')
         self.assertEqual([r.title for r in self.core.rows], ["Hacker News"])
 
-    def test_no_result_suggests_adding(self):
+    def test_no_result_says_so(self):
         self.core.set_query("naoexiste")
         self.assertEqual(self.core.rows, [])
-        self.assertIn("+ naoexiste", self.core.status())
+        self.assertIn("nothing found", self.core.status())
+        self.assertNotIn("+", self.core.status(), "the bar no longer offers to add")
 
     def test_row_carries_title_url_and_badges(self):
         self.core.set_query("kuber")
@@ -573,48 +558,21 @@ class TestBarCore(unittest.TestCase):
         self.core.set_query("naoexiste")
         self.assertEqual(self.core.activate(), (NOTHING, None))
 
-    def test_quick_add(self):
-        self.core.set_query("+ https://zed.dev editor #rust @dev /ferramentas")
-        self.assertTrue(self.core.is_quick_add)
-        row = self.core.rows[0]
-        self.assertEqual(row.kind, "add")
-        self.assertIn("https://zed.dev", row.subtitle)
-        self.assertIn("#rust", row.subtitle)
+    def test_the_bar_never_writes(self):
+        """Search only: no quick add, no delete, and `+` is just a search."""
+        self.assertFalse(hasattr(self.core, "delete_selected"))
+        self.assertFalse(hasattr(self.core, "is_quick_add"))
 
-        acao, bookmark = self.core.activate()
-        self.assertEqual(acao, ADDED)
-        self.assertEqual(bookmark["url"], "https://zed.dev")
-        self.assertEqual(bookmark["tags"], "rust")
-        self.assertEqual(self.core.query, "", "o campo limpa depois de adicionar")
-
-    def test_empty_quick_add_complains(self):
-        self.core.set_query("+   ")
-        acao, msg = self.core.activate()
-        self.assertEqual(acao, ERROR)
-        self.assertIn("url", msg)
+        self.core.set_query("+ https://zed.dev editor #rust")
+        self.assertEqual([r.kind for r in self.core.rows], [],
+                         "nothing matches that text, and no add row appears")
         self.assertEqual(self.client.added, [])
+        self.assertEqual(self.client.deleted, [])
 
     def test_copy(self):
         self.core.set_query("kuber")
         self.assertEqual(self.core.copy_selected(), "https://kubernetes.io/docs")
         self.assertIn("copied", self.core.status())
-
-    def test_copy_on_the_add_row_does_nothing(self):
-        self.core.set_query("+ algo")
-        self.assertIsNone(self.core.copy_selected())
-
-    def test_delete(self):
-        self.core.set_query("kuber")
-        removido = self.core.delete_selected()
-        self.assertEqual(removido["id"], "1")
-        self.assertEqual(self.client.deleted, ["1"])
-        self.assertEqual(self.core.rows, [], "some da lista na hora")
-        self.assertIn("deleted", self.core.status())
-
-    def test_delete_adjusts_the_selection(self):
-        self.core.move(4)          # last row
-        self.core.delete_selected()
-        self.assertEqual(self.core.sel, 3, "the selection must not fall outside the list")
 
     def test_sync_error_warns_and_keeps_the_cache(self):
         mudou = self.core.on_sync_result(0, "servidor inacessivel")
@@ -725,12 +683,13 @@ class TestViewTk(unittest.TestCase):
         bar.root.clipboard_clear.assert_called_once()
         bar.root.clipboard_append.assert_called_once()
 
-    def test_ctrl_d_deletes(self):
+    def test_ctrl_d_does_nothing(self):
+        # Deleting lives in the web UI: the key is free and must not be handled.
         bar, _ = self._bar()
-        alvo = bar.core.rows[0].bookmark["id"]
-        bar.on_key(self._evento("d", state=0x4))
-        self.assertEqual(bar.client.deleted, [alvo])
-        bar.sync_async.assert_called_once()
+        self.assertIsNone(bar.on_key(self._evento("d", state=0x4)),
+                          "the key falls through to the entry")
+        self.assertEqual(bar.client.deleted, [])
+        bar.sync_async.assert_not_called()
 
     def test_ctrl_r_syncs(self):
         bar, _ = self._bar()
@@ -789,14 +748,33 @@ class TestSyncWithServer(unittest.TestCase):
         c.config["server"] = self.base
         return c
 
-    def test_01_register_and_login(self):
-        c = self.make_client("reg")
-        user = c.register("desktop@example.com", "desktop", "senha123")
-        self.assertEqual(user["username"], "desktop")
-        self.assertTrue(c.authenticated)
+    def register_over_http(self, email, username, password):
+        """What the web UI does. The desktop client has no register()."""
+        req = urllib.request.Request(
+            self.base + "/api/auth/register",
+            data=json.dumps({"email": email, "username": username, "password": password}).encode(),
+            headers={"content-type": "application/json"},
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=8) as resp:
+                return json.loads(resp.read())
+        except urllib.error.HTTPError as err:
+            return json.loads(err.read())
 
-        with self.assertRaises(ApiError):
-            c.register("desktop@example.com", "desktop", "senha123")
+    def test_01_register_and_login(self):
+        # The account is created over the API, the way the web UI does it: the
+        # desktop client cannot register, on purpose.
+        c = self.make_client("reg")
+        self.assertFalse(hasattr(c, "register"), "the bar must not create accounts")
+        body = self.register_over_http("desktop@example.com", "desktop", "senha123")
+        self.assertEqual(body["user"]["username"], "desktop")
+
+        again = self.register_over_http("desktop@example.com", "desktop", "senha123")
+        self.assertIn("error", again, "the same account cannot be created twice")
+
+        c.login("desktop", "senha123")
+        self.assertTrue(c.authenticated)
 
         c2 = self.make_client("login")
         with self.assertRaises(ApiError):
@@ -917,30 +895,37 @@ class TestSyncWithServer(unittest.TestCase):
             c.sync()
 
     def test_11_full_bar_against_a_real_server(self):
-        """BarCore wired to the real Client: add, search, delete."""
+        """BarCore on the real Client: it searches, opens and copies, no more.
+
+        What the bar shows comes from the web side, and what the web deletes
+        disappears from the bar on the next sync.
+        """
+        web = self.make_client("bar-web")     # stands in for the web UI
+        web.login("desktop", "senha123")
+        web.add(url="https://caddyserver.com", title="Caddy", tags="#tls #proxy", category="@infra")
+        web.sync()
+
         c = self.make_client("bar")
         c.login("desktop", "senha123")
         c.sync()
 
         core = BarCore(c)
-        core.set_query("+ https://caddyserver.com Caddy #tls #proxy @infra")
-        acao, bookmark = core.activate()
-        self.assertEqual(acao, ADDED)
+        core.set_query("#tls")
+        self.assertEqual([r.title for r in core.rows], ["Caddy"])
+        self.assertEqual(core.copy_selected(), "https://caddyserver.com")
+        action, url = core.activate()
+        self.assertEqual((action, url), (OPEN, "https://caddyserver.com"))
 
+        # Typing the old quick-add syntax is a search now, and finds nothing.
+        core.set_query("+ https://zed.dev Zed #editor")
+        self.assertEqual(core.rows, [])
+
+        web.delete([b for b in web.all_bookmarks() if b["title"] == "Caddy"][0]["id"])
+        web.sync()
         c.sync()
         core.refresh()
         core.set_query("#tls")
-        self.assertEqual([r.title for r in core.rows], ["Caddy"])
-
-        other = self.make_client("bar-2")
-        other.login("desktop", "senha123")
-        other.sync()
-        self.assertEqual(titles(search(other.all_bookmarks(), "#proxy")), ["Caddy"])
-
-        core.delete_selected()
-        c.sync()
-        other.sync()
-        self.assertEqual(search(other.all_bookmarks(), "#tls"), [])
+        self.assertEqual(core.rows, [], "deleted on the web, gone from the bar")
 
     def test_12_opening_from_the_bar_counts_and_ranks(self):
         """Enter on a row counts the open, shows it and pushes the row up."""
@@ -948,12 +933,15 @@ class TestSyncWithServer(unittest.TestCase):
         c.login("desktop", "senha123")
         c.sync()
 
-        core = BarCore(c)
-        core.set_query("+ https://velho.example Velho #uso")
-        core.activate()
-        core.set_query("+ https://novo.example Novo #uso")
-        core.activate()
+        # Created from the web side: the bar only reads.
+        web = self.make_client("bar-uso-web")
+        web.login("desktop", "senha123")
+        web.add(url="https://velho.example", title="Velho", tags="#uso")
+        web.add(url="https://novo.example", title="Novo", tags="#uso")
+        web.sync()
         c.sync()
+
+        core = BarCore(c)
 
         core.set_query("#uso")
         # The newest one comes first while nothing has been opened.

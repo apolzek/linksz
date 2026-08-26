@@ -363,19 +363,24 @@ select.ghost option { background: var(--panel); color: var(--text); }
 .tree-row.dragging { opacity: .4; }
 /* No text selection while dragging across the panel. */
 #browse-body.dragging { user-select: none; }
-.tree-row.drop-into, .tree-root-drop.drop-into {
-  outline: 1px solid var(--accent); background: var(--accent-soft);
+.tree-row.drop-into { outline: 1px solid var(--accent); background: var(--accent-soft); }
+/* The root as the top of the tree, where it belongs. The gap is always there,
+   so a drag changes nothing about the layout: the zone only becomes visible,
+   and the whole strip is the target, label included. */
+.tree-root-zone {
+  height: 18px; margin: 0 6px 2px; display: flex; align-items: center;
+  border-top: 1px dashed transparent;
 }
-/* Pinned to the bottom of the panel instead of sitting in the list: appearing
-   in the flow would push every row down mid-drag and the drop would land on
-   the folder next door. Left, width and bottom come from the panel's box at
-   drag time, because the layout is centred and moves with the window. */
-.tree-root-drop {
-  display: none; position: fixed; z-index: 6; left: 16px; bottom: 14px; width: 216px;
-  padding: 10px; text-align: center; font-size: 12px; font-family: var(--font-mono);
-  background: var(--panel); border: 1px dashed var(--accent); color: var(--muted);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, .35);
+.tree-root-zone span {
+  font-family: var(--font-mono); font-size: 10.5px; letter-spacing: .06em;
+  text-transform: uppercase; color: var(--muted); opacity: 0;
 }
+#browse-body.dragging .tree-root-zone { border-top-color: var(--line); }
+#browse-body.dragging .tree-root-zone span { opacity: .7; }
+.tree-root-zone.drop-into {
+  border-top-color: var(--accent); background: var(--accent-soft); outline: none;
+}
+.tree-root-zone.drop-into span { opacity: 1; color: var(--accent); }
 #browse-body.dragging .tree-root-drop { display: block; }
 
 /* Mini search for each section of the panel. */

@@ -40,14 +40,18 @@ Press `Super+Space` to open the bar, type, press `Enter` to open the link.
 | `↑` `↓` / `Tab` | navigate |
 | `Enter` | open in the browser |
 | `Ctrl+C` | copy the URL |
-| `Ctrl+D` | delete the bookmark |
 | `Ctrl+R` | force sync |
 | `Esc` | clear the search, close when empty |
 
-Add a bookmark without leaving the bar by starting with `+`:
+The bar reads and never writes. Creating, editing and deleting live in the web
+UI; the bar is the launcher. The account it connects to comes from
+`~/.config/bookmarks/config.json`, so it never asks anyone to sign in:
 
-```
-+ https://fly.io simple deploy #cloud #deploy @work /tools
+```yaml
+server: http://127.0.0.1:8787
+username: your-user
+password: your-password     # after the first run the token below is enough
+token: ...
 ```
 
 ### Web keys

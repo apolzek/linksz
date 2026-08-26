@@ -13,7 +13,7 @@ gi.require_version("Gdk", "3.0")
 from gi.repository import Gdk, Gio, GLib, Gtk  # noqa: E402
 
 import bookmarks_platform  # noqa: E402
-from bookmarks_core import ADDED, ERROR, OPEN, BarCore  # noqa: E402
+from bookmarks_core import OPEN, BarCore  # noqa: E402
 from bookmarks_client import ApiError, Client  # noqa: E402
 
 APP_ID = "io.nochaos.Bookmarks"
@@ -190,49 +190,38 @@ class Bar(Gtk.Application):
             self.window.hide()
         return False
 
-    # ---------------- login ----------------
+    # ---------------- session ----------------
     def needs_login(self):
-        # The config YAML rules: with a valid token, or username/password in it,
-        # the bar signs in by itself to the same account the web uses, no dialog.
+        """True when the config cannot connect. The bar never asks for a login.
+
+        The account lives in the config file, the same one the web UI uses. A
+        bar that could sign in, or sign up, would be a second place to manage
+        accounts; here it is a search front-end and nothing else.
+        """
         try:
             if self.client.ensure_session():
                 return False
-        except ApiError:
-            pass
-        self.show_login_dialog()
+        except ApiError as err:
+            self.show_config_hint(str(err))
+            return True
+        self.show_config_hint("no account configured")
         return True
 
-    def show_login_dialog(self):
-        dlg = Gtk.Dialog(title="Bookmarks: sign in", modal=True)
-        dlg.set_default_size(360, -1)
-        dlg.add_buttons("Cancel", Gtk.ResponseType.CANCEL, "Sign in", Gtk.ResponseType.OK)
-        dlg.set_default_response(Gtk.ResponseType.OK)
-
-        grid = Gtk.Grid(row_spacing=8, column_spacing=8, margin=16)
-        server = Gtk.Entry(text=self.client.config["server"], hexpand=True)
-        login = Gtk.Entry(placeholder_text="username or email", hexpand=True, activates_default=True)
-        password = Gtk.Entry(placeholder_text="password", visibility=False, hexpand=True, activates_default=True)
-        error = Gtk.Label()
-        error.get_style_context().add_class("bar-error")
-
-        for i, (label, widget) in enumerate((("Server", server), ("Username", login), ("Password", password))):
-            grid.attach(Gtk.Label(label=label, xalign=1), 0, i, 1, 1)
-            grid.attach(widget, 1, i, 1, 1)
-        grid.attach(error, 0, 3, 2, 1)
-        dlg.get_content_area().add(grid)
-        dlg.show_all()
-
-        while dlg.run() == Gtk.ResponseType.OK:
-            self.client.config["server"] = server.get_text().strip() or self.client.config["server"]
-            try:
-                self.client.login(login.get_text().strip(), password.get_text())
-                dlg.destroy()
-                self.client.sync()
-                self.core.refresh()
-                self.show_bar()
-                return
-            except ApiError as err:
-                error.set_text(str(err))
+    def show_config_hint(self, reason):
+        dlg = Gtk.MessageDialog(
+            modal=True, message_type=Gtk.MessageType.INFO, buttons=Gtk.ButtonsType.CLOSE,
+            text="Bookmarks: nothing to search yet",
+        )
+        dlg.format_secondary_text(
+            f"{reason}.\n\n"
+            f"Point the bar at your account by editing\n{self.client.config_path}\n\n"
+            "  server: http://127.0.0.1:8787\n"
+            "  username: your-user\n"
+            "  password: your-password\n\n"
+            "The bar signs in on its own and stores the token there, so you can "
+            "delete the password afterwards. Accounts are created in the web UI."
+        )
+        dlg.run()
         dlg.destroy()
 
     # ---------------- render ----------------
@@ -292,23 +281,12 @@ class Bar(Gtk.Application):
         if action == OPEN:
             bookmarks_platform.open_url(payload)
             self.hide_bar()
-        elif action == ADDED:
-            self.entry.set_text("")
-            self.render()
-            self.sync_async()
-        elif action == ERROR:
-            self.status.set_text(payload)
 
     def copy_selected(self):
         url = self.core.copy_selected()
         if url:
             Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD).set_text(url, -1)
         self.status.set_text(self.core.status())
-
-    def delete_selected(self):
-        if self.core.delete_selected():
-            self.render()
-            self.sync_async()
 
     def move(self, delta):
         self.core.move(delta)
@@ -336,9 +314,6 @@ class Bar(Gtk.Application):
             return True
         if ctrl and key == "c":
             self.copy_selected()
-            return True
-        if ctrl and key == "d":
-            self.delete_selected()
             return True
         if ctrl and key == "r":
             self.sync_async()

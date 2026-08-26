@@ -3,6 +3,10 @@
 The bar always reads from the local cache (instant search, works offline).
 The sync runs in the background: it pushes what was created/edited locally and
 pulls what changed on the server (including edits made on the web).
+
+The bar reads and never writes, apart from counting opens for the ranking:
+creating, editing and deleting live in the web UI. There is no register() here
+either, because the account the bar connects to comes from the config file.
 """
 
 import json
@@ -268,13 +272,6 @@ class Client:
         self.save_config()
         return r["user"]
 
-    def register(self, email, username, password):
-        r = self._request("/api/auth/register", {"email": email, "username": username, "password": password})
-        self.config["token"] = r["token"]
-        self.config["username"] = r["user"]["username"]
-        self.save_config()
-        return r["user"]
-
     def logout(self):
         self.config["token"] = ""
         self.config["username"] = ""
@@ -329,20 +326,3 @@ def normalize_tags(v):
         if t and t not in out:
             out.append(t)
     return ",".join(out)
-
-
-def parse_quick_add(text):
-    """'https://x.com title #go #cli @studies /dev' -> dict ready for add()."""
-    url, tags, category, folder, words = "", [], "", "", []
-    for tok in text.split():
-        if tok.startswith("#") and len(tok) > 1:
-            tags.append(tok[1:])
-        elif tok.startswith("@") and len(tok) > 1:
-            category = tok[1:]
-        elif tok.startswith("/") and len(tok) > 1:
-            folder = tok[1:]
-        elif not url and (tok.startswith(("http://", "https://")) or "." in tok.strip(".")):
-            url = tok if tok.startswith(("http://", "https://")) else "https://" + tok
-        else:
-            words.append(tok)
-    return {"url": url, "title": " ".join(words), "tags": ",".join(tags), "category": category, "folder": folder}

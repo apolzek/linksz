@@ -17,7 +17,7 @@ from tkinter import font as tkfont
 
 import bookmarks_ipc
 import bookmarks_platform
-from bookmarks_core import ADDED, ERROR, OPEN, BarCore
+from bookmarks_core import OPEN, BarCore
 from bookmarks_client import ApiError, Client
 
 WIDTH = 680
@@ -106,16 +106,16 @@ class Bar:
 
     def show(self):
         if not self.client.authenticated:
-            # The config YAML rules: with a valid token, or username/password in
-            # it, the bar signs in by itself to the same account the web uses.
+            # The account comes from the config file, the same one the web UI
+            # uses. The bar never asks for a login and cannot create accounts:
+            # it is a search front-end.
             try:
                 self.client.ensure_session()
             except ApiError:
                 pass
         if not self.client.authenticated:
-            self.ask_login()
-            if not self.client.authenticated:
-                return
+            self.show_config_hint()
+            return
 
         self.var.set("")
         self.core.set_query("")
@@ -138,48 +138,20 @@ class Bar:
         if self.visible and not NO_AUTOHIDE:
             self.hide()
 
-    # ---------------- login ----------------
-    def ask_login(self):
-        dlg = tk.Toplevel(self.root, bg=BG)
-        dlg.title("Bookmarks: sign in")
-        dlg.attributes("-topmost", True)
-        dlg.geometry("380x210")
-
-        server = tk.StringVar(value=self.client.config["server"])
-        user = tk.StringVar()
-        pwd = tk.StringVar()
-        error = tk.Label(dlg, text="", fg="#ff6b6b", bg=BG, font=self.f_sub, wraplength=340)
-
-        for i, (label, var, secret) in enumerate((("Server", server, False),
-                                                  ("Username", user, False),
-                                                  ("Password", pwd, True))):
-            tk.Label(dlg, text=label, bg=BG, fg=FG, font=self.f_sub).grid(
-                row=i, column=0, sticky="e", padx=10, pady=8)
-            entry = tk.Entry(dlg, textvariable=var, bg=BG_SEL, fg=FG, relief="flat",
-                             insertbackground=ACCENT, show="•" if secret else "")
-            entry.grid(row=i, column=1, sticky="we", padx=10, pady=8)
-        dlg.columnconfigure(1, weight=1)
-        error.grid(row=3, column=0, columnspan=2, padx=10)
-
-        def submit(_event=None):
-            self.client.config["server"] = server.get().strip() or self.client.config["server"]
-            try:
-                self.client.login(user.get().strip(), pwd.get())
-            except ApiError as err:
-                error.config(text=str(err))
-                return
-            try:
-                self.client.sync()
-            except ApiError:
-                pass  # sem rede tudo bem: o cache local ja serve
-            self.core.refresh()
-            dlg.destroy()
-
-        tk.Button(dlg, text="Sign in", command=submit).grid(row=4, column=1, sticky="e", padx=10, pady=10)
-        dlg.bind("<Return>", submit)
-        dlg.bind("<Escape>", lambda _e: dlg.destroy())
-        dlg.focus_force()
-        self.root.wait_window(dlg)
+    # ---------------- session ----------------
+    def show_config_hint(self):
+        """No dialog to sign in: the config file is where the account lives."""
+        from tkinter import messagebox
+        messagebox.showinfo(
+            "Bookmarks: nothing to search yet",
+            "No account configured.\n\n"
+            f"Point the bar at yours by editing\n{self.client.config_path}\n\n"
+            "  server: http://127.0.0.1:8787\n"
+            "  username: your-user\n"
+            "  password: your-password\n\n"
+            "The bar signs in on its own and stores the token there, so you can "
+            "delete the password afterwards. Accounts are created in the web UI.",
+        )
 
     # ---------------- render ----------------
     def on_query_changed(self):
@@ -233,12 +205,6 @@ class Bar:
         if action == OPEN:
             bookmarks_platform.open_url(payload)
             self.hide()
-        elif action == ADDED:
-            self.var.set("")
-            self.render()
-            self.sync_async()
-        elif action == ERROR:
-            self.status.config(text=payload)
 
     def copy_selected(self):
         url = self.core.copy_selected()
@@ -246,11 +212,6 @@ class Bar:
             self.root.clipboard_clear()
             self.root.clipboard_append(url)
         self.status.config(text=self.core.status())
-
-    def delete_selected(self):
-        if self.core.delete_selected():
-            self.render()
-            self.sync_async()
 
     def on_key(self, event):
         key = event.keysym
@@ -273,8 +234,6 @@ class Bar:
             self.activate()
         elif mod and key == "c":
             self.copy_selected()
-        elif mod and key == "d":
-            self.delete_selected()
         elif mod and key == "r":
             self.sync_async()
         elif cmd and key == "w":

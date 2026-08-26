@@ -750,7 +750,7 @@ async function moveFolder(from, to) {
 function dropTargetAt(x, y) {
   const el = document.elementFromPoint(x, y);
   if (!el) return null;
-  const root = el.closest('.tree-root-drop');
+  const root = el.closest('.tree-root-zone');
   if (root) return canDropFolder(drag.path, '') ? { el: root, to: '' } : null;
   const row = el.closest('.tree-row');
   if (!row || !row.dataset.path) return null;
@@ -770,16 +770,6 @@ function beginDrag(pointerId) {
   // that follows a plain tap to the row instead of the folder button.
   drag.row.setPointerCapture(pointerId);
 
-  // The strip is fixed to the viewport so that showing it does not push the
-  // rows down mid-gesture, but it has to sit on the panel: the layout is
-  // centred, so on a wide screen a hardcoded left edge lands nowhere near it.
-  const strip = $('.tree-root-drop');
-  const panel = $('#browse').getBoundingClientRect();
-  if (strip) {
-    strip.style.left = `${Math.round(panel.left + 6)}px`;
-    strip.style.width = `${Math.round(panel.width - 12)}px`;
-    strip.style.bottom = `${Math.round(Math.max(8, window.innerHeight - panel.bottom + 8))}px`;
-  }
   drag.row.classList.add('dragging');
   $('#browse-body').classList.add('dragging');
 
@@ -951,11 +941,13 @@ function treeSection(root, total, filter) {
   const tree = document.createElement('div');
   tree.className = 'tree';
 
-  // Only reachable mid-drag, which is the only moment it means anything.
-  const rootDrop = document.createElement('div');
-  rootDrop.className = 'tree-root-drop';
-  rootDrop.textContent = 'drop here to move to the root';
-  tree.append(rootDrop);
+  // The root, as a place. It is the gap that already sits between the buttons
+  // above and the first folder, so it costs no layout and nothing moves when a
+  // drag starts: mid-drag it just becomes visible and says what it is.
+  const rootZone = document.createElement('div');
+  rootZone.className = 'tree-root-zone';
+  rootZone.innerHTML = '<span>root</span>';
+  tree.append(rootZone);
 
   treeRows(root, 0, tree, filter);
   if (tree.childElementCount === 1) {
