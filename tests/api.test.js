@@ -328,8 +328,8 @@ test('the yaml export comes as a download with a filename', async () => {
   assert.equal(r.status, 200);
   assert.match(r.headers.get('content-type'), /yaml/);
   assert.match(r.headers.get('content-disposition'), /attachment; filename="bookmarks-\d{4}-\d{2}-\d{2}\.yaml"/);
-  assert.match(r.text, /^# Bookmarks vault export/);
-  assert.match(r.text, /^bookmarks:$/m);
+  assert.match(r.text, /^# Bookmarks export/);
+  assert.match(r.text, /^folders:$/m, 'grouped by folder, one key per path');
 });
 
 test('the html export is the format browsers import', async () => {
@@ -741,4 +741,48 @@ test('insights only ever sees your own opens', async () => {
   assert.equal(r.body.total, 0);
   assert.deepEqual(r.body.log, []);
   assert.deepEqual(r.body.top, []);
+});
+
+/* ---------------- editing the yaml by hand ---------------- */
+
+test('renaming a folder key in the file moves everything under it', async () => {
+  const mk = (folder, title) => call('POST', '/api/bookmarks', {
+    token, body: { url: `https://${title}.example`, title, folder },
+  });
+  await mk('velho/caminho', 'yaml-a');
+  await mk('velho/caminho/fundo', 'yaml-b');
+
+  const exported = await fetch(`${base}/api/export?format=yaml`, {
+    headers: { authorization: `Bearer ${token}` },
+  }).then((r) => r.text());
+  assert.match(exported, /^ {2}velho\/caminho:$/m, 'the path is the key');
+
+  // The whole branch travels by editing one key, and one entry travels by
+  // being given a folder line: the two ways the header documents.
+  const edited = exported
+    .replace(/^ {2}velho\/caminho:$/m, '  novo/caminho:')
+    .replace(/^ {2}velho\/caminho\/fundo:$/m, '  novo/caminho/fundo:')
+    .replace('    title: yaml-a', '    title: yaml-a\n    folder: solto');
+
+  // `update` is the mode for a hand-edited file: with equal dates the others
+  // keep what the vault already has.
+  const plan = await call('POST', '/api/import', { token, body: { content: edited, mode: 'update', apply: true } });
+  assert.equal(plan.status, 200);
+
+  const all = (await call('GET', '/api/bookmarks?limit=500', { token })).body.items;
+  assert.equal(all.find((b) => b.title === 'yaml-a').folder, 'solto');
+  assert.equal(all.find((b) => b.title === 'yaml-b').folder, 'novo/caminho/fundo');
+});
+
+test('reimporting an untouched export changes nothing', async () => {
+  const exported = await fetch(`${base}/api/export?format=yaml`, {
+    headers: { authorization: `Bearer ${token}` },
+  }).then((r) => r.text());
+  const before = (await call('GET', '/api/bookmarks?limit=500', { token })).body.total;
+
+  const plan = await call('POST', '/api/import', { token, body: { content: exported, mode: 'add' } });
+  assert.equal(plan.body.summary.create, 0, 'nothing is created twice');
+
+  const after = (await call('GET', '/api/bookmarks?limit=500', { token })).body.total;
+  assert.equal(after, before);
 });

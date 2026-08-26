@@ -150,12 +150,16 @@ class TestRealExportOpensInPyYAML(unittest.TestCase):
         """, vault)
 
         doc = pyyaml.safe_load(text)
-        self.assertEqual(doc["version"], 1)
+        self.assertEqual(doc["version"], 2)
         self.assertEqual(doc["count"], 2)
-        self.assertEqual([b["title"] for b in doc["bookmarks"]],
-                         ["Página com Acentuação", "Caddy: server"])
-        self.assertEqual(doc["bookmarks"][0]["tags"], ["go", "cli"])
-        self.assertEqual(doc["bookmarks"][0]["description"], "note with\ntwo lines")
+        # Grouped by folder: the path is the key, and what has none is unfiled.
+        self.assertEqual(list(doc["folders"]), ["dev/infra"])
+        entry = doc["folders"]["dev/infra"][0]
+        self.assertEqual(entry["title"], "Página com Acentuação")
+        self.assertEqual(entry["tags"], ["go", "cli"])
+        self.assertEqual(entry["description"], "note with\ntwo lines")
+        self.assertNotIn("folder", entry, "the folder is the key, not a field")
+        self.assertEqual([b["title"] for b in doc["unfiled"]], ["Caddy: server"])
 
 
 if __name__ == "__main__":

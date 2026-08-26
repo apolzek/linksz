@@ -50,23 +50,106 @@ test('urlKey survives garbage without blowing up', () => {
 
 /* ---------------- export ---------------- */
 
-test('the yaml export reads back as the same vault', () => {
+test('the yaml export groups by folder, and the key is the path', () => {
   const doc = yaml.parse(p.toYaml(VAULT, { user: 'apolzek' }));
-  assert.equal(doc.version, 1);
+  assert.equal(doc.version, 2);
   assert.equal(doc.count, 2);
-  assert.deepEqual(doc.bookmarks.map((b) => b.title), ['Kubernetes Docs', 'The Go Blog']);
-  assert.deepEqual(doc.bookmarks[0].tags, ['k8s', 'devops'], 'tags become a list in the file');
+  assert.deepEqual(Object.keys(doc.folders), ['dev', 'dev/infra'], 'folders sorted by path');
+  assert.deepEqual(doc.folders['dev/infra'].map((b) => b.title), ['Kubernetes Docs']);
+  assert.deepEqual(doc.folders['dev/infra'][0].tags, ['k8s', 'devops'], 'tags become a list in the file');
+  assert.equal('folder' in doc.folders['dev/infra'][0], false, 'the folder is the key, not a field');
 });
 
 test('the yaml export comes back through import with no field lost', () => {
   const { items } = p.parseImport(p.toYaml(VAULT));
   assert.equal(items.length, 2);
-  const k8s = items[0];
-  assert.equal(k8s.id, 'v1');
-  assert.equal(k8s.folder, 'dev/infra');
+  const k8s = items.find((b) => b.id === 'v1');
+  assert.equal(k8s.folder, 'dev/infra', 'the key becomes the folder again');
   assert.equal(k8s.category, 'studies');
   assert.equal(k8s.tags, 'k8s,devops', 'the list in the file becomes csv again');
   assert.equal(k8s.created_at, 100);
+});
+
+test('two exports of the same vault are the same file', () => {
+  const shuffled = [...VAULT].reverse();
+  const strip = (text) => text.replace(/^exported_at:.*$/m, '');
+  assert.equal(strip(p.toYaml(VAULT)), strip(p.toYaml(shuffled)),
+               'order in the database must not change the file');
+});
+
+test('bookmarks with no folder go under unfiled', () => {
+  const doc = yaml.parse(p.toYaml([...VAULT, {
+    id: 'v3', title: 'Solto', url: 'https://solto.example', folder: '',
+    category: '', tags: '', description: '', created_at: 1, updated_at: 1,
+  }]));
+  assert.deepEqual(doc.unfiled.map((b) => b.title), ['Solto']);
+  const { items } = p.parseImport(yaml.stringify(doc));
+  assert.equal(items.find((b) => b.id === 'v3').folder, '');
+});
+
+test('usage survives the round trip', () => {
+  const used = [{ ...VAULT[0], opens: 12, last_open_at: 1787000000000 }];
+  const doc = yaml.parse(p.toYaml(used));
+  assert.equal(doc.folders['dev/infra'][0].opens, 12);
+  const { items } = p.parseImport(p.toYaml(used));
+  assert.equal(items[0].opens, 12);
+  assert.equal(items[0].last_open_at, 1787000000000);
+});
+
+test('a bookmark with no opens carries no counter in the file', () => {
+  const doc = yaml.parse(p.toYaml(VAULT));
+  assert.equal('opens' in doc.folders['dev/infra'][0], false);
+});
+
+/* ---------------- reading files edited by hand ---------------- */
+
+test('a flat bookmarks list, from older exports, still imports', () => {
+  const legacy = [
+    'version: 1',
+    'bookmarks:',
+    '- id: old1',
+    '  title: Antigo',
+    '  url: https://antigo.example',
+    '  folder: dev/infra',
+    '  tags:',
+    '  - k8s',
+  ].join('\n');
+  const { items, format } = p.parseImport(legacy);
+  assert.equal(format, 'yaml');
+  assert.equal(items.length, 1);
+  assert.equal(items[0].folder, 'dev/infra');
+  assert.equal(items[0].tags, 'k8s');
+});
+
+test('a folder: line on an entry wins over the key it sits under', () => {
+  const edited = [
+    'folders:',
+    '  dev/infra:',
+    '  - title: Movido a mao',
+    '    url: https://movido.example',
+    '    folder: technology/software/dev',
+  ].join('\n');
+  const { items } = p.parseImport(edited);
+  assert.equal(items[0].folder, 'technology/software/dev');
+});
+
+test('a key that does not exist yet simply becomes a folder', () => {
+  const { items } = p.parseImport('folders:\n  pasta/nova/em/folha:\n  - title: Novo\n    url: https://novo.example\n');
+  assert.equal(items[0].folder, 'pasta/nova/em/folha');
+});
+
+test('the root can be written as / or as unfiled', () => {
+  const { items } = p.parseImport('folders:\n  /:\n  - title: Raiz\n    url: https://raiz.example\n');
+  assert.equal(items[0].folder, '');
+});
+
+test('a yaml with none of the expected keys is refused', () => {
+  assert.throws(() => p.parseImport('titulo: nada a ver\noutro: campo\n'), /folders/);
+});
+
+test('an empty vault is a valid file', () => {
+  const { items } = p.parseImport(p.toYaml([]));
+  assert.deepEqual(items, []);
 });
 
 test('the html export is recognized as a browser format', () => {

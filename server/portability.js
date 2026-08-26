@@ -35,6 +35,8 @@ function urlKey(url) {
   }
 }
 
+// What makes two entries the same bookmark for the import plan. Usage counters
+// are deliberately out: opening a link is not an edit to it.
 const FIELDS = ['title', 'url', 'folder', 'category', 'tags', 'description'];
 
 function sameContent(a, b) {
@@ -43,35 +45,86 @@ function sameContent(a, b) {
 
 /* ======================= export ======================= */
 
+// One entry as it appears in the file. `folder` is not written: inside the
+// export it is the key the entry sits under.
+function yamlItem(b) {
+  const item = { id: b.id, title: b.title || '', url: b.url || '' };
+  if (b.category) item.category = b.category;
+  // A list instead of csv: in the file that is far more readable and editable.
+  if (b.tags) item.tags = String(b.tags).split(',').filter(Boolean);
+  if (b.description) item.description = b.description;
+  // Usage survives the round trip. Counters only ever grow, and the server
+  // merges them with MAX, so importing an old file cannot lower them.
+  if (Number(b.opens) > 0) item.opens = Number(b.opens);
+  if (Number(b.last_open_at) > 0) item.last_open_at = Number(b.last_open_at);
+  item.created_at = b.created_at;
+  item.updated_at = b.updated_at;
+  return item;
+}
+
+// Sorting is not cosmetic here: with folders and titles in a fixed order, two
+// exports of the same vault are the same file, and a diff shows what changed
+// instead of what moved.
+function byName(a, b) {
+  return String(a).localeCompare(String(b), 'en', { sensitivity: 'base' });
+}
+
+/* The file is grouped by folder:
+
+     folders:
+       technology/infrastructure/observability:
+       - title: Grafana Docs
+         ...
+
+   which is the tree the app shows, written down. It beats a flat list with a
+   `folder:` on every entry for the two things this file is for: reading the
+   taxonomy, and editing it by hand (renaming a folder is one key, moving one
+   is one line). */
 function toYaml(bookmarks, { user = '' } = {}) {
+  const grouped = new Map();
+  const unfiled = [];
+  for (const b of bookmarks) {
+    const folder = String(b.folder || '').trim();
+    if (!folder) { unfiled.push(b); continue; }
+    if (!grouped.has(folder)) grouped.set(folder, []);
+    grouped.get(folder).push(b);
+  }
+
+  const folders = {};
+  for (const path of [...grouped.keys()].sort(byName)) {
+    folders[path] = grouped.get(path)
+      .sort((a, b) => byName(a.title || a.url, b.title || b.url))
+      .map(yamlItem);
+  }
+
   const doc = {
-    version: 1,
+    version: 2,
     exported_at: new Date().toISOString(),
     count: bookmarks.length,
-    bookmarks: bookmarks.map((b) => {
-      const item = {
-        id: b.id,
-        title: b.title || '',
-        url: b.url || '',
-      };
-      if (b.folder) item.folder = b.folder;
-      if (b.category) item.category = b.category;
-      // A list instead of csv: in the file that is far more readable and editable.
-      if (b.tags) item.tags = String(b.tags).split(',').filter(Boolean);
-      if (b.description) item.description = b.description;
-      item.created_at = b.created_at;
-      item.updated_at = b.updated_at;
-      return item;
-    }),
+    folders,
   };
+  if (unfiled.length) {
+    doc.unfiled = unfiled
+      .sort((a, b) => byName(a.title || a.url, b.title || b.url))
+      .map(yamlItem);
+  }
 
   const header = [
-    'Bookmarks vault export',
+    'Bookmarks export',
     user ? `user: ${user}` : '',
     '',
-    'You can edit this file by hand and import it back.',
-    'The id field is what links each entry to an existing bookmark:',
-    'delete the id and the entry comes in as a new bookmark.',
+    'Entries are grouped by folder, and the key is the whole path.',
+    '',
+    'Editing by hand:',
+    '  * rename a key      -> renames that folder for everything under it',
+    '  * move an entry     -> cut it under another key, or give it a folder: line',
+    '  * new folder        -> a key that does not exist yet is created on import',
+    '  * delete the id     -> the entry comes in as a new bookmark',
+    '',
+    'Importing an edited file: choose "Use the file". The other modes keep what',
+    'is already here when the dates match, and your edits would be skipped.',
+    '',
+    'Files exported by older versions (a flat bookmarks: list) still import.',
   ].filter((l) => l !== null).join('\n');
 
   return yaml.stringify(doc, { header });
@@ -144,8 +197,10 @@ function toNetscapeHtml(bookmarks) {
   return lines.join('\n');
 }
 
+// The raw dump: every column as it is stored, for scripts. Unlike the YAML it
+// does not reshape anything, which is the point of having it.
 function toJson(bookmarks) {
-  return JSON.stringify({ version: 1, count: bookmarks.length, bookmarks }, null, 2);
+  return JSON.stringify({ version: 2, count: bookmarks.length, bookmarks }, null, 2);
 }
 
 /* ======================= import: read ======================= */
@@ -172,32 +227,72 @@ function normTagList(value) {
   return out.join(',');
 }
 
-function normalizeIncoming(raw) {
+// `folder` comes from the key the entry was found under. An explicit folder:
+// on the entry still wins, so moving one bookmark can be a single added line
+// instead of cutting and pasting the block.
+function normalizeIncoming(raw, folderFromKey = '') {
   return {
     id: String(raw.id ?? '').trim().slice(0, 64),
     title: String(raw.title ?? '').trim().slice(0, 500),
     url: String(raw.url ?? '').trim().slice(0, 2000),
-    folder: String(raw.folder ?? '').trim().replace(/^\/+|\/+$/g, '').slice(0, 300),
+    folder: String(raw.folder ?? folderFromKey ?? '').trim().replace(/^\/+|\/+$/g, '').slice(0, 300),
     category: String(raw.category ?? '').replace(/^@/, '').trim().toLowerCase().slice(0, 200),
     tags: normTagList(raw.tags),
     // `notes` is the field's old name: older files still import.
     description: String(raw.description ?? raw.notes ?? '').trim().slice(0, 5000),
     created_at: Number(raw.created_at) > 0 ? Number(raw.created_at) : null,
     updated_at: Number(raw.updated_at) > 0 ? Number(raw.updated_at) : null,
+    // Usage comes back with the file. The server merges counters with MAX, so
+    // an old export can restore a count but never shrink one.
+    opens: Number(raw.opens) > 0 ? Math.floor(Number(raw.opens)) : 0,
+    last_open_at: Number(raw.last_open_at) > 0 ? Math.floor(Number(raw.last_open_at)) : 0,
   };
 }
 
+// Reads both shapes: the current one, grouped by folder, and the flat
+// `bookmarks:` list that earlier versions wrote. A file edited by hand tends to
+// be a mix of the two, so neither is treated as the only right answer.
 function parseYamlExport(text) {
   const doc = yaml.parse(text);
   if (doc === null) return [];
 
-  const list = Array.isArray(doc) ? doc : doc.bookmarks;
-  if (!Array.isArray(list)) {
-    throw new Error('YAML without a "bookmarks" list, check the file');
+  const out = [];
+  const takeList = (list, folder) => {
+    if (!Array.isArray(list)) return;
+    for (const item of list) {
+      if (item && typeof item === 'object' && !Array.isArray(item)) out.push(normalizeIncoming(item, folder));
+    }
+  };
+  // A map of path -> entries. `unfiled` (or the empty key, or `/`) is the root.
+  const takeMap = (map) => {
+    if (!map || typeof map !== 'object' || Array.isArray(map)) return;
+    for (const [path, list] of Object.entries(map)) {
+      takeList(list, path === '/' ? '' : path);
+    }
+  };
+
+  if (Array.isArray(doc)) {
+    takeList(doc, '');
+  } else {
+    takeMap(doc.folders);
+    takeList(doc.unfiled, '');
+    // `bookmarks:` was the flat list, but a hand-written file may well use the
+    // same key for the grouped shape.
+    if (Array.isArray(doc.bookmarks)) takeList(doc.bookmarks, '');
+    else takeMap(doc.bookmarks);
   }
-  return list
-    .filter((item) => item && typeof item === 'object')
-    .map(normalizeIncoming);
+
+  if (!out.length && !hasAnyList(doc)) {
+    throw new Error('YAML without a "folders" map or a "bookmarks" list, check the file');
+  }
+  return out;
+}
+
+// An empty vault is a valid file; a file with none of the expected keys is not.
+function hasAnyList(doc) {
+  if (Array.isArray(doc)) return true;
+  if (!doc || typeof doc !== 'object') return false;
+  return ['folders', 'unfiled', 'bookmarks'].some((k) => k in doc);
 }
 
 // Reads the browser HTML without an HTML parser: the format is rigid enough
