@@ -91,9 +91,10 @@ jobs:
           ignore-unfixed: true
           exit-code: '1'
 
-      # Everything below only runs when the scan above passed
+      # Logging in is not publishing: it runs on every green scan so a broken or
+      # expired credential shows up here, on an ordinary push, instead of the
+      # day someone actually needs to release.
       - name: Log in to Docker Hub
-        if: ${{ inputs.push == true }}
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
@@ -102,13 +103,13 @@ jobs:
       # No secret to manage here: the token the runner already carries is
       # enough to write packages owned by this repository
       - name: Log in to the github registry
-        if: ${{ inputs.push == true }}
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # The only step that actually publishes, and the only one still gated
       - name: Publish to both registries
         if: ${{ inputs.push == true }}
         env:
@@ -130,6 +131,7 @@ jobs:
             echo "Scanned and published, tags $TAG and latest"
             echo "  $NAMESPACE/bookmarks and $GHCR/bookmarks"
           else
-            echo "Dry run: image built and scanned clean, nothing was pushed"
+            echo "Dry run: image built, scanned clean and both registries accepted"
+            echo "the credentials. Nothing was pushed"
             echo "The tag it would have used is $TAG"
           fi

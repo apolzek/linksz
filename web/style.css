@@ -368,11 +368,13 @@ select.ghost option { background: var(--panel); color: var(--text); }
 }
 /* Pinned to the bottom of the panel instead of sitting in the list: appearing
    in the flow would push every row down mid-drag and the drop would land on
-   the folder next door. The panel is a fixed-width column, so are these. */
+   the folder next door. Left, width and bottom come from the panel's box at
+   drag time, because the layout is centred and moves with the window. */
 .tree-root-drop {
   display: none; position: fixed; z-index: 6; left: 16px; bottom: 14px; width: 216px;
-  padding: 8px 10px; text-align: center; font-size: 12px;
-  background: var(--panel); border: 1px dashed var(--line); color: var(--muted);
+  padding: 10px; text-align: center; font-size: 12px; font-family: var(--font-mono);
+  background: var(--panel); border: 1px dashed var(--accent); color: var(--muted);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, .35);
 }
 #browse-body.dragging .tree-root-drop { display: block; }
 

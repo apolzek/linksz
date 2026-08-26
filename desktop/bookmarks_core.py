@@ -3,32 +3,32 @@
 The views (bookmarks_gtk.py, bookmarks_tk.py) only draw what this module decides and
 send the keys back. That keeps Linux and macOS behaving identically and, more
 importantly, makes the whole bar testable without a display.
+
+The bar reads and never writes. Search, open, copy: creating, editing and
+deleting live in the web UI, and the account it connects to comes from the
+config file, so the bar never asks anyone to sign in or sign up.
 """
 
-from bookmarks_client import parse_quick_add
 from bookmarks_search import search
 
 MAX_RESULTS = 12
 
 # Actions returned by activate(), for the view to carry out.
 OPEN = "open"
-ADDED = "added"
-ERROR = "error"
 NOTHING = "nothing"
 
 
 class Row:
     """One row of the list, ready to draw."""
 
-    __slots__ = ("kind", "title", "subtitle", "badges", "bookmark", "parsed")
+    __slots__ = ("kind", "title", "subtitle", "badges", "bookmark")
 
-    def __init__(self, kind, title, subtitle="", badges=(), bookmark=None, parsed=None):
-        self.kind = kind          # "result" or "add"
+    def __init__(self, kind, title, subtitle="", badges=(), bookmark=None):
+        self.kind = kind          # only "result": the bar lists bookmarks
         self.title = title
         self.subtitle = subtitle
         self.badges = list(badges)  # [(kind, text)], kind: folder | cat | tag
         self.bookmark = bookmark
-        self.parsed = parsed
 
     def __repr__(self):
         return f"Row({self.kind}, {self.title!r})"
@@ -55,18 +55,6 @@ def _subtitle_of(bookmark):
     return f"{url}   {opens}\u00d7" if opens > 0 else url
 
 
-def _describe(parsed):
-    bits = [parsed["url"] or "(no url)"]
-    if parsed["title"]:
-        bits.append(parsed["title"])
-    if parsed["folder"]:
-        bits.append("/" + parsed["folder"])
-    if parsed["category"]:
-        bits.append("@" + parsed["category"])
-    bits += ["#" + t for t in parsed["tags"].split(",") if t]
-    return "  ".join(bits)
-
-
 class BarCore:
     def __init__(self, client, max_results=MAX_RESULTS):
         self.client = client
@@ -87,23 +75,13 @@ class BarCore:
     def refresh(self):
         """Recomputes the rows from the local cache (never hits the network)."""
         self._all = self.client.all_bookmarks()
-
-        if self.is_quick_add:
-            parsed = parse_quick_add(self.query[1:].strip())
-            self.rows = [Row("add", "+ add bookmark", _describe(parsed), parsed=parsed)]
-        else:
-            found = search(self._all, self.query, self.max_results)
-            self.rows = [
-                Row("result", b.get("title") or b.get("url") or "(no title)",
-                    _subtitle_of(b), _badges_of(b), bookmark=b)
-                for b in found
-            ]
-
+        found = search(self._all, self.query, self.max_results)
+        self.rows = [
+            Row("result", b.get("title") or b.get("url") or "(no title)",
+                _subtitle_of(b), _badges_of(b), bookmark=b)
+            for b in found
+        ]
         self.sel = 0
-
-    @property
-    def is_quick_add(self):
-        return self.query.startswith("+")
 
     @property
     def total(self):
@@ -112,14 +90,12 @@ class BarCore:
     def status(self):
         if self.message:
             return self.message
-        if self.is_quick_add:
-            return "Enter adds the bookmark"
         if not self.query:
             return (f"{self.total} bookmarks · #tag  @category  /folder · "
-                    f'-term excludes · "phrase" literal · +url adds')
+                    f'-term excludes · "phrase" literal')
         if not self.rows:
-            return f"nothing found · type «+ {self.query}» to add it as a bookmark"
-        return f"{len(self.rows)} of {self.total} · Enter opens · Ctrl+C copies · Ctrl+D deletes"
+            return f"nothing found for «{self.query}»"
+        return f"{len(self.rows)} of {self.total} · Enter opens · Ctrl+C copies"
 
     # ---------------- navigation ----------------
     def move(self, delta):
@@ -148,19 +124,10 @@ class BarCore:
         if row is None:
             return (NOTHING, None)
 
-        if row.kind == "add":
-            parsed = row.parsed
-            if not parsed["url"] and not parsed["title"]:
-                self.message = "provide at least a url"
-                return (ERROR, self.message)
-            bookmark = self.client.add(**parsed)
-            self.set_query("")
-            self.message = "bookmark added, syncing…"
-            return (ADDED, bookmark)
-
         # Counts towards the ranking: the bar is the launcher, so most of the
-        # opens happen here and not in the web UI.
-        if row.kind == "result" and row.bookmark.get("id"):
+        # opens happen here and not in the web UI. It is also the only thing
+        # the bar ever writes.
+        if row.bookmark.get("id"):
             try:
                 self.client.register_open(row.bookmark["id"])
             except Exception:
@@ -175,18 +142,6 @@ class BarCore:
         url = row.bookmark.get("url", "")
         self.message = f"copied: {url}" if url else "this bookmark has no url"
         return url or None
-
-    def delete_selected(self):
-        row = self.selected()
-        if row is None or row.kind != "result":
-            return None
-        bookmark = row.bookmark
-        keep = self.sel
-        self.client.delete(bookmark["id"])
-        self.refresh()
-        self.sel = min(keep, max(0, len(self.rows) - 1))
-        self.message = f"deleted: {bookmark.get('title') or bookmark.get('url')}"
-        return bookmark
 
     def on_sync_result(self, applied, error):
         """Result of the background sync. True = the view has to redraw."""

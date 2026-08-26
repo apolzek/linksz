@@ -19,9 +19,20 @@ COPY api ./api
 COPY web ./web
 
 # Unprivileged user + /data as the database mount point.
-RUN addgroup -S bookmarks && adduser -S -G bookmarks bookmarks \
+#
+# npm and corepack go with it: this app has no dependencies and never installs
+# anything at runtime, so all they add is a pile of bundled packages with their
+# own CVEs, which is what the image scan in CI keeps finding.
+# The base image lags behind Alpine's own security updates by days; upgrading
+# here is what keeps the scan in CI from failing on a CVE that is already fixed
+# upstream. Runs before anything else so the layer caches on its own.
+RUN apk --no-cache upgrade \
+    && addgroup -S bookmarks && adduser -S -G bookmarks bookmarks \
     && mkdir -p /data \
-    && chown -R bookmarks:bookmarks /data /app
+    && chown -R bookmarks:bookmarks /data /app \
+    && rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack \
+              /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack \
+              /opt/yarn* /usr/local/bin/yarn /usr/local/bin/yarnpkg
 
 USER bookmarks
 

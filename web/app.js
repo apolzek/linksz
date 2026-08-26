@@ -769,6 +769,17 @@ function beginDrag(pointerId) {
   // Captured only now: taking the pointer on mousedown would send the click
   // that follows a plain tap to the row instead of the folder button.
   drag.row.setPointerCapture(pointerId);
+
+  // The strip is fixed to the viewport so that showing it does not push the
+  // rows down mid-gesture, but it has to sit on the panel: the layout is
+  // centred, so on a wide screen a hardcoded left edge lands nowhere near it.
+  const strip = $('.tree-root-drop');
+  const panel = $('#browse').getBoundingClientRect();
+  if (strip) {
+    strip.style.left = `${Math.round(panel.left + 6)}px`;
+    strip.style.width = `${Math.round(panel.width - 12)}px`;
+    strip.style.bottom = `${Math.round(Math.max(8, window.innerHeight - panel.bottom + 8))}px`;
+  }
   drag.row.classList.add('dragging');
   $('#browse-body').classList.add('dragging');
 
