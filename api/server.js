@@ -233,18 +233,25 @@ function createApp(dbPath) {
 
   // Writes a bookmark coming from a client. The client's `updated_at` wins when
   // it is newer (last-write-wins), which is what keeps web and desktop converging.
-  function writeBookmark(userId, b, ts = now()) {
+  //
+  // `revive` is what a sync push does not get. A push carries the whole record,
+  // including rows the other side only touched to count an open, and a counter
+  // bump must not undo a deletion: delete a bookmark on the web, open it on the
+  // bar a moment later, and it would come back from the dead. Deleting stays
+  // deliberate, so only a deliberate write (create, edit, import) revives.
+  function writeBookmark(userId, b, ts = now(), { revive = true } = {}) {
     const id = str(b.id, 64) || crypto.randomUUID();
     const existing = q.getOne.get(userId, id);
     const updated = Number(b.updated_at) > 0 ? Number(b.updated_at) : ts;
     const created = existing ? existing.created_at : (Number(b.created_at) > 0 ? Number(b.created_at) : ts);
+    const buried = !revive && existing?.deleted === 1;
 
     q.upsert.run(
       id, userId,
       str(b.title, 500), str(b.url, 2000),
       normFolder(b.folder), normCategory(b.category), normTags(b.tags),
       str(b.description ?? b.notes, 5000),   // `notes`: the field's old name
-      created, updated, b.deleted ? 1 : 0,
+      created, updated, (buried || b.deleted) ? 1 : 0,
       counter(b.opens), counter(b.last_open_at),
     );
     return q.getOne.get(userId, id);
@@ -370,7 +377,11 @@ function createApp(dbPath) {
         // the last-write-wins gate would drop the write and the bookmark would
         // never come back, so that write is stamped now.
         const buried = incoming.id ? q.getOne.get(user.id, incoming.id) : null;
-        writeBookmark(user.id, buried ? { ...incoming, updated_at: ts } : incoming, ts);
+        // Strictly newer than the tombstone, not merely now: a client with a
+        // clock running ahead can leave a timestamp in the future, and a
+        // restore losing to it would fail quietly.
+        const stamp = buried ? Math.max(ts, buried.updated_at + 1) : ts;
+        writeBookmark(user.id, buried ? { ...incoming, updated_at: stamp } : incoming, ts);
       }
       for (const { incoming } of plan.update) writeBookmark(user.id, { ...incoming, updated_at: ts }, ts);
       for (const { current } of plan.remove) q.softDelete.run(ts, user.id, current.id);
@@ -456,7 +467,8 @@ function createApp(dbPath) {
       const since = Number(b.since) || 0;
       const pushed = Array.isArray(b.changes) ? b.changes : [];
       const ts = now();
-      for (const item of pushed) writeBookmark(user.id, item, ts);
+      // A push never revives: see writeBookmark.
+      for (const item of pushed) writeBookmark(user.id, item, ts, { revive: false });
       const changes = q.since.all(user.id, since);
       return json(res, 200, { changes, now: ts, pushed: pushed.length });
     },

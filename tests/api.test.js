@@ -922,3 +922,38 @@ test('a deletion in that same window is not lost either', async () => {
   assert.ok(tomb, 'the tombstone travels');
   assert.equal(tomb.deleted, 1);
 });
+
+test('a sync push does not bring a deleted bookmark back', async () => {
+  const t = (await call('POST', '/api/auth/register', {
+    body: { email: 'revive@example.com', username: 'revive', password: 'secret123' },
+  })).body.token;
+  const made = (await call('POST', '/api/bookmarks', {
+    token: t, body: { url: 'https://revive.example', title: 'Revive' },
+  })).body.item;
+
+  await call('DELETE', `/api/bookmarks/${made.id}`, { token: t });
+
+  // What a bar that opened the link just before the deletion pushes: the whole
+  // record, not deleted, stamped later. It must not undo the deletion.
+  const pushed = await call('POST', '/api/sync', {
+    token: t,
+    body: { since: 0, changes: [{ ...made, opens: 3, updated_at: Date.now() + 5000 }] },
+  });
+  assert.equal(pushed.status, 200);
+
+  const after = await call('GET', `/api/bookmarks/${made.id}`, { token: t });
+  assert.equal(after.status, 404, 'it stays deleted');
+
+  // The counter still merged, so nothing is lost if it is ever restored.
+  const restored = await call('POST', '/api/import', {
+    token: t, mode: 'add',
+    body: {
+      mode: 'add', apply: true,
+      content: `folders:\n  /:\n  - id: ${made.id}\n    title: Revive\n    url: https://revive.example\n`,
+    },
+  });
+  assert.equal(restored.status, 200);
+  const back = await call('GET', `/api/bookmarks/${made.id}`, { token: t });
+  assert.equal(back.status, 200, 'an import still restores it, because that one is deliberate');
+  assert.equal(back.body.item.opens, 3, 'and the opens counted while it was gone survived');
+});

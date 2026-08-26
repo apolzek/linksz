@@ -937,6 +937,9 @@ class TestSyncWithServer(unittest.TestCase):
         web = self.make_client("bar-uso-web")
         web.login("desktop", "senha123")
         web.add(url="https://velho.example", title="Velho", tags="#uso")
+        # Distinct timestamps on purpose: created in the same millisecond the
+        # two would tie, and "the newest first" would have nothing to say.
+        time.sleep(0.005)
         web.add(url="https://novo.example", title="Novo", tags="#uso")
         web.sync()
         c.sync()
