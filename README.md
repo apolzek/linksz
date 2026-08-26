@@ -7,23 +7,38 @@ the same vault: a Spotlight-style launcher bar on Linux, and a PWA in the
 browser served by the same backend. No dependencies, no accounts anywhere but
 your own machine.
 
-## Requirements
+## Running it
 
-Node 24 and Python 3 with GTK3 (`python3-gi`). `mise` is optional and pins both.
+Linux, macOS or Docker, each with its own page:
 
-## Install
+    docs/linux.md         systemd service, resident bar, Super+Space
+    docs/macos.md         LaunchAgents, Bookmarks Bar.app, manual shortcut
+    docs/containers.md    the three images, the phone, TLS
+
+The short version on Linux:
 
     git clone git@github.com:nochaosio/bookmarks.nochaos.io.git
     cd bookmarks.nochaos.io
     mise install
     bash desktop/install.sh
 
-That installs a systemd user service for the backend on http://127.0.0.1:8787,
-the bar on autostart, and Super+Space as the global shortcut. Pass another one
-to change it: `bash desktop/install.sh '<Super>b'`.
+That puts the backend on http://127.0.0.1:8787 as a user service, the bar on
+autostart behind Super+Space, and the PWA one click away in the browser. Sign
+in with the test account `teste` / `teste123`, or register your own.
 
-Open http://127.0.0.1:8787 and sign in with the test account `teste` /
-`teste123`, or register your own.
+## HTTPS is what makes it an app
+
+A PWA installs, and a service worker registers, only in a secure context:
+https, or localhost. Measured on this stack, same build, same browser:
+
+    http://localhost:8080          secure context: yes    service worker: registers
+    http://192.168.0.10:8080       secure context: no     navigator.serviceWorker: absent
+
+So on your own machine plain HTTP is fine, localhost is trusted by definition.
+From a phone, or any other machine, it is not, and without TLS you get a
+website instead of an app: no offline, no install. That is the whole reason the
+docker stack ships a caddy in front, issuing a certificate from its own CA and
+handing that CA to the phone at http://<ip>/root.crt. See docs/containers.md.
 
 ## The bar
 
@@ -94,7 +109,7 @@ skipped.
     mise run server    backend + web UI on http://127.0.0.1:8787
     mise run bar       opens the bar
     mise run test      the whole suite
-    mise run up        docker stack (add --profile tls for the phone)
+    mise run up        the docker stack, api + web + proxy
 
 ## Layout
 
@@ -102,6 +117,7 @@ skipped.
     web/        the PWA, and the nginx image that serves it in Docker
     proxy/      caddy with TLS, so a phone can install the PWA
     desktop/    the GTK/Tk bar and its installers
+    docs/       how to run it on linux, on macos, in containers
     tests/      one suite for all of it: bash tests/run.sh
 
 The search engine is written twice, `web/search.js` and
@@ -130,19 +146,10 @@ touched it, so a frontend release leaves the other two on the tag they had:
     nochaos/bookmarks-web      nginx: the PWA, and /api proxied to the api
     nochaos/bookmarks-proxy    caddy: TLS in front, for the phone
 
-`docker compose up -d --build` brings up api and web on http://localhost:8080.
-That is the whole stack for normal use: nginx serves the PWA and proxies /api
-to the backend, which is the same origin the service worker needs.
-
-The proxy is the exception, and it is behind a profile:
-
-    BOOKMARKS_SITE=192.168.0.10 docker compose --profile tls up -d --build
-
-It exists for one thing. A PWA only installs, and a service worker only
-registers, in a secure context: https or localhost. From a phone over the LAN
-you have neither, so caddy issues a certificate from its own CA and serves that
-CA at http://<ip>/root.crt for the phone to trust. With a real domain, or a
-tunnel that already terminates TLS, you do not need it.
+`docker compose up -d --build` wires the three together; `mise run up` is the
+same thing. Only using it from this machine, at localhost? Then the proxy adds
+nothing: `docker compose up -d api web`. Details, the phone flow and the
+environment variables are in docs/containers.md.
 
 ## CI
 
