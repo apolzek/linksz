@@ -175,7 +175,11 @@ function createApp(dbPath) {
     sessionByToken: db.prepare('SELECT * FROM sessions WHERE token = ?'),
     deleteSession: db.prepare('DELETE FROM sessions WHERE token = ?'),
     allBookmarks: db.prepare('SELECT * FROM bookmarks WHERE user_id = ? AND deleted = 0 ORDER BY updated_at DESC'),
-    since: db.prepare('SELECT * FROM bookmarks WHERE user_id = ? AND updated_at > ? ORDER BY updated_at ASC'),
+    // >= and not >: the cursor is a millisecond, and a change written in the
+    // same millisecond as the previous answer would fall in the gap and never
+    // be sent again. Resending a row the client already has costs nothing,
+    // losing one costs a deletion that never arrives.
+    since: db.prepare('SELECT * FROM bookmarks WHERE user_id = ? AND updated_at >= ? ORDER BY updated_at ASC'),
     getOne: db.prepare('SELECT * FROM bookmarks WHERE user_id = ? AND id = ?'),
     upsert: db.prepare(`
       INSERT INTO bookmarks (id, user_id, title, url, folder, category, tags, description, created_at, updated_at, deleted, opens, last_open_at)

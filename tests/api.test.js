@@ -879,3 +879,46 @@ test('folder names that need quoting in yaml survive the round trip', async () =
   const copied = (await call('GET', '/api/bookmarks?limit=500', { token: other })).body.items;
   assert.deepEqual([...new Set(copied.map((b) => b.folder))].sort(), [...names].sort());
 });
+
+/* ---------------- sync: the cursor is a millisecond ---------------- */
+
+test('a change made in the same millisecond as the last sync still arrives', async () => {
+  const t = (await call('POST', '/api/auth/register', {
+    body: { email: 'cursor@example.com', username: 'cursor', password: 'secret123' },
+  })).body.token;
+
+  const made = await call('POST', '/api/bookmarks', {
+    token: t, body: { url: 'https://cursor.example', title: 'Cursor' },
+  });
+  const first = await call('POST', '/api/sync', { token: t, body: { since: 0, changes: [] } });
+  const cursor = first.body.now;
+
+  // The worst case, forced: a write stamped exactly at the cursor the client
+  // was told to come back with. An exclusive `>` would drop it forever.
+  await call('POST', '/api/sync', {
+    token: t,
+    body: { since: cursor, changes: [{ ...made.body.item, title: 'Cursor edited', updated_at: cursor }] },
+  });
+
+  const other = await call('POST', '/api/sync', { token: t, body: { since: cursor, changes: [] } });
+  const seen = other.body.changes.find((c) => c.id === made.body.item.id);
+  assert.ok(seen, 'the change is in the answer');
+  assert.equal(seen.title, 'Cursor edited');
+});
+
+test('a deletion in that same window is not lost either', async () => {
+  const t = (await call('POST', '/api/auth/register', {
+    body: { email: 'cursor2@example.com', username: 'cursor2', password: 'secret123' },
+  })).body.token;
+  const made = await call('POST', '/api/bookmarks', {
+    token: t, body: { url: 'https://gone.example', title: 'Gone' },
+  });
+
+  const first = await call('POST', '/api/sync', { token: t, body: { since: 0, changes: [] } });
+  await call('DELETE', `/api/bookmarks/${made.body.item.id}`, { token: t });
+
+  const after = await call('POST', '/api/sync', { token: t, body: { since: first.body.now, changes: [] } });
+  const tomb = after.body.changes.find((c) => c.id === made.body.item.id);
+  assert.ok(tomb, 'the tombstone travels');
+  assert.equal(tomb.deleted, 1);
+});

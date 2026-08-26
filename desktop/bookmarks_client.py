@@ -295,12 +295,20 @@ class Client:
 
         applied = 0
         for c in r.get("changes", []):
-            local = self.db.execute("SELECT updated_at, dirty FROM bookmarks WHERE id = ?", (c["id"],)).fetchone()
+            local = self.db.execute(
+                "SELECT updated_at, deleted, dirty FROM bookmarks WHERE id = ?", (c["id"],)).fetchone()
             # Does not overwrite a newer local change that has not been pushed yet.
             if local and local["dirty"] and local["updated_at"] > c["updated_at"]:
                 continue
+            # The cursor overlaps by a millisecond, so the boundary row comes
+            # back on every sync. Applying it again is harmless; counting it is
+            # not, because a non-zero count redraws the bar for nothing.
+            already = (local
+                       and local["updated_at"] == (c.get("updated_at") or 0)
+                       and bool(local["deleted"]) == bool(c.get("deleted")))
             self._upsert_local(c, dirty=0)
-            applied += 1
+            if not already:
+                applied += 1
 
         self._set_meta("last_sync", r.get("now", now_ms()))
         return applied
