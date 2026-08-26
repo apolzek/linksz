@@ -167,7 +167,7 @@ jobs:
           severity: CRITICAL,HIGH
           ignore-unfixed: true
           scanners: vuln,secret
-          pkg-types: os
+          vuln-type: os
           exit-code: '1'
 
       # The other half is the Go standard library caddy was compiled against.
@@ -180,7 +180,7 @@ jobs:
           format: table
           severity: CRITICAL,HIGH
           ignore-unfixed: true
-          pkg-types: library
+          vuln-type: library
           exit-code: '0'
 
       # Logging in is not publishing: it runs on every green scan so a broken or
