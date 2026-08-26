@@ -152,7 +152,6 @@ jobs:
           format: table
           severity: CRITICAL,HIGH
           scanners: vuln,secret
-          scanners: vuln,secret
           ignore-unfixed: true
           exit-code: '1'
 
