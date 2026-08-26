@@ -12,7 +12,7 @@ case "$(uname -s)" in
   Darwin) exec bash "$ROOT/desktop/install-macos.sh" "$@" ;;
   *)
     echo "unsupported system: $(uname -s)" >&2
-    echo "the backend runs anywhere with 'node server/server.js'" >&2
+    echo "the backend runs anywhere with 'node api/server.js'" >&2
     exit 1
     ;;
 esac

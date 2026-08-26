@@ -76,7 +76,7 @@ if [[ -n "$NODE" ]]; then
   <key>ProgramArguments</key>
   <array>
     <string>$NODE</string>
-    <string>$ROOT/server/server.js</string>
+    <string>$ROOT/api/server.js</string>
   </array>
   <key>EnvironmentVariables</key>
   <dict><key>BOOKMARKS_PORT</key><string>8787</string></dict>

@@ -7,7 +7,7 @@ BOOKMARKS_PORT = "8787"
 
 [tasks.server]
 description = "Starts the backend + web UI (http://localhost:8787)"
-run = "node server/server.js"
+run = "node api/server.js"
 
 [tasks.bar]
 description = "Opens the desktop search bar"

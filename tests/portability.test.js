@@ -6,8 +6,8 @@
 const test = require('node:test');
 const assert = require('node:assert');
 
-const p = require('../server/portability');
-const yaml = require('../server/yaml');
+const p = require('../api/portability');
+const yaml = require('../api/yaml');
 
 const VAULT = [
   { id: 'v1', title: 'Kubernetes Docs', url: 'https://kubernetes.io/docs', folder: 'dev/infra',
@@ -71,10 +71,22 @@ test('the yaml export comes back through import with no field lost', () => {
 });
 
 test('two exports of the same vault are the same file', () => {
-  const shuffled = [...VAULT].reverse();
+  // Including two entries with the same title: without a total order they land
+  // in whatever order the database returned and the file changes for nothing.
+  const twins = [
+    ...VAULT,
+    { id: 'z1', title: 'Mesmo Titulo', url: 'https://b.example', folder: 'dev',
+      category: '', tags: '', description: '', created_at: 1, updated_at: 1 },
+    { id: 'z2', title: 'Mesmo Titulo', url: 'https://a.example', folder: 'dev',
+      category: '', tags: '', description: '', created_at: 1, updated_at: 1 },
+  ];
   const strip = (text) => text.replace(/^exported_at:.*$/m, '');
-  assert.equal(strip(p.toYaml(VAULT)), strip(p.toYaml(shuffled)),
+  assert.equal(strip(p.toYaml(twins)), strip(p.toYaml([...twins].reverse())),
                'order in the database must not change the file');
+  const doc = yaml.parse(p.toYaml(twins));
+  assert.deepEqual(doc.folders.dev.map((b) => b.url),
+                   ['https://a.example', 'https://b.example', 'https://go.dev/blog'],
+                   'sorted by title, and ties break by url');
 });
 
 test('bookmarks with no folder go under unfiled', () => {

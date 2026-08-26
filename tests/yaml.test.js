@@ -7,7 +7,7 @@
 const test = require('node:test');
 const assert = require('node:assert');
 
-const { stringify, parse, YamlError } = require('../server/yaml');
+const { stringify, parse, YamlError } = require('../api/yaml');
 
 const roundTrip = (v) => parse(stringify(v));
 

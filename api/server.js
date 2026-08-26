@@ -359,7 +359,15 @@ function createApp(dbPath) {
       if (!b.apply) return json(res, 200, { ...preview, applied: false });
 
       const ts = now();
-      for (const { incoming } of plan.create) writeBookmark(user.id, { ...incoming, id: '' }, ts);
+      for (const { incoming } of plan.create) {
+        // The id in the file is kept: an export is a backup, and restoring one
+        // has to give back the same bookmarks, not copies of them. The one
+        // catch is a tombstone with that id (deleted here, still in the file):
+        // the last-write-wins gate would drop the write and the bookmark would
+        // never come back, so that write is stamped now.
+        const buried = incoming.id ? q.getOne.get(user.id, incoming.id) : null;
+        writeBookmark(user.id, buried ? { ...incoming, updated_at: ts } : incoming, ts);
+      }
       for (const { incoming } of plan.update) writeBookmark(user.id, { ...incoming, updated_at: ts }, ts);
       for (const { current } of plan.remove) q.softDelete.run(ts, user.id, current.id);
 

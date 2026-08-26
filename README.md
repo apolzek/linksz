@@ -29,10 +29,7 @@ Another shortcut:
 bash desktop/install.sh '<Super>b'
 ```
 
-## Usage
-
-Open `http://127.0.0.1:8787` and log in with the test account `teste` / `teste123`,
-or register your own.
+## Bar
 
 Press `Super+Space` to open the bar, type, press `Enter` to open the link.
 
@@ -105,11 +102,24 @@ mise run bar       # open the bar
 mise run test      # the whole suite
 ```
 
+## Layout
+
+```
+api/        backend: HTTP, SQLite, import/export. Node built-ins only, no deps
+web/        the PWA the backend serves on the same port
+desktop/    the GTK/Tk bar and the installers
+tests/      one suite for all three: bash tests/run.sh
+```
+
+The search engine is written twice on purpose, `web/search.js` and
+`desktop/bookmarks_search.py`, so the bar answers offline exactly like the web
+does. A parity test compares them on random vaults and queries.
+
 ## Where things live
 
 | What | Where |
 |---|---|
-| Vault (server) | `~/.local/share/bookmarks/bookmarks.db` |
+| Vault (api) | `~/.local/share/bookmarks/bookmarks.db` |
 | Bar cache | `~/.local/share/bookmarks/cache.db` |
 | Bar config | `~/.config/bookmarks/config.json` |
 | Backend service | `systemctl --user status bookmarks` |
@@ -117,3 +127,10 @@ mise run test      # the whole suite
 Environment: `BOOKMARKS_PORT`, `BOOKMARKS_HOST`, `BOOKMARKS_DB`, `BOOKMARKS_SEED=0`
 to skip the test account, and `BOOKMARKS_COMMIT` / `BOOKMARKS_DEPLOYED_AT` for a
 pipeline to stamp the build shown next to the sync light.
+
+## CI
+
+`.github/workflows/docker.yml` runs the suite, builds the image, scans it with
+trivy and stamps the commit into it. Publishing is opt in: the workflow pushes
+to Docker Hub and ghcr.io only when dispatched with `push` checked, so a run on
+`master` is a build and a scan and nothing else.

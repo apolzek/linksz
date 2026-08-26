@@ -62,11 +62,20 @@ function yamlItem(b) {
   return item;
 }
 
-// Sorting is not cosmetic here: with folders and titles in a fixed order, two
+// Sorting is not cosmetic here: with folders and entries in a fixed order, two
 // exports of the same vault are the same file, and a diff shows what changed
 // instead of what moved.
 function byName(a, b) {
   return String(a).localeCompare(String(b), 'en', { sensitivity: 'base' });
+}
+
+// Title, then url, then id: a total order. Two bookmarks sharing a title (the
+// same page saved from two mirrors, say) would otherwise land in whatever order
+// the database happened to return, and the file would differ for no reason.
+function byEntry(a, b) {
+  return byName(a.title || a.url, b.title || b.url)
+      || byName(a.url, b.url)
+      || byName(a.id, b.id);
 }
 
 /* The file is grouped by folder:
@@ -92,9 +101,7 @@ function toYaml(bookmarks, { user = '' } = {}) {
 
   const folders = {};
   for (const path of [...grouped.keys()].sort(byName)) {
-    folders[path] = grouped.get(path)
-      .sort((a, b) => byName(a.title || a.url, b.title || b.url))
-      .map(yamlItem);
+    folders[path] = grouped.get(path).sort(byEntry).map(yamlItem);
   }
 
   const doc = {
@@ -104,9 +111,7 @@ function toYaml(bookmarks, { user = '' } = {}) {
     folders,
   };
   if (unfiled.length) {
-    doc.unfiled = unfiled
-      .sort((a, b) => byName(a.title || a.url, b.title || b.url))
-      .map(yamlItem);
+    doc.unfiled = unfiled.sort(byEntry).map(yamlItem);
   }
 
   const header = [
@@ -274,6 +279,11 @@ function parseYamlExport(text) {
   if (Array.isArray(doc)) {
     takeList(doc, '');
   } else {
+    // `folders` written as a list is a hand-editing mistake with an obvious
+    // fix; reading it as zero bookmarks and saying nothing is the worst answer.
+    if (Array.isArray(doc.folders)) {
+      throw new Error('"folders" must be a map of path -> entries, not a list');
+    }
     takeMap(doc.folders);
     takeList(doc.unfiled, '');
     // `bookmarks:` was the flat list, but a hand-written file may well use the

@@ -760,7 +760,7 @@ class TestSyncWithServer(unittest.TestCase):
         cls.tmp = tempfile.mkdtemp(prefix="bookmarks-py-test-")
         cls.port = free_port()
         cls.proc = subprocess.Popen(
-            ["node", os.path.join(ROOT, "server", "server.js")],
+            ["node", os.path.join(ROOT, "api", "server.js")],
             env={**os.environ, "BOOKMARKS_PORT": str(cls.port),
                  "BOOKMARKS_DB": os.path.join(cls.tmp, "bookmarks.db")},
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,

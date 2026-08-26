@@ -85,9 +85,11 @@ case \"\$ct\" in
   *) echo \"FAIL manifest content-type (\$ct)\" ;;
 esac
 
-# 6. the full API through the proxy, advanced search included
+# 6. the full API through the proxy, advanced search included.
+# The account is `composetest`, not `teste`: the stack seeds a `teste` user on
+# every boot and registering it again is a 409, not a test failure.
 TOKEN=\$(\$C -X POST https://$SITE/api/auth/register -H 'content-type: application/json' \
-  -d '{\"email\":\"t@t.com\",\"username\":\"teste\",\"password\":\"secret123\"}' \
+  -d '{\"email\":\"compose@t.com\",\"username\":\"composetest\",\"password\":\"secret123\"}' \
   | sed -n 's/.*\"token\":\"\([^\"]*\)\".*/\1/p')
 [ -n \"\$TOKEN\" ] && echo 'PASS register over the API' || echo 'FAIL register over the API'
 
@@ -118,7 +120,7 @@ persist=$(docker run --rm --network "$NET" --entrypoint sh curlimages/curl:lates
 R=\"--resolve $SITE:443:$IP --resolve $SITE:80:$IP\"
 curl -s \$R -o /tmp/ca.crt http://$SITE/root.crt
 TOKEN=\$(curl -s \$R --cacert /tmp/ca.crt -X POST https://$SITE/api/auth/login \
-  -H 'content-type: application/json' -d '{\"login\":\"teste\",\"password\":\"secret123\"}' \
+  -H 'content-type: application/json' -d '{\"login\":\"composetest\",\"password\":\"secret123\"}' \
   | sed -n 's/.*\"token\":\"\([^\"]*\)\".*/\1/p')
 curl -s \$R --cacert /tmp/ca.crt https://$SITE/api/bookmarks -H \"authorization: Bearer \$TOKEN\"
 " 2>/dev/null)

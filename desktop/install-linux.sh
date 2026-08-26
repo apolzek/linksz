@@ -82,7 +82,7 @@ Description=Bookmarks backend (API + web)
 After=network.target
 
 [Service]
-ExecStart=$(command -v node) $ROOT/server/server.js
+ExecStart=$(command -v node) $ROOT/api/server.js
 Restart=on-failure
 Environment=BOOKMARKS_PORT=8787
 

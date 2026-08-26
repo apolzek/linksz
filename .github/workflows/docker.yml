@@ -1,0 +1,135 @@
+name: Docker image
+
+# The push step is opt in on purpose: run the workflow with push set to false
+# to check the credentials, the build and the scan without publishing anything.
+on:
+  workflow_dispatch:
+    inputs:
+      push:
+        description: Publish the image
+        type: boolean
+        default: false
+  push:
+    branches: [master]
+
+env:
+  # Same shape as the other images in the account, nochaos/delineax-api
+  NAMESPACE: nochaos
+  # The github registry mirrors the same image under the organization
+  GHCR: ghcr.io/${{ github.repository_owner }}
+
+jobs:
+  # The image is only worth building if the suite that guards it still passes
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24   # node:sqlite, which the api is built on
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # The suite has no dependencies: node builtins on one side, the standard
+      # library on the other. PyYAML is the exception, and it is there to prove
+      # that a file this project writes opens in somebody else's parser.
+      - name: Install PyYAML for the interop test
+        run: pip install pyyaml
+
+      # api, web search engine, its Python twin and the desktop bar, in one go
+      - name: Run the suite
+        run: bash tests/run.sh
+
+  image:
+    needs: tests
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write   # required to push to ghcr.io
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Collect the build stamp
+        id: stamp
+        run: |
+          # Image tag: date and the first five characters of the commit, so a
+          # tag says when it was built and exactly what it was built from
+          echo "tag=$(date -u +%Y-%m-%d)-$(git rev-parse --short=5 HEAD)" >> "$GITHUB_OUTPUT"
+          echo "sha=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+          echo "time=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v3
+
+      # One image: unlike a split frontend, this backend serves the PWA itself,
+      # and that single port is what makes the app installable from a phone.
+      #
+      # Built into the local daemon first, so trivy scans the exact bits that
+      # will be pushed later, not a rebuild of them
+      - name: Build the image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          pull: true   # always start from the freshest base image
+          tags: bookmarks:candidate
+          # The stamp reaches the UI through /api/health, next to the sync light
+          build-args: |
+            BOOKMARKS_COMMIT=${{ steps.stamp.outputs.sha }}
+            BOOKMARKS_DEPLOYED_AT=${{ steps.stamp.outputs.time }}
+          cache-from: type=gha,scope=bookmarks
+          cache-to: type=gha,mode=max,scope=bookmarks
+
+      - name: Scan the image
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: bookmarks:candidate
+          format: table
+          severity: CRITICAL,HIGH
+          # Nothing to do about a vulnerability with no fix available yet, so
+          # it is reported by the next step instead of blocking the release
+          ignore-unfixed: true
+          exit-code: '1'
+
+      # Everything below only runs when the scan above passed
+      - name: Log in to Docker Hub
+        if: ${{ inputs.push == true }}
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      # No secret to manage here: the token the runner already carries is
+      # enough to write packages owned by this repository
+      - name: Log in to the github registry
+        if: ${{ inputs.push == true }}
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish to both registries
+        if: ${{ inputs.push == true }}
+        env:
+          TAG: ${{ steps.stamp.outputs.tag }}
+        run: |
+          set -eu
+          for target in "$NAMESPACE/bookmarks" "$GHCR/bookmarks"; do
+            docker tag bookmarks:candidate "$target:$TAG"
+            docker tag bookmarks:candidate "$target:latest"
+            docker push "$target:$TAG"
+            docker push "$target:latest"
+          done
+
+      - name: Say what happened
+        env:
+          TAG: ${{ steps.stamp.outputs.tag }}
+        run: |
+          if [ "${{ inputs.push }}" = "true" ]; then
+            echo "Scanned and published, tags $TAG and latest"
+            echo "  $NAMESPACE/bookmarks and $GHCR/bookmarks"
+          else
+            echo "Dry run: image built and scanned clean, nothing was pushed"
+            echo "The tag it would have used is $TAG"
+          fi

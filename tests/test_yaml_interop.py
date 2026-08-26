@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Is the YAML we write real YAML?
 
-server/yaml.js is hand-written (the backend has no dependencies). A home-made
+api/yaml.js is hand-written (the backend has no dependencies). A home-made
 parser risks speaking a private dialect: it reads back what it wrote and nobody
 else understands it, exactly the opposite of what an export format should be.
 
@@ -21,7 +21,7 @@ import subprocess
 import unittest
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-YAML_JS = os.path.join(ROOT, "server", "yaml.js")
+YAML_JS = os.path.join(ROOT, "api", "yaml.js")
 
 try:
     import yaml as pyyaml

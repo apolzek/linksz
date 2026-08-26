@@ -9,8 +9,8 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const { createApp, ensureSeedUser } = require('../server/server');
-const { verifyPassword } = require('../server/auth');
+const { createApp, ensureSeedUser } = require('../api/server');
+const { verifyPassword } = require('../api/auth');
 
 const tmpDb = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'bookmarks-test-')), 'bookmarks.db');
 const { server } = createApp(tmpDb);
@@ -470,9 +470,19 @@ test('the web UI is served at the root', async () => {
 });
 
 test('does not serve files outside web/', async () => {
-  for (const p of ['/../server/db.js', '/../../etc/passwd', '/%2e%2e/server/db.js']) {
+  // The encoded ones are the interesting half: fetch normalizes `/../x` away
+  // before it leaves the client, while `%2e%2e` reaches the server intact.
+  const attempts = [
+    '/%2e%2e/api/db.js', '/%2e%2e/%2e%2e/etc/passwd', '/..%2fapi%2fserver.js',
+    '/../../etc/passwd', '/./../api/auth.js',
+  ];
+  for (const p of attempts) {
     const res = await fetch(base + p);
-    assert.ok(res.status === 403 || res.status === 404, `${p} devolveu ${res.status}`);
+    const body = await res.text();
+    // 401 is a pass too: `%2e%2e` normalizes to `..` in the URL parser, so the
+    // path lands on the API router and is turned away before any file is read.
+    assert.ok([401, 403, 404].includes(res.status), `${p} answered ${res.status}`);
+    assert.ok(!body.includes('DatabaseSync') && !body.includes('root:'), `${p} leaked a file`);
   }
 });
 
@@ -785,4 +795,87 @@ test('reimporting an untouched export changes nothing', async () => {
 
   const after = (await call('GET', '/api/bookmarks?limit=500', { token })).body.total;
   assert.equal(after, before);
+});
+
+/* ---------------- import: the file is a backup ---------------- */
+
+test('an exported id comes back as the same bookmark, not a copy', async () => {
+  const mine = await call('POST', '/api/auth/register', {
+    body: { email: 'restore@example.com', username: 'restore', password: 'secret123' },
+  });
+  const t = mine.body.token;
+  const made = await call('POST', '/api/bookmarks', {
+    token: t, body: { url: 'https://restore.example', title: 'Restaurar', folder: 'a/b' },
+  });
+  const backup = await fetch(`${base}/api/export?format=yaml`, {
+    headers: { authorization: `Bearer ${t}` },
+  }).then((r) => r.text());
+
+  // Deleted here, still in the file: importing has to bring the same row back,
+  // tombstone and last-write-wins gate notwithstanding.
+  await call('DELETE', `/api/bookmarks/${made.body.item.id}`, { token: t });
+  assert.equal((await call('GET', `/api/bookmarks/${made.body.item.id}`, { token: t })).status, 404);
+
+  await call('POST', '/api/import', { token: t, body: { content: backup, mode: 'add', apply: true } });
+  const back = await call('GET', `/api/bookmarks/${made.body.item.id}`, { token: t });
+  assert.equal(back.status, 200, 'the bookmark is back');
+  assert.equal(back.body.item.id, made.body.item.id, 'with the id it had');
+  assert.equal(back.body.item.folder, 'a/b');
+});
+
+test('a file that cannot be read is refused and writes nothing', async () => {
+  const before = (await call('GET', '/api/bookmarks?limit=5000', { token })).body.total;
+  const broken = {
+    'empty': '',
+    'plain text': 'this is not an export of anything',
+    'unclosed quote': 'folders:\n  dev:\n  - title: "cut in half\n',
+    'tab indentation': 'folders:\n\tdev:\n\t- title: x\n',
+    'no known key': 'title: nothing\nother: field\n',
+    'folders as a list': 'folders:\n- title: loose\n  url: https://loose\n',
+  };
+  for (const [what, content] of Object.entries(broken)) {
+    const r = await call('POST', '/api/import', { token, body: { content, mode: 'add', apply: true } });
+    assert.equal(r.status, 400, `${what} should be refused`);
+    assert.ok(r.body.error, `${what} says why`);
+    const after = (await call('GET', '/api/bookmarks?limit=5000', { token })).body.total;
+    assert.equal(after, before, `${what} wrote nothing`);
+  }
+});
+
+test('the preview writes nothing and matches what apply does', async () => {
+  const file = ['folders:', '  preview/only:',
+                '  - title: Previsto', '    url: https://previsto.example', ''].join('\n');
+  const before = (await call('GET', '/api/bookmarks?limit=5000', { token })).body.total;
+
+  const plan = await call('POST', '/api/import', { token, body: { content: file, mode: 'add' } });
+  assert.equal(plan.body.applied, false);
+  assert.equal((await call('GET', '/api/bookmarks?limit=5000', { token })).body.total, before,
+               'a preview is a preview');
+
+  await call('POST', '/api/import', { token, body: { content: file, mode: 'add', apply: true } });
+  const after = (await call('GET', '/api/bookmarks?limit=5000', { token })).body.total;
+  assert.equal(after - before, plan.body.summary.create, 'created exactly what the plan said');
+});
+
+test('folder names that need quoting in yaml survive the round trip', async () => {
+  const t = (await call('POST', '/api/auth/register', {
+    body: { email: 'quoting@example.com', username: 'quoting', password: 'secret123' },
+  })).body.token;
+
+  // Every one of these means something else in YAML unless the key is quoted.
+  const names = ['dev: infra', '#tag', 'c++', '100%', 'true', 'null', '123', '[a]', '@at', '- dash'];
+  for (const [i, folder] of names.entries()) {
+    await call('POST', '/api/bookmarks', { token: t, body: { url: `https://q${i}.example`, title: `q${i}`, folder } });
+  }
+  const file = await fetch(`${base}/api/export?format=yaml`, {
+    headers: { authorization: `Bearer ${t}` },
+  }).then((r) => r.text());
+
+  const other = (await call('POST', '/api/auth/register', {
+    body: { email: 'quoting2@example.com', username: 'quoting2', password: 'secret123' },
+  })).body.token;
+  await call('POST', '/api/import', { token: other, body: { content: file, mode: 'add', apply: true } });
+
+  const copied = (await call('GET', '/api/bookmarks?limit=500', { token: other })).body.items;
+  assert.deepEqual([...new Set(copied.map((b) => b.folder))].sort(), [...names].sort());
 });
