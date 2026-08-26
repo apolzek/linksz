@@ -12,7 +12,7 @@ import tempfile
 IS_MAC = sys.platform == "darwin"
 IS_LINUX = sys.platform.startswith("linux")
 
-APP = "vaultmarks"
+APP = "bookmarks"
 
 # macOS puts config and data together in Application Support; Linux follows XDG.
 _MAC_SUPPORT = "~/Library/Application Support"
@@ -112,8 +112,8 @@ def available_toolkits():
 
 
 def pick_toolkit():
-    """VAULTMARKS_UI forces a toolkit; otherwise the best available one is used."""
-    forced = os.environ.get("VAULTMARKS_UI", "").strip().lower()
+    """BOOKMARKS_UI forces a toolkit; otherwise the best available one is used."""
+    forced = os.environ.get("BOOKMARKS_UI", "").strip().lower()
     if forced in ("gtk", "tk"):
         return forced
 

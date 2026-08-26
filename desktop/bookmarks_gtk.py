@@ -1,6 +1,6 @@
 """GTK3 view of the bar, for Linux/GNOME.
 
-It only draws and translates keys: every decision lives in vmbar_core.BarCore.
+It only draws and translates keys: every decision lives in bookmarks_core.BarCore.
 """
 
 import os
@@ -12,24 +12,27 @@ gi.require_version("Gtk", "3.0")
 gi.require_version("Gdk", "3.0")
 from gi.repository import Gdk, Gio, GLib, Gtk  # noqa: E402
 
-import vmplatform  # noqa: E402
-from vmbar_core import ADDED, ERROR, OPEN, BarCore  # noqa: E402
-from vmclient import ApiError, Client  # noqa: E402
+import bookmarks_platform  # noqa: E402
+from bookmarks_core import ADDED, ERROR, OPEN, BarCore  # noqa: E402
+from bookmarks_client import ApiError, Client  # noqa: E402
 
-APP_ID = "dev.vaultmarks.Bar"
+APP_ID = "io.nochaos.Bookmarks"
 WIDTH = 680
 # With 1, the bar does not hide when it loses focus (handy for debugging and screenshots).
-NO_AUTOHIDE = os.environ.get("VAULTMARKS_NO_AUTOHIDE") == "1"
+NO_AUTOHIDE = os.environ.get("BOOKMARKS_NO_AUTOHIDE") == "1"
 
+# Square corners and a monospace readout, so the bar and the web UI read as the
+# same product. Colours still come from the system theme, which is what makes
+# the bar fit whatever desktop it opens on.
 CSS = b"""
-window.vm { background: transparent; }
-.vm-box {
+window.bar { background: transparent; }
+.bar-box {
   background: @theme_bg_color;
   border: 1px solid alpha(@theme_fg_color, 0.18);
-  border-radius: 14px;
+  border-radius: 0;
   box-shadow: 0 12px 40px alpha(black, 0.45);
 }
-.vm-entry {
+.bar-entry {
   font-size: 19px;
   padding: 14px 16px;
   background: transparent;
@@ -37,20 +40,21 @@ window.vm { background: transparent; }
   box-shadow: none;
   caret-color: @theme_selected_bg_color;
 }
-.vm-sep { background: alpha(@theme_fg_color, 0.12); min-height: 1px; }
-.vm-row { padding: 8px 16px; }
-.vm-title { font-size: 14px; }
-.vm-url { font-size: 11.5px; opacity: 0.6; }
-.vm-badge {
+.bar-sep { background: alpha(@theme_fg_color, 0.12); min-height: 1px; }
+.bar-row { padding: 8px 16px; }
+.bar-title { font-size: 14px; }
+.bar-url { font-family: monospace; font-size: 11.5px; opacity: 0.6; }
+.bar-badge {
+  font-family: monospace;
   font-size: 10.5px;
   padding: 1px 8px;
-  border-radius: 10px;
+  border-radius: 0;
   background: alpha(@theme_selected_bg_color, 0.20);
 }
-.vm-badge.cat { background: alpha(#f0b86e, 0.22); }
-.vm-badge.folder { background: alpha(#7ee0a1, 0.22); }
-.vm-status { font-size: 11px; opacity: 0.55; padding: 6px 16px; }
-.vm-error { color: #ff6b6b; font-size: 12px; padding: 4px 16px; }
+.bar-badge.cat { background: alpha(#fab387, 0.22); }
+.bar-badge.folder { background: alpha(#a6e3a1, 0.22); }
+.bar-status { font-family: monospace; font-size: 11px; opacity: 0.55; padding: 6px 16px; }
+.bar-error { color: #f38ba8; font-size: 12px; padding: 4px 16px; }
 """
 
 
@@ -89,7 +93,7 @@ class Bar(Gtk.Application):
 
     def build_window(self):
         win = Gtk.ApplicationWindow(application=self)
-        win.get_style_context().add_class("vm")
+        win.get_style_context().add_class("bar")
         win.set_decorated(False)
         win.set_skip_taskbar_hint(True)
         win.set_skip_pager_hint(True)
@@ -107,10 +111,10 @@ class Bar(Gtk.Application):
         win.connect("key-press-event", self.on_key)
 
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        box.get_style_context().add_class("vm-box")
+        box.get_style_context().add_class("bar-box")
 
         self.entry = Gtk.Entry()
-        self.entry.get_style_context().add_class("vm-entry")
+        self.entry.get_style_context().add_class("bar-entry")
         self.entry.set_has_frame(False)
         self.entry.set_placeholder_text("search…   #tag  @category  /folder   ·   + url to add")
         self.entry.connect("changed", lambda *_: self.on_query_changed())
@@ -118,7 +122,7 @@ class Bar(Gtk.Application):
         box.pack_start(self.entry, False, False, 0)
 
         sep = Gtk.Box()
-        sep.get_style_context().add_class("vm-sep")
+        sep.get_style_context().add_class("bar-sep")
         box.pack_start(sep, False, False, 0)
 
         self.listbox = Gtk.ListBox()
@@ -134,7 +138,7 @@ class Bar(Gtk.Application):
         box.pack_start(self.scroll, True, True, 0)
 
         self.status = Gtk.Label(xalign=0)
-        self.status.get_style_context().add_class("vm-status")
+        self.status.get_style_context().add_class("bar-status")
         box.pack_start(self.status, False, False, 0)
 
         win.add(box)
@@ -199,7 +203,7 @@ class Bar(Gtk.Application):
         return True
 
     def show_login_dialog(self):
-        dlg = Gtk.Dialog(title="Vaultmarks: sign in", modal=True)
+        dlg = Gtk.Dialog(title="Bookmarks: sign in", modal=True)
         dlg.set_default_size(360, -1)
         dlg.add_buttons("Cancel", Gtk.ResponseType.CANCEL, "Sign in", Gtk.ResponseType.OK)
         dlg.set_default_response(Gtk.ResponseType.OK)
@@ -209,7 +213,7 @@ class Bar(Gtk.Application):
         login = Gtk.Entry(placeholder_text="username or email", hexpand=True, activates_default=True)
         password = Gtk.Entry(placeholder_text="password", visibility=False, hexpand=True, activates_default=True)
         error = Gtk.Label()
-        error.get_style_context().add_class("vm-error")
+        error.get_style_context().add_class("bar-error")
 
         for i, (label, widget) in enumerate((("Server", server), ("Username", login), ("Password", password))):
             grid.attach(Gtk.Label(label=label, xalign=1), 0, i, 1, 1)
@@ -250,21 +254,21 @@ class Bar(Gtk.Application):
     def badge(self, kind, text):
         lbl = Gtk.Label(label=text)
         ctx = lbl.get_style_context()
-        ctx.add_class("vm-badge")
+        ctx.add_class("bar-badge")
         if kind in ("cat", "folder"):
             ctx.add_class(kind)
         return lbl
 
     def build_row(self, row):
         gtk_row = Gtk.ListBoxRow()
-        gtk_row.get_style_context().add_class("vm-row")
+        gtk_row.get_style_context().add_class("bar-row")
         line = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
 
         text = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         title = Gtk.Label(label=row.title, xalign=0, ellipsize=3)
-        title.get_style_context().add_class("vm-title")
+        title.get_style_context().add_class("bar-title")
         subtitle = Gtk.Label(label=row.subtitle, xalign=0, ellipsize=3)
-        subtitle.get_style_context().add_class("vm-url")
+        subtitle.get_style_context().add_class("bar-url")
         text.pack_start(title, False, False, 0)
         text.pack_start(subtitle, False, False, 0)
         line.pack_start(text, True, True, 0)
@@ -286,7 +290,7 @@ class Bar(Gtk.Application):
     def run_selected(self, index=None):
         action, payload = self.core.activate(index)
         if action == OPEN:
-            vmplatform.open_url(payload)
+            bookmarks_platform.open_url(payload)
             self.hide_bar()
         elif action == ADDED:
             self.entry.set_text("")

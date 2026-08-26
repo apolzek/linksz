@@ -15,7 +15,7 @@ set -euo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
-PROJECT="vaultmarks-test-$$"
+PROJECT="bookmarks-test-$$"
 SITE="localhost"
 COMPOSE=(docker compose -p "$PROJECT")
 FAILS=0
@@ -36,12 +36,12 @@ if ! docker info >/dev/null 2>&1; then
 fi
 
 info "starting the stack (the first build can take a while)"
-VAULTMARKS_SITE="$SITE" VAULTMARKS_HTTP_PORT=0 VAULTMARKS_HTTPS_PORT=0 \
+BOOKMARKS_SITE="$SITE" BOOKMARKS_HTTP_PORT=0 BOOKMARKS_HTTPS_PORT=0 \
   "${COMPOSE[@]}" up -d --build >/dev/null 2>&1
 
 # Waits for the backend to become healthy (Caddy depends on it to start).
 for _ in $(seq 60); do
-  status=$("${COMPOSE[@]}" ps --format '{{.Service}} {{.Status}}' 2>/dev/null | grep '^vaultmarks' || true)
+  status=$("${COMPOSE[@]}" ps --format '{{.Service}} {{.Status}}' 2>/dev/null | grep '^bookmarks' || true)
   [[ "$status" == *healthy* ]] && break
   sleep 1
 done
@@ -111,7 +111,7 @@ while IFS= read -r line; do
 done <<< "$output"
 
 info "restarting the backend to check persistence in the volume"
-"${COMPOSE[@]}" restart vaultmarks >/dev/null 2>&1
+"${COMPOSE[@]}" restart bookmarks >/dev/null 2>&1
 sleep 4
 
 persist=$(docker run --rm --network "$NET" --entrypoint sh curlimages/curl:latest -c "

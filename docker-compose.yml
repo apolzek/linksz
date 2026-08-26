@@ -1,58 +1,58 @@
 # The stack for the phone.
 #
 #   1. find this machine's IP on the network:  ip route get 1 | awk '{print $7; exit}'
-#   2. VAULTMARKS_SITE=192.168.0.10 docker compose up -d
+#   2. BOOKMARKS_SITE=192.168.0.10 docker compose up -d
 #   3. on the phone, open http://192.168.0.10/root.crt and install the certificate
 #   4. open https://192.168.0.10 and use "Add to home screen"
 #
 # Without step 3 the phone browser refuses the HTTPS and the PWA does not install.
 
 services:
-  vaultmarks:
+  bookmarks:
     build: .
-    image: vaultmarks:local
+    image: bookmarks:local
     restart: unless-stopped
     environment:
-      VAULTMARKS_HOST: 0.0.0.0
-      VAULTMARKS_PORT: "8787"
-      VAULTMARKS_DB: /data/vault.db
+      BOOKMARKS_HOST: 0.0.0.0
+      BOOKMARKS_PORT: "8787"
+      BOOKMARKS_DB: /data/bookmarks.db
       # Test account created on every boot (default: teste / teste123).
       # This stack is exposed on the local network: change the password, or turn
-      # it off with VAULTMARKS_SEED=0, before leaving it running.
-      VAULTMARKS_SEED_PASSWORD: ${VAULTMARKS_SEED_PASSWORD:-teste123}
+      # it off with BOOKMARKS_SEED=0, before leaving it running.
+      BOOKMARKS_SEED_PASSWORD: ${BOOKMARKS_SEED_PASSWORD:-teste123}
     volumes:
-      - vault-data:/data
+      - bookmarks-data:/data
     # No ports: Caddy is what talks to the network. To reach the backend
     # directly (debugging), uncomment:
     # ports:
     #   - "8787:8787"
     networks:
-      - vaultmarks
+      - bookmarks
 
   caddy:
     build: ./caddy          # the Caddyfile is baked in, see caddy/Dockerfile
-    image: vaultmarks-caddy:local
+    image: bookmarks-caddy:local
     restart: unless-stopped
     depends_on:
-      vaultmarks:
+      bookmarks:
         condition: service_healthy
     environment:
       # The hostname or IP you use to reach it. The certificate is issued for it.
-      VAULTMARKS_SITE: ${VAULTMARKS_SITE:-vaultmarks.local}
+      BOOKMARKS_SITE: ${BOOKMARKS_SITE:-bookmarks.local}
     ports:
-      - "${VAULTMARKS_HTTP_PORT:-80}:80"
-      - "${VAULTMARKS_HTTPS_PORT:-443}:443"
+      - "${BOOKMARKS_HTTP_PORT:-80}:80"
+      - "${BOOKMARKS_HTTPS_PORT:-443}:443"
     volumes:
       - caddy-data:/data       # holds the CA: deleting it means recertifying everything
       - caddy-config:/config
     networks:
-      - vaultmarks
+      - bookmarks
 
 volumes:
-  vault-data:
+  bookmarks-data:
   caddy-data:
   caddy-config:
 
 networks:
-  vaultmarks:
+  bookmarks:
     driver: bridge

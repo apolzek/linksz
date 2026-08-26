@@ -1,7 +1,7 @@
 {
   "id": "/",
-  "name": "Vaultmarks",
-  "short_name": "Vaultmarks",
+  "name": "Bookmarks",
+  "short_name": "Bookmarks",
   "description": "Your bookmarks with instant search, on the phone and on the desktop.",
   "start_url": "/",
   "scope": "/",

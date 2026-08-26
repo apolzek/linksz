@@ -3,7 +3,7 @@ node = "24"
 python = "3.12"
 
 [env]
-VAULTMARKS_PORT = "8787"
+BOOKMARKS_PORT = "8787"
 
 [tasks.server]
 description = "Starts the backend + web UI (http://localhost:8787)"
@@ -11,7 +11,7 @@ run = "node server/server.js"
 
 [tasks.bar]
 description = "Opens the desktop search bar"
-run = "python3 desktop/vaultmarks_bar.py"
+run = "python3 desktop/bookmarks_bar.py"
 
 [tasks.install]
 description = "Installs on the desktop (detects Linux or macOS)"

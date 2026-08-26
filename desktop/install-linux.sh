@@ -10,10 +10,10 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BINDING="${1:-<Super>space}"
-NAME="Vaultmarks"
+NAME="Bookmarks"
 PYTHON="$(command -v python3)"
-CMD="$PYTHON $ROOT/desktop/vaultmarks_bar.py"
-URL="${VAULTMARKS_URL:-http://127.0.0.1:8787}"
+CMD="$PYTHON $ROOT/desktop/bookmarks_bar.py"
+URL="${BOOKMARKS_URL:-http://127.0.0.1:8787}"
 
 say() { printf '\033[1;34m›\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m!\033[0m %s\n' "$*"; }
@@ -26,23 +26,23 @@ fi
 
 # ---------- 1. daemon autostart ----------
 mkdir -p ~/.config/autostart
-cat > ~/.config/autostart/vaultmarks.desktop <<EOF
+cat > ~/.config/autostart/bookmarks.desktop <<EOF
 [Desktop Entry]
 Type=Application
-Name=Vaultmarks (search bar)
+Name=Bookmarks (search bar)
 Comment=Keeps the bar resident so it opens instantly
 Exec=$CMD --daemon
 X-GNOME-Autostart-enabled=true
 NoDisplay=true
 EOF
-say "autostart installed at ~/.config/autostart/vaultmarks.desktop"
+say "autostart installed at ~/.config/autostart/bookmarks.desktop"
 
 # ---------- 2. launchers ----------
 mkdir -p ~/.local/share/applications
-cat > ~/.local/share/applications/vaultmarks.desktop <<EOF
+cat > ~/.local/share/applications/bookmarks.desktop <<EOF
 [Desktop Entry]
 Type=Application
-Name=Vaultmarks
+Name=Bookmarks
 Comment=Fast bookmark search
 Exec=$CMD
 Icon=bookmark-new
@@ -58,11 +58,11 @@ for b in google-chrome google-chrome-stable chromium chromium-browser brave-brow
 done
 
 if [[ -n "$BROWSER" ]]; then
-  cat > ~/.local/share/applications/vaultmarks-web.desktop <<EOF
+  cat > ~/.local/share/applications/bookmarks-web.desktop <<EOF
 [Desktop Entry]
 Type=Application
-Name=Vaultmarks (web)
-Comment=Opens the vault in its own window
+Name=Bookmarks (web)
+Comment=Opens your bookmarks in their own window
 Exec=$BROWSER --app=$URL
 Icon=bookmark-new
 Terminal=false
@@ -76,21 +76,21 @@ say "launchers installed in the applications menu"
 
 # ---------- 3. backend service ----------
 mkdir -p ~/.config/systemd/user
-cat > ~/.config/systemd/user/vaultmarks.service <<EOF
+cat > ~/.config/systemd/user/bookmarks.service <<EOF
 [Unit]
-Description=Vaultmarks backend (API + web)
+Description=Bookmarks backend (API + web)
 After=network.target
 
 [Service]
 ExecStart=$(command -v node) $ROOT/server/server.js
 Restart=on-failure
-Environment=VAULTMARKS_PORT=8787
+Environment=BOOKMARKS_PORT=8787
 
 [Install]
 WantedBy=default.target
 EOF
 systemctl --user daemon-reload
-systemctl --user enable --now vaultmarks.service >/dev/null 2>&1 \
+systemctl --user enable --now bookmarks.service >/dev/null 2>&1 \
   && say "backend running via systemd ($URL)" \
   || warn "systemd --user unavailable; run it by hand: mise run server"
 
@@ -103,11 +103,15 @@ if ! command -v gsettings >/dev/null 2>&1; then
 else
   existing=$(gsettings get org.gnome.settings-daemon.plugins.media-keys custom-keybindings)
   slot=""
-  # Reuses the slot when it is already registered.
+  # Reuses the slot when it is already registered. A slot counts as ours when
+  # its command points into this checkout, which also catches the ones written
+  # before the project was renamed, instead of leaving a dead shortcut behind.
   for i in $(seq 0 20); do
     p="$KEY_PATH/custom$i/"
     if [[ "$existing" == *"$p"* ]]; then
-      if [[ "$(gsettings get "$SCHEMA:$p" name 2>/dev/null)" == "'$NAME'" ]]; then slot="$p"; break; fi
+      slot_name="$(gsettings get "$SCHEMA:$p" name 2>/dev/null || true)"
+      slot_cmd="$(gsettings get "$SCHEMA:$p" command 2>/dev/null || true)"
+      if [[ "$slot_name" == "'$NAME'" || "$slot_cmd" == *"$ROOT/desktop/"* ]]; then slot="$p"; break; fi
     else
       slot="$p"; break
     fi
@@ -151,7 +155,7 @@ PY
 fi
 
 # Starts the daemon now so the shortcut works without logging out first.
-pgrep -f "vaultmarks_bar.py --daemon" >/dev/null || (setsid $CMD --daemon >/dev/null 2>&1 &)
+pgrep -f "bookmarks_bar.py --daemon" >/dev/null || (setsid $CMD --daemon >/dev/null 2>&1 &)
 
 echo
 say "done! press $BINDING to open the bar"

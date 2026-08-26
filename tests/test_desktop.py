@@ -30,17 +30,17 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "desktop"))
 
 # Isolates the tests' config/cache/socket from whatever exists on the machine.
-_SANDBOX = tempfile.mkdtemp(prefix="vm-test-home-")
+_SANDBOX = tempfile.mkdtemp(prefix="bookmarks-test-home-")
 os.environ["XDG_CONFIG_HOME"] = os.path.join(_SANDBOX, "config")
 os.environ["XDG_DATA_HOME"] = os.path.join(_SANDBOX, "data")
 os.environ["XDG_RUNTIME_DIR"] = os.path.join(_SANDBOX, "run")
 os.makedirs(os.environ["XDG_RUNTIME_DIR"], mode=0o700, exist_ok=True)
 
-import vmipc  # noqa: E402
-import vmplatform  # noqa: E402
-from vmbar_core import ADDED, ERROR, NOTHING, OPEN, BarCore  # noqa: E402
-from vmclient import ApiError, Client, normalize_tags, parse_quick_add  # noqa: E402
-from vmsearch import components, parse_query, search, tokenize  # noqa: E402
+import bookmarks_ipc  # noqa: E402
+import bookmarks_platform  # noqa: E402
+from bookmarks_core import ADDED, ERROR, NOTHING, OPEN, BarCore  # noqa: E402
+from bookmarks_client import ApiError, Client, normalize_tags, parse_quick_add  # noqa: E402
+from bookmarks_search import components, parse_query, search, tokenize  # noqa: E402
 
 FIXTURES = [
     {"id": "1", "title": "Kubernetes Docs", "url": "https://kubernetes.io/docs", "folder": "dev/infra",
@@ -274,6 +274,9 @@ class TestParityWithJS(unittest.TestCase):
             "tags": ",".join(rnd.sample(words, k=rnd.randint(0, 3))),
             "description": rnd.choice(words),
             "updated_at": rnd.choice([rnd.randint(0, 100), None, 0]),
+            # Including the junk a client may send: both engines have to read it
+            # the same way, or the ranking diverges between the bar and the web.
+            "opens": rnd.choice([0, None, rnd.randint(0, 30), "3", -2]),
             "deleted": rnd.choice([0, 0, 0, 1]),
         } for i in range(30)]
 
@@ -291,6 +294,47 @@ class TestParityWithJS(unittest.TestCase):
         for query, js_ids in zip(queries, expected):
             py_ids = [b["id"] for b in search(vault, query, 50)]
             self.assertEqual(py_ids, js_ids, f"divergencia na query {query!r}")
+
+
+class TestRankingDeUso(unittest.TestCase):
+    """The Python side of the usage ranking. The JS twin is in search.test.js."""
+
+    RANKED = [
+        {"id": "novo", "title": "go novo", "url": "", "tags": "", "category": "",
+         "folder": "", "description": "", "updated_at": 100, "deleted": 0},
+        {"id": "usado", "title": "go usado", "url": "", "tags": "", "category": "",
+         "folder": "", "description": "", "updated_at": 1, "opens": 5, "deleted": 0},
+    ]
+
+    def ids(self, items, query):
+        return [b["id"] for b in search(items, query)]
+
+    def test_most_used_comes_first(self):
+        self.assertEqual(self.ids(self.RANKED, ""), ["usado", "novo"])
+        self.assertEqual(self.ids(self.RANKED, "go"), ["usado", "novo"])
+
+    def test_without_opens_recency_still_decides(self):
+        none = [dict(b, opens=0) for b in self.RANKED]
+        self.assertEqual(self.ids(none, ""), ["novo", "usado"])
+
+    def test_boost_saturates(self):
+        items = [
+            {"id": "titulo", "title": "grafana", "url": "", "tags": "", "category": "",
+             "folder": "", "description": "", "updated_at": 1, "deleted": 0},
+            {"id": "desc", "title": "outro", "url": "", "tags": "", "category": "",
+             "folder": "", "description": "grafana", "updated_at": 1, "opens": 999, "deleted": 0},
+        ]
+        self.assertEqual(self.ids(items, "grafana"), ["titulo", "desc"])
+
+    def test_broken_counter_counts_as_zero(self):
+        for opens in (None, -5, "abc", "", [], {}):
+            items = [
+                {"id": "a", "title": "x", "url": "", "tags": "", "category": "", "folder": "",
+                 "description": "", "updated_at": 2, "opens": opens, "deleted": 0},
+                {"id": "b", "title": "x", "url": "", "tags": "", "category": "", "folder": "",
+                 "description": "", "updated_at": 1, "deleted": 0},
+            ]
+            self.assertEqual(self.ids(items, "x"), ["a", "b"], f"opens = {opens!r}")
 
 
 class TestNormalizacao(unittest.TestCase):
@@ -321,63 +365,63 @@ class TestPlatform(unittest.TestCase):
     """Linux and macOS differ in paths and in how a URL is opened."""
 
     def test_paths_respect_xdg(self):
-        self.assertTrue(vmplatform.config_dir().startswith(_SANDBOX))
-        self.assertTrue(vmplatform.data_dir().startswith(_SANDBOX))
-        self.assertTrue(vmplatform.config_dir().endswith("vaultmarks"))
+        self.assertTrue(bookmarks_platform.config_dir().startswith(_SANDBOX))
+        self.assertTrue(bookmarks_platform.data_dir().startswith(_SANDBOX))
+        self.assertTrue(bookmarks_platform.config_dir().endswith("bookmarks"))
 
     def test_paths_macos(self):
         with mock.patch.dict(os.environ, {}, clear=True), \
-             mock.patch.object(vmplatform, "IS_MAC", True):
-            self.assertIn("Library/Application Support", vmplatform.config_dir())
-            self.assertIn("Library/Application Support", vmplatform.data_dir())
+             mock.patch.object(bookmarks_platform, "IS_MAC", True):
+            self.assertIn("Library/Application Support", bookmarks_platform.config_dir())
+            self.assertIn("Library/Application Support", bookmarks_platform.data_dir())
 
     def test_paths_linux(self):
         with mock.patch.dict(os.environ, {}, clear=True), \
-             mock.patch.object(vmplatform, "IS_MAC", False):
-            self.assertIn(".config", vmplatform.config_dir())
-            self.assertIn(".local/share", vmplatform.data_dir())
+             mock.patch.object(bookmarks_platform, "IS_MAC", False):
+            self.assertIn(".config", bookmarks_platform.config_dir())
+            self.assertIn(".local/share", bookmarks_platform.data_dir())
 
     def test_open_url_per_system(self):
-        with mock.patch.object(vmplatform, "IS_MAC", True):
-            self.assertEqual(vmplatform.open_url_command("https://go.dev"), ["open", "https://go.dev"])
-        with mock.patch.object(vmplatform, "IS_MAC", False):
-            self.assertEqual(vmplatform.open_url_command("https://go.dev"), ["xdg-open", "https://go.dev"])
+        with mock.patch.object(bookmarks_platform, "IS_MAC", True):
+            self.assertEqual(bookmarks_platform.open_url_command("https://go.dev"), ["open", "https://go.dev"])
+        with mock.patch.object(bookmarks_platform, "IS_MAC", False):
+            self.assertEqual(bookmarks_platform.open_url_command("https://go.dev"), ["xdg-open", "https://go.dev"])
 
     def test_open_url_completes_the_scheme(self):
-        cmd = vmplatform.open_url_command("go.dev")
+        cmd = bookmarks_platform.open_url_command("go.dev")
         self.assertEqual(cmd[-1], "https://go.dev")
-        self.assertIsNone(vmplatform.open_url_command(""))
+        self.assertIsNone(bookmarks_platform.open_url_command(""))
 
     def test_socket_lives_in_a_private_directory(self):
-        caminho = vmplatform.socket_path()
+        caminho = bookmarks_platform.socket_path()
         mode = os.stat(os.path.dirname(caminho)).st_mode & 0o777
         self.assertEqual(mode, 0o700, "the socket must not sit in an open directory")
 
     def test_toolkit_can_be_forced(self):
-        with mock.patch.dict(os.environ, {"VAULTMARKS_UI": "tk"}):
-            self.assertEqual(vmplatform.pick_toolkit(), "tk")
-        with mock.patch.dict(os.environ, {"VAULTMARKS_UI": "gtk"}):
-            self.assertEqual(vmplatform.pick_toolkit(), "gtk")
+        with mock.patch.dict(os.environ, {"BOOKMARKS_UI": "tk"}):
+            self.assertEqual(bookmarks_platform.pick_toolkit(), "tk")
+        with mock.patch.dict(os.environ, {"BOOKMARKS_UI": "gtk"}):
+            self.assertEqual(bookmarks_platform.pick_toolkit(), "gtk")
 
     def test_no_toolkit_gives_a_useful_error(self):
-        with mock.patch.dict(os.environ, {"VAULTMARKS_UI": ""}), \
-             mock.patch.object(vmplatform, "available_toolkits", return_value=[]):
+        with mock.patch.dict(os.environ, {"BOOKMARKS_UI": ""}), \
+             mock.patch.object(bookmarks_platform, "available_toolkits", return_value=[]):
             with self.assertRaises(RuntimeError) as ctx:
-                vmplatform.pick_toolkit()
+                bookmarks_platform.pick_toolkit()
             self.assertIn("install", str(ctx.exception).lower())
 
     def test_macos_prefers_tk(self):
         """On macOS Tk comes with Python; GTK is almost never there."""
-        with mock.patch.object(vmplatform, "IS_MAC", True):
+        with mock.patch.object(bookmarks_platform, "IS_MAC", True):
             with mock.patch.dict(sys.modules, {"tkinter": mock.MagicMock()}):
-                self.assertEqual(vmplatform.available_toolkits()[0], "tk")
+                self.assertEqual(bookmarks_platform.available_toolkits()[0], "tk")
 
 
 class TestIPCInstanciaUnica(unittest.TestCase):
     """The global shortcut runs the script again; it only wakes the daemon."""
 
     def setUp(self):
-        self.dir = tempfile.mkdtemp(prefix="vm-ipc-")
+        self.dir = tempfile.mkdtemp(prefix="bookmarks-ipc-")
         self.path = os.path.join(self.dir, "bar.sock")
         self.recebidas = []
 
@@ -385,51 +429,51 @@ class TestIPCInstanciaUnica(unittest.TestCase):
         shutil.rmtree(self.dir, ignore_errors=True)
 
     def test_send_without_daemon_fails(self):
-        self.assertFalse(vmipc.send(self.path, vmipc.SHOW))
-        self.assertFalse(vmipc.is_running(self.path))
+        self.assertFalse(bookmarks_ipc.send(self.path, bookmarks_ipc.SHOW))
+        self.assertFalse(bookmarks_ipc.is_running(self.path))
 
     def test_daemon_receives_messages(self):
-        listener = vmipc.Listener(self.path, self.recebidas.append).start()
+        listener = bookmarks_ipc.Listener(self.path, self.recebidas.append).start()
         try:
-            self.assertTrue(vmipc.is_running(self.path))
-            self.assertTrue(vmipc.send(self.path, vmipc.SHOW))
-            self.assertTrue(vmipc.send(self.path, vmipc.SHOW))
+            self.assertTrue(bookmarks_ipc.is_running(self.path))
+            self.assertTrue(bookmarks_ipc.send(self.path, bookmarks_ipc.SHOW))
+            self.assertTrue(bookmarks_ipc.send(self.path, bookmarks_ipc.SHOW))
             for _ in range(50):
                 if len(self.recebidas) >= 2:
                     break
                 time.sleep(0.02)
-            self.assertEqual(self.recebidas, [vmipc.SHOW, vmipc.SHOW])
+            self.assertEqual(self.recebidas, [bookmarks_ipc.SHOW, bookmarks_ipc.SHOW])
         finally:
             listener.close()
 
     def test_ping_does_not_become_a_message(self):
-        listener = vmipc.Listener(self.path, self.recebidas.append).start()
+        listener = bookmarks_ipc.Listener(self.path, self.recebidas.append).start()
         try:
-            vmipc.is_running(self.path)
+            bookmarks_ipc.is_running(self.path)
             time.sleep(0.15)
             self.assertEqual(self.recebidas, [], "ping so checa se esta vivo")
         finally:
             listener.close()
 
     def test_two_daemons_do_not_coexist(self):
-        listener = vmipc.Listener(self.path, self.recebidas.append).start()
+        listener = bookmarks_ipc.Listener(self.path, self.recebidas.append).start()
         try:
             with self.assertRaises(OSError):
-                vmipc.Listener(self.path, self.recebidas.append).start()
+                bookmarks_ipc.Listener(self.path, self.recebidas.append).start()
         finally:
             listener.close()
 
     def test_orphan_socket_is_taken_over(self):
         """A daemon that died without cleaning up leaves the file; the next one has to take over."""
         open(self.path, "w").close()
-        listener = vmipc.Listener(self.path, self.recebidas.append).start()
+        listener = bookmarks_ipc.Listener(self.path, self.recebidas.append).start()
         try:
-            self.assertTrue(vmipc.send(self.path, vmipc.SHOW))
+            self.assertTrue(bookmarks_ipc.send(self.path, bookmarks_ipc.SHOW))
         finally:
             listener.close()
 
     def test_close_removes_the_socket(self):
-        listener = vmipc.Listener(self.path, self.recebidas.append).start()
+        listener = bookmarks_ipc.Listener(self.path, self.recebidas.append).start()
         listener.close()
         self.assertFalse(os.path.exists(self.path))
 
@@ -606,17 +650,17 @@ class TestViewTk(unittest.TestCase):
             "tkinter.font": self.fake_tk.font,
         })
         self.modules.start()
-        for mod in ("vmbar_tk",):
+        for mod in ("bookmarks_tk",):
             sys.modules.pop(mod, None)
 
     def tearDown(self):
         self.modules.stop()
-        sys.modules.pop("vmbar_tk", None)
+        sys.modules.pop("bookmarks_tk", None)
 
     def _bar(self):
-        import vmbar_tk
+        import bookmarks_tk
 
-        bar = vmbar_tk.Bar.__new__(vmbar_tk.Bar)   # sem __init__: nada de janela
+        bar = bookmarks_tk.Bar.__new__(bookmarks_tk.Bar)   # sem __init__: nada de janela
         bar.client = FakeClient(FIXTURES)
         bar.core = BarCore(bar.client)
         bar.root = mock.MagicMock()
@@ -628,7 +672,7 @@ class TestViewTk(unittest.TestCase):
         bar.render = mock.MagicMock()
         bar.hide = mock.MagicMock()
         bar.sync_async = mock.MagicMock()
-        return bar, vmbar_tk
+        return bar, bookmarks_tk
 
     @staticmethod
     def _evento(keysym, state=0):
@@ -668,8 +712,8 @@ class TestViewTk(unittest.TestCase):
         bar.hide.assert_called_once()
 
     def test_enter_opens_and_hides(self):
-        bar, vmbar_tk = self._bar()
-        with mock.patch.object(vmbar_tk.vmplatform, "open_url") as abrir:
+        bar, bookmarks_tk = self._bar()
+        with mock.patch.object(bookmarks_tk.bookmarks_platform, "open_url") as abrir:
             bar.on_key(self._evento("Return"))
             abrir.assert_called_once()
             self.assertTrue(abrir.call_args[0][0].startswith("http"))
@@ -713,12 +757,12 @@ class TestSyncWithServer(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls.tmp = tempfile.mkdtemp(prefix="vm-py-test-")
+        cls.tmp = tempfile.mkdtemp(prefix="bookmarks-py-test-")
         cls.port = free_port()
         cls.proc = subprocess.Popen(
             ["node", os.path.join(ROOT, "server", "server.js")],
-            env={**os.environ, "VAULTMARKS_PORT": str(cls.port),
-                 "VAULTMARKS_DB": os.path.join(cls.tmp, "vault.db")},
+            env={**os.environ, "BOOKMARKS_PORT": str(cls.port),
+                 "BOOKMARKS_DB": os.path.join(cls.tmp, "bookmarks.db")},
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         )
         cls.base = f"http://127.0.0.1:{cls.port}"
@@ -897,6 +941,45 @@ class TestSyncWithServer(unittest.TestCase):
         c.sync()
         other.sync()
         self.assertEqual(search(other.all_bookmarks(), "#tls"), [])
+
+    def test_12_opening_from_the_bar_counts_and_ranks(self):
+        """Enter on a row counts the open, shows it and pushes the row up."""
+        c = self.make_client("bar-uso")
+        c.login("desktop", "senha123")
+        c.sync()
+
+        core = BarCore(c)
+        core.set_query("+ https://velho.example Velho #uso")
+        core.activate()
+        core.set_query("+ https://novo.example Novo #uso")
+        core.activate()
+        c.sync()
+
+        core.set_query("#uso")
+        # The newest one comes first while nothing has been opened.
+        self.assertEqual([r.title for r in core.rows], ["Novo", "Velho"])
+        self.assertNotIn("\u00d7", core.rows[0].subtitle)
+
+        # Opens the older one twice: usage beats recency. Its position changes
+        # after the first open, which is the whole point, so it is found by name.
+        for _ in range(2):
+            index = [r.title for r in core.rows].index("Velho")
+            action, url = core.activate(index)
+            self.assertEqual(action, OPEN)
+            self.assertEqual(url, "https://velho.example")
+            core.refresh()
+
+        core.set_query("#uso")
+        self.assertEqual([r.title for r in core.rows], ["Velho", "Novo"])
+        self.assertIn("2\u00d7", core.rows[0].subtitle)
+
+        # And the count reaches the server, where the web UI reads it.
+        c.sync()
+        other = self.make_client("bar-uso-2")
+        other.login("desktop", "senha123")
+        other.sync()
+        velho = [b for b in other.all_bookmarks() if b["title"] == "Velho"][0]
+        self.assertEqual(int(velho["opens"]), 2)
 
 
 if __name__ == "__main__":

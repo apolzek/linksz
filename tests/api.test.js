@@ -12,7 +12,7 @@ const path = require('node:path');
 const { createApp, ensureSeedUser } = require('../server/server');
 const { verifyPassword } = require('../server/auth');
 
-const tmpDb = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'vm-test-')), 'vault.db');
+const tmpDb = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'bookmarks-test-')), 'bookmarks.db');
 const { server } = createApp(tmpDb);
 let base;
 
@@ -327,7 +327,7 @@ test('the yaml export comes as a download with a filename', async () => {
   const r = await download('yaml');
   assert.equal(r.status, 200);
   assert.match(r.headers.get('content-type'), /yaml/);
-  assert.match(r.headers.get('content-disposition'), /attachment; filename="vaultmarks-\d{4}-\d{2}-\d{2}\.yaml"/);
+  assert.match(r.headers.get('content-disposition'), /attachment; filename="bookmarks-\d{4}-\d{2}-\d{2}\.yaml"/);
   assert.match(r.text, /^# Bookmarks vault export/);
   assert.match(r.text, /^bookmarks:$/m);
 });
@@ -466,7 +466,7 @@ test('replace removes what is missing from the file, and warns first', async () 
 test('the web UI is served at the root', async () => {
   const res = await fetch(base + '/');
   assert.equal(res.status, 200);
-  assert.match(await res.text(), /vaultmarks/i);
+  assert.match(await res.text(), /bookmarks/i);
 });
 
 test('does not serve files outside web/', async () => {
@@ -542,8 +542,8 @@ test('index points at the manifest, the icon and a mobile viewport', async () =>
 // The same path as the real boot (server.js calls this before listen), only
 // with a throwaway database and the environment restored at the end.
 function bootSeed(env = {}) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vm-seed-'));
-  const dbPath = path.join(dir, 'vault.db');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bookmarks-seed-'));
+  const dbPath = path.join(dir, 'bookmarks.db');
   const before = {};
   for (const [k, v] of Object.entries(env)) { before[k] = process.env[k]; process.env[k] = v; }
 
@@ -573,7 +573,7 @@ test('boot creates the test account with the default password', () => {
   const { afterFirstBoot } = bootSeed();
   assert.equal(afterFirstBoot.length, 1);
   assert.equal(afterFirstBoot[0].username, 'teste');
-  assert.equal(afterFirstBoot[0].email, 'teste@vaultmarks.local');
+  assert.equal(afterFirstBoot[0].email, 'teste@bookmarks.local');
   assert.ok(verifyPassword('teste123', afterFirstBoot[0].pass_hash));
 });
 
@@ -583,31 +583,31 @@ test('a second boot neither duplicates the account nor breaks the password', () 
   assert.ok(verifyPassword('teste123', afterSecondBoot[0].pass_hash));
 });
 
-test('VAULTMARKS_SEED=0 creates no account at all', () => {
-  const { afterSecondBoot } = bootSeed({ VAULTMARKS_SEED: '0' });
+test('BOOKMARKS_SEED=0 creates no account at all', () => {
+  const { afterSecondBoot } = bootSeed({ BOOKMARKS_SEED: '0' });
   assert.equal(afterSecondBoot.length, 0);
 });
 
 test('the test account username and password come from the environment', () => {
   const { afterFirstBoot } = bootSeed({
-    VAULTMARKS_SEED_USER: 'qa',
-    VAULTMARKS_SEED_PASSWORD: 'segredo123',
+    BOOKMARKS_SEED_USER: 'qa',
+    BOOKMARKS_SEED_PASSWORD: 'segredo123',
   });
   assert.equal(afterFirstBoot[0].username, 'qa');
-  assert.equal(afterFirstBoot[0].email, 'qa@vaultmarks.local');
+  assert.equal(afterFirstBoot[0].email, 'qa@bookmarks.local');
   assert.ok(verifyPassword('segredo123', afterFirstBoot[0].pass_hash));
   assert.ok(!verifyPassword('teste123', afterFirstBoot[0].pass_hash));
 });
 
 test('a password changed in the environment is reset on the next boot', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vm-seed-'));
-  const dbPath = path.join(dir, 'vault.db');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bookmarks-seed-'));
+  const dbPath = path.join(dir, 'bookmarks.db');
   try {
     const a = createApp(dbPath);
     ensureSeedUser(a.db);
     a.db.close();
 
-    process.env.VAULTMARKS_SEED_PASSWORD = 'new-password';
+    process.env.BOOKMARKS_SEED_PASSWORD = 'new-password';
     const b = createApp(dbPath);
     ensureSeedUser(b.db);
     const [u] = b.db.prepare('SELECT * FROM users').all();
@@ -615,7 +615,130 @@ test('a password changed in the environment is reset on the next boot', () => {
 
     assert.ok(verifyPassword('new-password', u.pass_hash));
   } finally {
-    delete process.env.VAULTMARKS_SEED_PASSWORD;
+    delete process.env.BOOKMARKS_SEED_PASSWORD;
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+/* ---------------- usage ranking ---------------- */
+
+test('opening a bookmark counts, and the count survives a sync', async () => {
+  const created = await call('POST', '/api/bookmarks', {
+    token, body: { url: 'https://usado.example', title: 'usado' },
+  });
+  const id = created.body.item.id;
+  assert.equal(created.body.item.opens, 0);
+
+  const first = await call('POST', '/api/bookmarks/open', { token, body: { id } });
+  assert.equal(first.status, 200);
+  assert.equal(first.body.item.opens, 1);
+  assert.ok(first.body.item.last_open_at > 0);
+
+  await call('POST', '/api/bookmarks/open', { token, body: { id } });
+  const after = await call('GET', `/api/bookmarks/${id}`, { token });
+  assert.equal(after.body.item.opens, 2);
+
+  // A client pushing an older count must not erase what the server has: the
+  // counters merge with MAX, they are not last-write-wins.
+  await call('POST', '/api/sync', {
+    token, body: { since: 0, changes: [{ ...after.body.item, opens: 0, title: 'usado editado' }] },
+  });
+  const merged = await call('GET', `/api/bookmarks/${id}`, { token });
+  assert.equal(merged.body.item.opens, 2, 'the count stays');
+  assert.equal(merged.body.item.title, 'usado editado', 'the rest is last-write-wins');
+});
+
+test('opening something that does not exist is a 404', async () => {
+  const r = await call('POST', '/api/bookmarks/open', { token, body: { id: 'nao-existe' } });
+  assert.equal(r.status, 404);
+});
+
+/* ---------------- moving folders ---------------- */
+
+async function makeIn(folder, title) {
+  const r = await call('POST', '/api/bookmarks', { token, body: { url: `https://${title}.example`, title, folder } });
+  return r.body.item.id;
+}
+
+test('moving a folder takes everything under it', async () => {
+  const rust = await makeIn('rust', 'rust raiz');
+  const nested = await makeIn('rust/async', 'rust async');
+  const other = await makeIn('rustico', 'nao e a mesma pasta');
+
+  const r = await call('POST', '/api/folders/move', { token, body: { from: 'rust', to: 'programming' } });
+  assert.equal(r.status, 200);
+  assert.equal(r.body.moved, 2);
+  assert.equal(r.body.to, 'programming/rust');
+
+  const folderOf = async (id) => (await call('GET', `/api/bookmarks/${id}`, { token })).body.item.folder;
+  assert.equal(await folderOf(rust), 'programming/rust');
+  assert.equal(await folderOf(nested), 'programming/rust/async');
+  assert.equal(await folderOf(other), 'rustico', 'a folder with the same prefix is not dragged along');
+});
+
+test('a folder cannot move inside itself', async () => {
+  await makeIn('dev/infra', 'infra');
+  const r = await call('POST', '/api/folders/move', { token, body: { from: 'dev', to: 'dev/infra' } });
+  assert.equal(r.status, 400);
+  assert.match(r.body.error, /inside itself/);
+});
+
+test('moving to the root pulls the folder out', async () => {
+  const id = await makeIn('a/b/c', 'fundo do poco');
+  const r = await call('POST', '/api/folders/move', { token, body: { from: 'a/b', to: '' } });
+  assert.equal(r.body.to, 'b');
+  const item = (await call('GET', `/api/bookmarks/${id}`, { token })).body.item;
+  assert.equal(item.folder, 'b/c');
+});
+
+test('moving an empty folder changes nothing and does not fail', async () => {
+  const r = await call('POST', '/api/folders/move', { token, body: { from: 'pasta-vazia', to: 'destino' } });
+  assert.equal(r.status, 200);
+  assert.equal(r.body.moved, 0);
+});
+
+test('from is required', async () => {
+  const r = await call('POST', '/api/folders/move', { token, body: { from: '  /  ', to: 'x' } });
+  assert.equal(r.status, 400);
+});
+
+/* ---------------- insights ---------------- */
+
+test('insights reports the window, the top links and the log', async () => {
+  const a = await call('POST', '/api/bookmarks', { token, body: { url: 'https://insight-a.example', title: 'Insight A' } });
+  const b = await call('POST', '/api/bookmarks', { token, body: { url: 'https://insight-b.example', title: 'Insight B' } });
+
+  for (let i = 0; i < 3; i++) await call('POST', '/api/bookmarks/open', { token, body: { id: a.body.item.id } });
+  await call('POST', '/api/bookmarks/open', { token, body: { id: b.body.item.id } });
+
+  const r = await call('GET', '/api/insights?days=7', { token });
+  assert.equal(r.status, 200);
+  assert.equal(r.body.days, 7);
+  assert.equal(r.body.daily.length, 7, 'one bucket per day, empty days included');
+  assert.equal(r.body.daily.at(-1).count >= 4, true, 'today holds the opens');
+
+  const top = r.body.top.find((x) => x.id === a.body.item.id);
+  assert.equal(top.hits, 3);
+  assert.equal(top.total, 3);
+  assert.ok(r.body.top.findIndex((x) => x.id === a.body.item.id)
+          < r.body.top.findIndex((x) => x.id === b.body.item.id), 'the most opened comes first');
+
+  assert.equal(r.body.log[0].id, b.body.item.id, 'the log is newest first');
+  assert.ok(r.body.log.every((row) => row.at >= r.body.since));
+});
+
+test('the window is clamped and days is a number', async () => {
+  assert.equal((await call('GET', '/api/insights?days=0', { token })).body.days, 7, 'falls back to a week');
+  assert.equal((await call('GET', '/api/insights?days=999', { token })).body.days, 30, 'never past what is kept');
+  assert.equal((await call('GET', '/api/insights?days=abc', { token })).body.days, 7);
+});
+
+test('insights only ever sees your own opens', async () => {
+  const other = await call('POST', '/api/auth/register', {
+    body: { email: 'insights@example.com', username: 'insights', password: 'secret123' },
+  });
+  const r = await call('GET', '/api/insights?days=7', { token: other.body.token });
+  assert.equal(r.body.total, 0);
+  assert.deepEqual(r.body.log, []);
+  assert.deepEqual(r.body.top, []);
 });

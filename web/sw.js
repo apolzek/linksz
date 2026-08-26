@@ -12,8 +12,8 @@
 'use strict';
 
 // Bump this version whenever a shell file changes.
-const VERSION = 'v3';
-const SHELL_CACHE = `vaultmarks-shell-${VERSION}`;
+const VERSION = 'v32';
+const SHELL_CACHE = `bookmarks-shell-${VERSION}`;
 
 const SHELL = [
   '/',
@@ -40,7 +40,7 @@ self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys()
       .then((keys) => Promise.all(
-        keys.filter((k) => k.startsWith('vaultmarks-') && k !== SHELL_CACHE)
+        keys.filter((k) => k.startsWith('bookmarks-') && k !== SHELL_CACHE)
           .map((k) => caches.delete(k)),
       ))
       .then(() => self.clients.claim()),

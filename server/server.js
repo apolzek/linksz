@@ -19,6 +19,7 @@ const http = require('node:http');
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
+const { execFileSync } = require('node:child_process');
 
 const { open } = require('./db');
 const { search } = require('../web/search');
@@ -95,6 +96,70 @@ function normFolder(v) {
   return String(v == null ? '' : v).trim().replace(/^\/+|\/+$/g, '').slice(0, 300);
 }
 
+// A folder path with the empty segments dropped: `//a//b/` -> `a/b`.
+function normFolderPath(v) {
+  return normFolder(v).split('/').map((p) => p.trim()).filter(Boolean).join('/');
+}
+
+// `_` and `%` are wildcards inside LIKE: a folder named `100%` would otherwise
+// match far more than itself.
+function escapeLike(v) {
+  return String(v).replace(/[\\%_]/g, (c) => '\\' + c);
+}
+
+// Usage counters arriving from a client. Never negative, never fractional:
+// they are merged with MAX and a bogus value would stick forever.
+const DAY = 86400000;
+// How far back the log is kept. Long enough for "the last week" to always be
+// complete, short enough that it stays a recent history.
+const OPENS_LOG_DAYS = 30;
+
+// Midnight local time, which is the day boundary a person means.
+function startOfDay(ts) {
+  const d = new Date(ts);
+  d.setHours(0, 0, 0, 0);
+  return d.getTime();
+}
+
+function counter(v) {
+  const n = Math.floor(Number(v));
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
+// What is running right now: which commit the frontend came from and when it
+// was put there. A pipeline sets the two environment variables at deploy time;
+// with none set (running from a clone) it falls back to asking git, and if even
+// that is unavailable the UI simply shows nothing.
+let buildInfoCache = null;
+function buildInfo() {
+  if (buildInfoCache) return buildInfoCache;
+
+  const fromEnv = {
+    commit: str(process.env.BOOKMARKS_COMMIT, 40),
+    deployed_at: str(process.env.BOOKMARKS_DEPLOYED_AT, 40),
+  };
+  if (fromEnv.commit) {
+    buildInfoCache = { ...fromEnv, source: 'env' };
+    return buildInfoCache;
+  }
+
+  try {
+    const git = (...args) => execFileSync('git', args, {
+      cwd: path.join(__dirname, '..'), encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
+    buildInfoCache = {
+      commit: git('rev-parse', '--short', 'HEAD'),
+      // The commit's own date: with no pipeline, that is the closest thing to
+      // a deploy date there is.
+      deployed_at: git('log', '-1', '--format=%cI'),
+      source: 'git',
+    };
+  } catch {
+    buildInfoCache = { commit: '', deployed_at: '', source: 'unknown' };
+  }
+  return buildInfoCache;
+}
+
 function createApp(dbPath) {
   const db = open(dbPath);
 
@@ -113,14 +178,44 @@ function createApp(dbPath) {
     since: db.prepare('SELECT * FROM bookmarks WHERE user_id = ? AND updated_at > ? ORDER BY updated_at ASC'),
     getOne: db.prepare('SELECT * FROM bookmarks WHERE user_id = ? AND id = ?'),
     upsert: db.prepare(`
-      INSERT INTO bookmarks (id, user_id, title, url, folder, category, tags, description, created_at, updated_at, deleted)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO bookmarks (id, user_id, title, url, folder, category, tags, description, created_at, updated_at, deleted, opens, last_open_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(user_id, id) DO UPDATE SET
         title=excluded.title, url=excluded.url, folder=excluded.folder,
         category=excluded.category, tags=excluded.tags, description=excluded.description,
-        updated_at=excluded.updated_at, deleted=excluded.deleted
+        updated_at=excluded.updated_at, deleted=excluded.deleted,
+        -- The counters never go backwards: two devices that opened the same
+        -- link while offline both keep what they counted.
+        opens=MAX(excluded.opens, bookmarks.opens),
+        last_open_at=MAX(excluded.last_open_at, bookmarks.last_open_at)
       WHERE excluded.updated_at >= bookmarks.updated_at`),
     softDelete: db.prepare('UPDATE bookmarks SET deleted = 1, updated_at = ? WHERE user_id = ? AND id = ?'),
+    logOpen: db.prepare('INSERT INTO opens_log (user_id, bookmark_id, at) VALUES (?, ?, ?)'),
+    pruneLog: db.prepare('DELETE FROM opens_log WHERE user_id = ? AND at < ?'),
+    // Most opened inside the window, with the bookmark's own fields alongside.
+    topOpened: db.prepare(`
+      SELECT b.id, b.title, b.url, b.folder, b.category, b.opens AS total, COUNT(l.id) AS hits
+      FROM opens_log l JOIN bookmarks b ON b.user_id = l.user_id AND b.id = l.bookmark_id
+      WHERE l.user_id = ? AND l.at >= ? AND b.deleted = 0
+      GROUP BY b.id ORDER BY hits DESC, b.opens DESC LIMIT ?`),
+    recentOpens: db.prepare(`
+      SELECT l.at, b.id, b.title, b.url, b.folder
+      FROM opens_log l JOIN bookmarks b ON b.user_id = l.user_id AND b.id = l.bookmark_id
+      WHERE l.user_id = ? AND l.at >= ?
+      ORDER BY l.at DESC LIMIT ?`),
+    countOpens: db.prepare('SELECT COUNT(*) AS n FROM opens_log WHERE user_id = ? AND at >= ?'),
+    // All time, for the bookmarks that were opened before the log existed.
+    topEver: db.prepare(`
+      SELECT id, title, url, folder, category, opens AS total, last_open_at
+      FROM bookmarks WHERE user_id = ? AND deleted = 0 AND opens > 0
+      ORDER BY opens DESC, last_open_at DESC LIMIT ?`),
+    registerOpen: db.prepare(`
+      UPDATE bookmarks SET opens = opens + 1, last_open_at = ?, updated_at = ?
+      WHERE user_id = ? AND id = ? AND deleted = 0`),
+    // Moving a folder is a prefix rewrite over every bookmark inside it.
+    inFolder: db.prepare(`
+      SELECT * FROM bookmarks
+      WHERE user_id = ? AND deleted = 0 AND (folder = ? OR folder LIKE ? ESCAPE '\\')`),
   };
 
   function auth(req) {
@@ -146,6 +241,7 @@ function createApp(dbPath) {
       normFolder(b.folder), normCategory(b.category), normTags(b.tags),
       str(b.description ?? b.notes, 5000),   // `notes`: the field's old name
       created, updated, b.deleted ? 1 : 0,
+      counter(b.opens), counter(b.last_open_at),
     );
     return q.getOne.get(userId, id);
   }
@@ -210,11 +306,11 @@ function createApp(dbPath) {
 
       const renderers = {
         yaml: () => [portability.toYaml(items, { user: user.username }),
-          'application/yaml; charset=utf-8', `vaultmarks-${stamp}.yaml`],
+          'application/yaml; charset=utf-8', `bookmarks-${stamp}.yaml`],
         html: () => [portability.toNetscapeHtml(items),
-          'text/html; charset=utf-8', `vaultmarks-${stamp}.html`],
+          'text/html; charset=utf-8', `bookmarks-${stamp}.html`],
         json: () => [portability.toJson(items),
-          'application/json; charset=utf-8', `vaultmarks-${stamp}.json`],
+          'application/json; charset=utf-8', `bookmarks-${stamp}.json`],
       };
       if (!renderers[format]) return json(res, 400, { error: 'format must be yaml, html or json' });
 
@@ -268,6 +364,78 @@ function createApp(dbPath) {
       for (const { current } of plan.remove) q.softDelete.run(ts, user.id, current.id);
 
       return json(res, 200, { ...preview, applied: true, total: q.allBookmarks.all(user.id).length });
+    },
+
+    // Ranking input: the client says "I just opened this one". Kept apart from
+    // PUT so that opening a bookmark cannot rewrite its fields by accident.
+    'POST /api/bookmarks/open': async (req, res, user) => {
+      const b = await readBody(req);
+      const id = str(b.id, 64);
+      const ts = now();
+      const info = q.registerOpen.run(ts, ts, user.id, id);
+      if (!info.changes) return json(res, 404, { error: 'not found' });
+      // The counter says how often, the log says when: insights needs both.
+      q.logOpen.run(user.id, id, ts);
+      q.pruneLog.run(user.id, ts - OPENS_LOG_DAYS * DAY);
+      return json(res, 200, { item: q.getOne.get(user.id, id) });
+    },
+
+    // Moves a folder (with everything under it) into another one. `to` empty
+    // means the root. The path is a string on each bookmark, so this is a
+    // prefix rewrite, and every touched row is bumped so the sync carries it.
+    'POST /api/folders/move': async (req, res, user) => {
+      const b = await readBody(req);
+      const from = normFolderPath(b.from);
+      const to = normFolderPath(b.to);
+      if (!from) return json(res, 400, { error: 'from is required' });
+
+      const name = from.split('/').pop();
+      const target = to ? `${to}/${name}` : name;
+      if (target === from) return json(res, 200, { moved: 0, from, to: target });
+      // Dropping a folder inside itself would detach the branch from the tree.
+      if (to === from || to.startsWith(from + '/')) {
+        return json(res, 400, { error: 'a folder cannot move inside itself' });
+      }
+
+      // LIKE with the separator attached, so `dev` does not also match `devops`.
+      const rows = q.inFolder.all(user.id, from, escapeLike(from) + '/%');
+      const ts = now();
+      for (const row of rows) {
+        const rest = row.folder.slice(from.length);      // '' or '/child/…'
+        writeBookmark(user.id, { ...row, folder: target + rest, updated_at: ts }, ts);
+      }
+      return json(res, 200, { moved: rows.length, from, to: target });
+    },
+
+    // Browsing habits: what gets opened, and when. Everything is derived from
+    // opens_log, except the all-time top, which the counter answers on its own.
+    'GET /api/insights': async (req, res, user, url) => {
+      const days = Math.min(Math.max(Number(url.searchParams.get('days')) || 7, 1), OPENS_LOG_DAYS);
+      const now = Date.now();
+      const since = now - days * DAY;
+
+      const rows = q.recentOpens.all(user.id, since, 500);
+      // One bucket per day, oldest first, including the days with nothing in
+      // them: a gap in the chart is information too.
+      const buckets = [];
+      for (let i = days - 1; i >= 0; i--) {
+        const start = startOfDay(now - i * DAY);
+        buckets.push({ day: new Date(start).toISOString().slice(0, 10), start, count: 0 });
+      }
+      for (const row of rows) {
+        const bucket = buckets.find((b) => row.at >= b.start && row.at < b.start + DAY);
+        if (bucket) bucket.count += 1;
+      }
+
+      return json(res, 200, {
+        days,
+        since,
+        total: q.countOpens.get(user.id, since).n,
+        daily: buckets.map(({ day, count }) => ({ day, count })),
+        top: q.topOpened.all(user.id, since, 10),
+        top_ever: q.topEver.all(user.id, 10),
+        log: rows.slice(0, 200),
+      });
     },
 
     // Two-way sync: the client sends what changed locally and gets back what changed here.
@@ -354,19 +522,24 @@ function createApp(dbPath) {
 
     try {
       if (!pathname.startsWith('/api/')) return serveStatic(res, pathname);
-      if (pathname === '/api/health') return json(res, 200, { ok: true, service: 'vaultmarks', demo: runtime.demo });
+      if (pathname === '/api/health') {
+        return json(res, 200, { ok: true, service: 'bookmarks', demo: runtime.demo, build: buildInfo() });
+      }
 
       const key = `${req.method} ${pathname}`;
       const isPublic = key === 'POST /api/auth/register' || key === 'POST /api/auth/login';
       const user = auth(req);
       if (!isPublic && !user) return json(res, 401, { error: 'not authenticated' });
 
+      // Named routes first: otherwise `POST /api/bookmarks/open` would be read
+      // as a bookmark whose id is "open".
+      const handler = routes[key];
+      if (handler) return await handler(req, res, user, url);
+
       const idMatch = /^\/api\/bookmarks\/([^/]+)$/.exec(pathname);
       if (idMatch) return await handleBookmarkId(req.method, decodeURIComponent(idMatch[1]), req, res, user);
 
-      const handler = routes[key];
-      if (!handler) return json(res, 404, { error: 'route not found' });
-      return await handler(req, res, user, url);
+      return json(res, 404, { error: 'route not found' });
     } catch (err) {
       return json(res, 400, { error: err.message || 'error' });
     }
@@ -384,14 +557,14 @@ function createApp(dbPath) {
 //
 // The password is known by design, so this is for local development and
 // testing. Before publishing the instance on a network (compose + Caddy), turn
-// it off with VAULTMARKS_SEED=0, or anyone who reads this file can log in.
+// it off with BOOKMARKS_SEED=0, or anyone who reads this file can log in.
 function ensureSeedUser(db) {
-  if (process.env.VAULTMARKS_SEED === '0') return null;
+  if (process.env.BOOKMARKS_SEED === '0') return null;
 
-  const username = String(process.env.VAULTMARKS_SEED_USER || 'teste').toLowerCase();
-  const email = String(process.env.VAULTMARKS_SEED_EMAIL || `${username}@vaultmarks.local`).toLowerCase();
-  const password = String(process.env.VAULTMARKS_SEED_PASSWORD || 'teste123');
-  const isDefaultPassword = !process.env.VAULTMARKS_SEED_PASSWORD;
+  const username = String(process.env.BOOKMARKS_SEED_USER || 'teste').toLowerCase();
+  const email = String(process.env.BOOKMARKS_SEED_EMAIL || `${username}@bookmarks.local`).toLowerCase();
+  const password = String(process.env.BOOKMARKS_SEED_PASSWORD || 'teste123');
+  const isDefaultPassword = !process.env.BOOKMARKS_SEED_PASSWORD;
 
   const existing = db.prepare('SELECT * FROM users WHERE email = ? OR username = ?').get(email, username);
   if (existing) {
@@ -408,8 +581,8 @@ function ensureSeedUser(db) {
 }
 
 if (require.main === module) {
-  const port = Number(process.env.VAULTMARKS_PORT) || 8787;
-  const host = process.env.VAULTMARKS_HOST || '127.0.0.1';
+  const port = Number(process.env.BOOKMARKS_PORT) || 8787;
+  const host = process.env.BOOKMARKS_HOST || '127.0.0.1';
   const { server, db, runtime } = createApp();
 
   const seed = ensureSeedUser(db);
@@ -417,11 +590,11 @@ if (require.main === module) {
   // the shortcut on the login screen could not work anyway.
   runtime.demo = seed && seed.isDefaultPassword ? { login: seed.username } : null;
   server.listen(port, host, () => {
-    console.log(`vaultmarks running on http://${host}:${port}`);
+    console.log(`bookmarks running on http://${host}:${port}`);
     if (seed) {
       // The password only reaches the log when it is the default one, which is
-      // already in this file. A VAULTMARKS_SEED_PASSWORD stays out of the journal.
-      const shown = seed.isDefaultPassword ? ` / ${seed.password}` : ' (password from VAULTMARKS_SEED_PASSWORD)';
+      // already in this file. A BOOKMARKS_SEED_PASSWORD stays out of the journal.
+      const shown = seed.isDefaultPassword ? ` / ${seed.password}` : ' (password from BOOKMARKS_SEED_PASSWORD)';
       console.log(`test user: ${seed.username}${shown}`);
     }
   });

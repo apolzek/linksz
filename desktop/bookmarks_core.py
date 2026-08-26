@@ -1,12 +1,12 @@
 """All of the bar's logic, with no GTK or Tk dependency.
 
-The views (vmbar_gtk.py, vmbar_tk.py) only draw what this module decides and
+The views (bookmarks_gtk.py, bookmarks_tk.py) only draw what this module decides and
 send the keys back. That keeps Linux and macOS behaving identically and, more
 importantly, makes the whole bar testable without a display.
 """
 
-from vmclient import parse_quick_add
-from vmsearch import search
+from bookmarks_client import parse_quick_add
+from bookmarks_search import search
 
 MAX_RESULTS = 12
 
@@ -43,6 +43,16 @@ def _badges_of(bookmark, max_tags=3):
     for tag in [t for t in (bookmark.get("tags") or "").split(",") if t][:max_tags]:
         badges.append(("tag", "#" + tag))
     return badges
+
+
+def _subtitle_of(bookmark):
+    """The URL, plus how often it was opened from here, like the web UI shows."""
+    url = bookmark.get("url", "")
+    try:
+        opens = int(bookmark.get("opens") or 0)
+    except (TypeError, ValueError):
+        opens = 0
+    return f"{url}   {opens}\u00d7" if opens > 0 else url
 
 
 def _describe(parsed):
@@ -85,7 +95,7 @@ class BarCore:
             found = search(self._all, self.query, self.max_results)
             self.rows = [
                 Row("result", b.get("title") or b.get("url") or "(no title)",
-                    b.get("url", ""), _badges_of(b), bookmark=b)
+                    _subtitle_of(b), _badges_of(b), bookmark=b)
                 for b in found
             ]
 
@@ -148,6 +158,13 @@ class BarCore:
             self.message = "bookmark added, syncing…"
             return (ADDED, bookmark)
 
+        # Counts towards the ranking: the bar is the launcher, so most of the
+        # opens happen here and not in the web UI.
+        if row.kind == "result" and row.bookmark.get("id"):
+            try:
+                self.client.register_open(row.bookmark["id"])
+            except Exception:
+                pass          # a statistic must never keep a link from opening
         return (OPEN, row.bookmark.get("url", ""))
 
     def copy_selected(self):

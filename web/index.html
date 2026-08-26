@@ -5,31 +5,43 @@
 <!-- viewport-fit=cover + safe-area in the CSS: without it the bar hides behind
      the iPhone notch and gesture bar once installed. -->
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Vaultmarks</title>
+<title>Bookmarks</title>
 <meta name="description" content="Your bookmarks with instant substring search, on mobile and desktop.">
 
 <link rel="icon" href="/icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <link rel="manifest" href="/manifest.webmanifest">
 
-<meta name="theme-color" content="#0f1115" media="(prefers-color-scheme: dark)">
-<meta name="theme-color" content="#f6f7f9" media="(prefers-color-scheme: light)">
+<!-- A single tag, rewritten by app.js from the palette in use: with a theme
+     picked by hand, a media-based tag would report the wrong colour. -->
+<meta name="theme-color" content="#0f1115">
 <meta name="color-scheme" content="dark light">
 
 <!-- iOS still does not read everything from the manifest on the home screen. -->
 <meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-title" content="Vaultmarks">
+<meta name="apple-mobile-web-app-title" content="Bookmarks">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="mobile-web-app-capable" content="yes">
 
 <link rel="stylesheet" href="/style.css">
+
+<!-- Before the first paint, otherwise the page shows the default palette for a
+     frame and only then the chosen one. -->
+<script>
+  try {
+    // vm_theme: the key used before the project was renamed, still honoured
+    // once so nobody's chosen palette is lost to a rename.
+    var savedTheme = localStorage.getItem('bookmarks_theme') || localStorage.getItem('vm_theme');
+    if (savedTheme && savedTheme !== 'auto') document.documentElement.dataset.theme = savedTheme;
+  } catch (e) { /* storage blocked: the default palette is a fine fallback */ }
+</script>
 </head>
 <body>
 
 <!-- ---------- LOGIN ---------- -->
 <section id="auth" class="auth hidden">
   <div class="auth-card">
-    <h1 class="logo">🔖 vaultmarks</h1>
+    <h1 class="logo brand">bookmarks<i>_</i></h1>
     <p class="sub">your bookmarks, instant search</p>
 
     <!-- Backend status, checked when the screen opens: whoever is signing in
@@ -75,7 +87,7 @@
     <div id="auth-offline" class="offline hidden">
       <b>The backend is not responding</b>
       <p>Nothing answered at <code id="auth-origin"></code>.</p>
-      <p class="dim">Start it with <code>systemctl --user start vaultmarks</code> or
+      <p class="dim">Start it with <code>systemctl --user start bookmarks</code> or
         <code>mise run server</code>. If you opened another port, check the address.</p>
       <button type="button" id="auth-retry" class="ghost">check again</button>
     </div>
@@ -89,14 +101,32 @@
 
 <!-- ---------- APP ---------- -->
 <main id="app" class="hidden">
+  <!-- Three columns so the wordmark sits in the middle of the bar and stays
+       there however wide the buttons on the right get. -->
   <header class="topbar">
-    <span class="brand">🔖 vaultmarks</span>
-    <div class="spacer"></div>
-    <span id="sync-state" class="sync">synced</span>
-    <button id="btn-browse" class="ghost" title="Folders, categories and tags (b)" aria-expanded="true">☰ browse</button>
-    <button id="btn-io" class="ghost" title="Import and export">⇅ data</button>
-    <button id="btn-new" class="ghost" title="New bookmark (n)">+ new</button>
-    <button id="btn-logout" class="ghost" title="Sign out">sign out</button>
+    <div class="topbar-side">
+      <span id="sync-state" class="sync">synced</span>
+      <!-- Which build is on screen. Filled from /api/health, which a pipeline
+           feeds through BOOKMARKS_COMMIT and BOOKMARKS_DEPLOYED_AT. -->
+      <span id="build" class="build hidden"></span>
+    </div>
+    <span class="brand">bookmarks<i>_</i></span>
+    <div class="topbar-side topbar-actions">
+      <span class="select-ghost"><select id="theme" class="ghost" title="Colour theme" aria-label="Colour theme">
+        <option value="auto">system</option>
+        <option value="latte">latte</option>
+        <option value="frappe">frappé</option>
+        <option value="macchiato">macchiato</option>
+        <option value="mocha">mocha</option>
+        <option value="matrix">matrix</option>
+      </select></span>
+      <button id="btn-browse" class="ghost" title="Folders, categories and tags (b)" aria-expanded="true">browse</button>
+      <button id="btn-io" class="ghost" title="Import and export">data</button>
+      <button id="btn-new" class="ghost" title="New bookmark (n)">new</button>
+      <button id="btn-insights" class="ghost" title="What you actually open">insights</button>
+      <button id="btn-help" class="ghost" title="Shortcuts and search syntax (or type help)">help</button>
+      <button id="btn-logout" class="ghost" title="Sign out">sign out</button>
+    </div>
   </header>
 
   <div class="layout">
@@ -114,13 +144,36 @@
   <div class="content">
   <div class="searchwrap">
     <div class="searchbar">
-      <span class="icon">⌕</span>
+      <!-- Two eyes instead of a magnifier: drawn, not an emoji, so they take the
+           theme's colour and stay sharp at any size. -->
+      <span class="icon" aria-hidden="true">
+        <svg viewBox="0 0 27 16" width="24" height="15" fill="none" stroke="currentColor" stroke-width="1.5">
+          <ellipse cx="7.5" cy="8" rx="5.6" ry="6.6"/>
+          <ellipse cx="19.5" cy="8" rx="5.6" ry="6.6"/>
+          <circle cx="8.6" cy="8.6" r="2.1" fill="currentColor" stroke="none"/>
+          <circle cx="20.6" cy="8.6" r="2.1" fill="currentColor" stroke="none"/>
+        </svg>
+      </span>
       <input id="q" placeholder="search…  #tag  @category  /folder  -exclude" autocomplete="off" spellcheck="false" autofocus>
       <button id="q-clear" class="clear hidden" title="Clear">×</button>
     </div>
+
+    <!-- The searches you actually use, offered back while you type. -->
+    <ul id="suggest" class="suggest hidden"></ul>
     <div id="chips" class="chips"></div>
-    <p class="hint"><kbd>↑</kbd><kbd>↓</kbd> move · <kbd>Enter</kbd> open · <kbd>Ctrl</kbd>+<kbd>Enter</kbd> new tab · <kbd>e</kbd> edit · <kbd>Del</kbd> delete · <kbd>b</kbd> browse</p>
-    <p class="hint syntax"><code>#tag</code> <code>@category</code> <code>/folder</code> <code>title:something</code> <code>"exact phrase"</code> <code>-exclude</code></p>
+
+    <!-- Out of the way until asked for: the `help` button in the topbar, or
+         typing `help` in the search box. -->
+    <section id="help" class="help hidden">
+      <div class="help-head">
+        <span>help</span>
+        <button id="help-close" class="linkish" title="Close (Esc)">close</button>
+      </div>
+      <p class="hint"><kbd>↑</kbd><kbd>↓</kbd> move · <kbd>Enter</kbd> open · <kbd>Ctrl</kbd>+<kbd>Enter</kbd> new tab · <kbd>e</kbd> edit · <kbd>Del</kbd> delete · <kbd>n</kbd> new · <kbd>b</kbd> browse · <kbd>/</kbd> search</p>
+      <p class="hint syntax"><code>#tag</code> <code>@category</code> <code>/folder</code> <code>title:something</code> <code>"exact phrase"</code> <code>-exclude</code></p>
+      <p class="hint">Terms combine with AND. Everything is substring, case and accent insensitive.
+         Drag a folder onto another one in the panel to nest it.</p>
+    </section>
   </div>
 
   <p id="count" class="count"></p>
@@ -158,6 +211,44 @@
 </div>
 
 <!-- ---------- IMPORTAR / EXPORTAR ---------- -->
+<!-- Browsing habits: what gets opened and when. The data comes from the
+     server's opens log, so it is the same on every device. -->
+<div id="insights-modal" class="modal hidden">
+  <div class="modal-card insights-card">
+    <h2>Insights</h2>
+
+    <section class="io-section">
+      <div class="ins-head">
+        <h3>Last <span id="ins-days">7</span> days</h3>
+        <div class="ins-range">
+          <button type="button" class="linkish" data-days="7">7 days</button>
+          <button type="button" class="linkish" data-days="14">14 days</button>
+          <button type="button" class="linkish" data-days="30">30 days</button>
+        </div>
+      </div>
+      <p class="io-hint"><b id="ins-total">0</b> opens in the window</p>
+      <div id="ins-chart" class="ins-chart"></div>
+    </section>
+
+    <section class="io-section">
+      <h3>Most opened</h3>
+      <p class="io-hint">In the window, and all time next to it.</p>
+      <ol id="ins-top" class="ins-top"></ol>
+    </section>
+
+    <section class="io-section">
+      <h3>Access log</h3>
+      <p class="io-hint">Every open in the window, newest first.</p>
+      <ul id="ins-log" class="ins-log"></ul>
+    </section>
+
+    <div class="modal-actions">
+      <div class="spacer"></div>
+      <button type="button" id="ins-close" class="ghost">close</button>
+    </div>
+  </div>
+</div>
+
 <div id="io-modal" class="modal hidden">
   <div class="modal-card io-card">
     <h2>Import and export</h2>

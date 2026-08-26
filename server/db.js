@@ -17,9 +17,9 @@ const fs = require('node:fs');
 const os = require('node:os');
 
 function defaultDbPath() {
-  if (process.env.VAULTMARKS_DB) return process.env.VAULTMARKS_DB;
+  if (process.env.BOOKMARKS_DB) return process.env.BOOKMARKS_DB;
   const base = process.env.XDG_DATA_HOME || path.join(os.homedir(), '.local', 'share');
-  return path.join(base, 'vaultmarks', 'vault.db');
+  return path.join(base, 'bookmarks', 'bookmarks.db');
 }
 
 // The field used to be called `notes`. Databases created before the rename get
@@ -29,6 +29,14 @@ function migrateNotesToDescription(db) {
   const columns = db.prepare('SELECT name FROM pragma_table_info(?)').all('bookmarks').map((c) => c.name);
   if (columns.includes('description') || !columns.includes('notes')) return;
   db.exec('ALTER TABLE bookmarks RENAME COLUMN notes TO description');
+}
+
+// Vaults created before usage ranking have no counters. The CREATE TABLE above
+// does not run on an existing table, so the columns are added here.
+function addUsageColumns(db) {
+  const columns = db.prepare('SELECT name FROM pragma_table_info(?)').all('bookmarks').map((c) => c.name);
+  if (!columns.includes('opens')) db.exec('ALTER TABLE bookmarks ADD COLUMN opens INTEGER NOT NULL DEFAULT 0');
+  if (!columns.includes('last_open_at')) db.exec('ALTER TABLE bookmarks ADD COLUMN last_open_at INTEGER NOT NULL DEFAULT 0');
 }
 
 function open(dbPath = defaultDbPath()) {
@@ -66,13 +74,31 @@ function open(dbPath = defaultDbPath()) {
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL,
       deleted    INTEGER NOT NULL DEFAULT 0,
+      -- How often this bookmark was opened, and when it was last opened. Both
+      -- only ever grow: clients merge them with MAX, never with last-write-wins,
+      -- so a count is not lost when two devices open the same link offline.
+      opens        INTEGER NOT NULL DEFAULT 0,
+      last_open_at INTEGER NOT NULL DEFAULT 0,
       PRIMARY KEY (user_id, id)
     );
 
     CREATE INDEX IF NOT EXISTS idx_bm_sync ON bookmarks(user_id, updated_at);
+
+    -- One row per open, which is what the opens counter cannot tell you: when
+    -- it happened. This is what the insights screen reads, and it is pruned on
+    -- write, so it stays a recent history and not a permanent record.
+    CREATE TABLE IF NOT EXISTS opens_log (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      bookmark_id TEXT NOT NULL,
+      at          INTEGER NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_opens_when ON opens_log(user_id, at);
   `);
 
   migrateNotesToDescription(db);
+  addUsageColumns(db);
   return db;
 }
 

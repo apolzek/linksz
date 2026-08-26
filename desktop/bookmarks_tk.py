@@ -1,13 +1,13 @@
 """Tkinter view of the bar, for macOS (and as a fallback on Linux without GTK).
 
 Tk comes with Python, so macOS needs no dependency at all. As with GTK, all the
-logic lives in vmbar_core.BarCore; this file only has drawing, keyboard handling
+logic lives in bookmarks_core.BarCore; this file only has drawing, keyboard handling
 and the macOS window tricks.
 
 macOS does not let an arbitrary process register a global shortcut, so what
 opens the bar is the launcher (Shortcuts.app / skhd / Raycast) running this
 script again: the second instance only sends "show" over the socket and exits.
-See vmipc.py.
+See bookmarks_ipc.py.
 """
 
 import os
@@ -15,16 +15,16 @@ import threading
 import tkinter as tk
 from tkinter import font as tkfont
 
-import vmipc
-import vmplatform
-from vmbar_core import ADDED, ERROR, OPEN, BarCore
-from vmclient import ApiError, Client
+import bookmarks_ipc
+import bookmarks_platform
+from bookmarks_core import ADDED, ERROR, OPEN, BarCore
+from bookmarks_client import ApiError, Client
 
 WIDTH = 680
 ROW_HEIGHT = 46
 MAX_VISIBLE = 9
 # With 1, the bar does not hide when it loses focus (handy for debugging and screenshots).
-NO_AUTOHIDE = os.environ.get("VAULTMARKS_NO_AUTOHIDE") == "1"
+NO_AUTOHIDE = os.environ.get("BOOKMARKS_NO_AUTOHIDE") == "1"
 
 # Fixed dark palette: Tk has no system theme like GTK, and the bar shows up on
 # top of anything, so predictable contrast is better.
@@ -46,7 +46,7 @@ class Bar:
 
         self.root = tk.Tk()
         self.root.withdraw()
-        self.root.title("Vaultmarks")
+        self.root.title("Bookmarks")
         self._build()
 
         if not daemon:
@@ -141,7 +141,7 @@ class Bar:
     # ---------------- login ----------------
     def ask_login(self):
         dlg = tk.Toplevel(self.root, bg=BG)
-        dlg.title("Vaultmarks: sign in")
+        dlg.title("Bookmarks: sign in")
         dlg.attributes("-topmost", True)
         dlg.geometry("380x210")
 
@@ -231,7 +231,7 @@ class Bar:
     def activate(self, index=None):
         action, payload = self.core.activate(index)
         if action == OPEN:
-            vmplatform.open_url(payload)
+            bookmarks_platform.open_url(payload)
             self.hide()
         elif action == ADDED:
             self.var.set("")
@@ -305,7 +305,7 @@ class Bar:
     # ---------------- daemon ----------------
     def serve(self, path):
         """Listens on the socket so the launcher can wake the bar."""
-        self.listener = vmipc.Listener(path, lambda msg: self.root.after(0, self.show))
+        self.listener = bookmarks_ipc.Listener(path, lambda msg: self.root.after(0, self.show))
         self.listener.start()
 
     def run(self):
@@ -318,10 +318,10 @@ class Bar:
 
 def run(argv):
     daemon = "--daemon" in argv
-    path = vmplatform.socket_path()
+    path = bookmarks_platform.socket_path()
 
     # A daemon already there? Just ask it to show up and exit: the fast path.
-    if vmipc.send(path, vmipc.SHOW):
+    if bookmarks_ipc.send(path, bookmarks_ipc.SHOW):
         return 0
 
     bar = Bar(daemon=daemon)

@@ -1,5 +1,5 @@
 // Shared search engine: runs on Node (server) and in the browser (web).
-// The equivalent Python version lives in desktop/vmsearch.py and MUST return
+// The equivalent Python version lives in desktop/bookmarks_search.py and MUST return
 // exactly the same results; tests/test_desktop.py compares the two.
 'use strict';
 
@@ -28,6 +28,13 @@ const ANY_WEIGHTS = [
   ['folder', 35],
   ['description', 20],
 ];
+
+// Usage ranking. A bookmark you keep opening is the one you probably want, so
+// its score gets a bonus. It saturates on purpose: after USAGE_CAP opens an old
+// favourite stops climbing, otherwise it would bury better matches forever.
+// Integers only, because the Python twin has to produce the same order.
+const USAGE_STEP = 3;
+const USAGE_CAP = 12;
 
 const SIGILS = { '#': 'tags', '@': 'category', '/': 'folder' };
 
@@ -180,6 +187,12 @@ function scoreTerm(f, term) {
   return best;
 }
 
+function usageBoost(b) {
+  const opens = Math.floor(Number(b.opens));
+  if (!Number.isFinite(opens) || opens <= 0) return 0;
+  return Math.min(opens, USAGE_CAP) * USAGE_STEP;
+}
+
 function search(bookmarks, q, limit = 50) {
   const terms = parseQuery(q);
   const out = [];
@@ -203,7 +216,9 @@ function search(bookmarks, q, limit = 50) {
       }
     }
 
-    if (ok) out.push({ bookmark: b, score: total });
+    // With no query every match scores 0, so the plain list is ranked by usage
+    // too, which is what the bar shows the moment it opens.
+    if (ok) out.push({ bookmark: b, score: total + usageBoost(b) });
   }
 
   // Ties break by recency. Beyond that the sort is stable in both languages, so
@@ -218,5 +233,5 @@ function search(bookmarks, q, limit = 50) {
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = { search, parseQuery, tokenize, norm };
 } else {
-  globalThis.VMSearch = { search, parseQuery, tokenize, norm };
+  globalThis.BookmarksSearch = { search, parseQuery, tokenize, norm };
 }

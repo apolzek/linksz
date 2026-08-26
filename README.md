@@ -55,7 +55,29 @@ Add a bookmark without leaving the bar by starting with `+`:
 
 ### Web keys
 
-`↑` `↓` navigate, `Enter` open, `e` edit, `Del` delete, `n` new, `b` panel, `/` focus search.
+`↑` `↓` navigate, `Enter` open, `e` edit, `Del` delete, `n` new, `b` panel, `/` focus search,
+`Ctrl+C` clear the search, `Esc` close what is open. Type `help` (or click **help**)
+for the whole list without leaving the page.
+
+### Panel
+
+The left panel lists every folder, category and tag in the vault. Each section
+folds by clicking its heading, folders expand and collapse in bulk, and
+**dragging a folder onto another nests it**, rewriting the path of everything
+below it.
+
+### Usage ranking
+
+Every time a bookmark is opened (`Enter`, `Ctrl+Enter`, a click, or the bar) the
+count goes up and the link climbs the results. The counter shows next to the URL,
+and **insights** in the topbar has the opens per day, the most opened links and
+the access log for the last 7, 14 or 30 days.
+
+### Themes
+
+The topbar picker carries the four Catppuccin flavours (latte, frappé,
+macchiato, mocha), a matrix one and `system`, which follows the desktop.
+The choice is per browser and survives a reload.
 
 ### Search
 
@@ -80,4 +102,18 @@ Terms combine with AND: `#devops @work -grafana`.
 ```bash
 mise run server    # backend + web UI on http://127.0.0.1:8787
 mise run bar       # open the bar
+mise run test      # the whole suite
 ```
+
+## Where things live
+
+| What | Where |
+|---|---|
+| Vault (server) | `~/.local/share/bookmarks/bookmarks.db` |
+| Bar cache | `~/.local/share/bookmarks/cache.db` |
+| Bar config | `~/.config/bookmarks/config.json` |
+| Backend service | `systemctl --user status bookmarks` |
+
+Environment: `BOOKMARKS_PORT`, `BOOKMARKS_HOST`, `BOOKMARKS_DB`, `BOOKMARKS_SEED=0`
+to skip the test account, and `BOOKMARKS_COMMIT` / `BOOKMARKS_DEPLOYED_AT` for a
+pipeline to stamp the build shown next to the sync light.

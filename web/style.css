@@ -1,3 +1,12 @@
+/* ---------- palettes ----------
+ *
+ * The default one follows the system (dark, light below). The four Catppuccin
+ * flavours are chosen in the topbar and stay in localStorage; the choice lands
+ * as data-theme on <html>, applied before the first paint so nothing flashes.
+ *
+ * A palette declares only base colours. Everything tinted (soft backgrounds,
+ * coloured borders) is derived once, further down, with color-mix.
+ */
 :root {
   --bg: #0f1115;
   --panel: #171a21;
@@ -6,13 +15,18 @@
   --text: #e6e9ef;
   --muted: #8b93a7;
   --accent: #6ea8fe;
-  --accent-soft: rgba(110, 168, 254, .14);
   --danger: #ff6b6b;
+  --ok: #4fbf7b;
+  --warn: #f0b86e;
   --radius: 0;
+  /* Every face here ships with some OS, so the wordmark looks the same offline. */
+  --font-mono: ui-monospace, "JetBrains Mono", SFMono-Regular, "SF Mono", Menlo,
+               Consolas, "DejaVu Sans Mono", monospace;
 }
 
+/* :not([data-theme]) so picking a flavour is not undone by the system setting. */
 @media (prefers-color-scheme: light) {
-  :root {
+  :root:not([data-theme]) {
     --bg: #f6f7f9;
     --panel: #ffffff;
     --panel-2: #f0f2f6;
@@ -20,11 +34,101 @@
     --text: #14171d;
     --muted: #666f81;
     --accent: #2563eb;
-    --accent-soft: rgba(37, 99, 235, .10);
+    --ok: #2f9e5f;
+    --warn: #b7791f;
   }
 }
 
+:root[data-theme="latte"] {
+  --bg: #e6e9ef;
+  --panel: #eff1f5;
+  --panel-2: #dce0e8;
+  --line: #ccd0da;
+  --text: #4c4f69;
+  --muted: #6c6f85;
+  --accent: #1e66f5;
+  --danger: #d20f39;
+  --ok: #40a02b;
+  --warn: #fe640b;
+}
+
+:root[data-theme="frappe"] {
+  --bg: #303446;
+  --panel: #292c3c;
+  --panel-2: #414559;
+  --line: #51576d;
+  --text: #c6d0f5;
+  --muted: #a5adce;
+  --accent: #8caaee;
+  --danger: #e78284;
+  --ok: #a6d189;
+  --warn: #ef9f76;
+}
+
+:root[data-theme="macchiato"] {
+  --bg: #24273a;
+  --panel: #1e2030;
+  --panel-2: #363a4f;
+  --line: #494d64;
+  --text: #cad3f5;
+  --muted: #a5adcb;
+  --accent: #8aadf4;
+  --danger: #ed8796;
+  --ok: #a6da95;
+  --warn: #f5a97f;
+}
+
+:root[data-theme="mocha"] {
+  --bg: #1e1e2e;
+  --panel: #181825;
+  --panel-2: #313244;
+  --line: #45475a;
+  --text: #cdd6f4;
+  --muted: #a6adc8;
+  --accent: #89b4fa;
+  --danger: #f38ba8;
+  --ok: #a6e3a1;
+  --warn: #fab387;
+}
+
+/* Matrix: the green is the accent and nothing else. Terminal text is pale grey
+   with a green cast, and ok/warn step out of the green family on purpose, so
+   the screen reads as a terminal instead of a wall of phosphor. */
+:root[data-theme="matrix"] {
+  --bg: #080b09;
+  --panel: #0c110d;
+  --panel-2: #131a14;
+  --line: #1f2b21;
+  --text: #ccd6cd;
+  --muted: #6e8472;
+  --accent: #3ad06a;
+  --danger: #e05561;
+  --ok: #46b3ae;
+  --warn: #cc9a45;
+}
+
+/* Derived from whichever palette won above: var() resolves at use time, so
+   these follow the theme without every flavour having to repeat them. */
+:root {
+  --accent-soft: color-mix(in srgb, var(--accent) 14%, transparent);
+  --accent-line: color-mix(in srgb, var(--accent) 40%, transparent);
+  --danger-soft: color-mix(in srgb, var(--danger) 12%, transparent);
+  --danger-line: color-mix(in srgb, var(--danger) 40%, transparent);
+  --ok-line: color-mix(in srgb, var(--ok) 40%, transparent);
+  --warn-line: color-mix(in srgb, var(--warn) 40%, transparent);
+}
+
 * { box-sizing: border-box; }
+
+/* CRT scanlines over the whole page: the retro layer. Faint on purpose, one
+   pixel on, one off, and it never eats a click. */
+body::after {
+  content: ''; position: fixed; inset: 0; z-index: 100; pointer-events: none;
+  background: repeating-linear-gradient(to bottom,
+    rgba(0, 0, 0, .16) 0, rgba(0, 0, 0, .16) 1px, transparent 1px, transparent 3px);
+  opacity: .5; mix-blend-mode: multiply;
+}
+:root[data-theme="latte"] body::after, :root:not([data-theme]) body::after { opacity: .28; }
 
 body {
   margin: 0;
@@ -40,7 +144,7 @@ body {
 /* ---------- login ---------- */
 .auth { min-height: 100vh; display: grid; place-items: center; padding: 24px; }
 .auth-card { width: 100%; max-width: 360px; background: var(--panel); border: 1px solid var(--line); border-radius: 0; padding: 28px; }
-.logo { margin: 0; font-size: 24px; letter-spacing: -.02em; }
+.logo { margin: 0; font-size: 26px; }
 .sub { margin: 4px 0 20px; color: var(--muted); font-size: 13px; }
 .tabs { display: flex; gap: 4px; background: var(--panel-2); padding: 4px; border-radius: 0; margin-bottom: 16px; }
 .tab { flex: 1; padding: 8px; border: 0; border-radius: 0; background: transparent; color: var(--muted); font: inherit; font-size: 14px; cursor: pointer; }
@@ -53,9 +157,9 @@ body {
   color: var(--muted); overflow-wrap: anywhere;
 }
 .status .dot { flex: none; width: 7px; height: 7px; background: var(--muted); }
-.status.up { color: #4fbf7b; border-color: rgba(79,191,123,.35); }
-.status.up .dot { background: #4fbf7b; }
-.status.down { color: var(--danger); border-color: rgba(255,107,107,.4); }
+.status.up { color: var(--ok); border-color: var(--ok-line); }
+.status.up .dot { background: var(--ok); }
+.status.down { color: var(--danger); border-color: var(--danger-line); }
 .status.down .dot { background: var(--danger); }
 .status.checking .dot { animation: pulse 1s ease-in-out infinite; }
 @keyframes pulse { 50% { opacity: .25; } }
@@ -115,16 +219,73 @@ button { cursor: pointer; border-radius: 0; border: 1px solid transparent; paddi
 .primary:hover { filter: brightness(1.08); }
 .ghost { background: transparent; color: var(--muted); border-color: var(--line); }
 .ghost:hover { color: var(--text); border-color: var(--accent); }
+select.ghost { font: inherit; border: 1px solid var(--line); border-radius: 0; background: transparent; color: var(--muted); }
+select.ghost option { background: var(--panel); color: var(--text); }
+
+/* No boxes in the menu: each item is a word with a rule under it, and the rule
+   is what lights up. Same font as the wordmark, same height for all of them. */
+.topbar-actions .ghost {
+  display: inline-flex; align-items: center; justify-content: center;
+  height: 28px; padding: 0 1px; line-height: 1;
+  border: 0; border-bottom: 1px solid var(--line); background: transparent;
+  font-family: var(--font-mono); font-size: 12.5px; font-weight: 600;
+  letter-spacing: -.02em; text-transform: lowercase;
+}
+.topbar-actions .ghost:hover { color: var(--text); border-bottom-color: var(--accent); }
+/* Native selects ignore part of this, and the caret is drawn below anyway. */
+/* Centred like every other label in the menu, with room on the right for the
+   caret so the two never touch. */
+.topbar-actions select.ghost { appearance: none; width: 104px; padding: 0 16px 0 4px; text-align: center; text-align-last: center; }
+.select-ghost { position: relative; display: inline-flex; }
+.select-ghost::after {
+  content: '▾'; position: absolute; right: 2px; top: 50%; transform: translateY(-60%);
+  font-size: 10px; color: var(--muted); pointer-events: none;
+}
+.select-ghost:hover::after { color: var(--text); }
 .danger { background: transparent; color: var(--danger); border-color: var(--danger); }
 .danger:hover { background: var(--danger); color: #fff; }
 .error { color: var(--danger); font-size: 13px; min-height: 18px; margin: 4px 0 0; }
 
 /* ---------- topbar ---------- */
-.topbar { display: flex; align-items: center; gap: 10px; padding: 12px 20px; border-bottom: 1px solid var(--line); }
-.brand { font-weight: 600; letter-spacing: -.01em; }
-.sync { font-size: 12px; color: var(--muted); }
-.sync.saving { color: var(--accent); }
-.sync.err { color: var(--danger); }
+.topbar {
+  display: grid; grid-template-columns: 1fr auto 1fr; align-items: center;
+  gap: 10px; padding: 12px 20px; border-bottom: 1px solid var(--line);
+}
+.topbar-side { display: flex; align-items: center; gap: 10px; min-width: 0; }
+/* Wider gaps than the boxed version had: with no borders, the spacing is what
+   separates one item from the next. */
+.topbar-actions { justify-content: flex-end; flex-wrap: wrap; gap: 16px; row-gap: 6px; }
+
+/* Wordmark: heavy monospace with a terminal cursor. Every face in the stack
+   ships with some OS, so it looks the same offline as it does online. */
+.brand {
+  justify-self: center;
+  font-family: var(--font-mono);
+  font-weight: 800; font-size: 18px; letter-spacing: -.045em;
+  text-transform: lowercase; white-space: nowrap;
+}
+.brand i { font-style: normal; color: var(--accent); }
+/* A terminal cursor, blinking like one. Stops for anyone who asked the system
+   for less motion. */
+@media (prefers-reduced-motion: no-preference) {
+  .brand i { animation: blink 1.1s step-end infinite; }
+}
+@keyframes blink { 50% { opacity: 0; } }
+/* A light, not a word in the corner: colour says the state at a glance and the
+   label still spells it out, which colour alone would not do for everyone. */
+.sync {
+  display: inline-flex; align-items: center; gap: 7px;
+  padding: 4px 10px; border: 1px solid var(--line); background: var(--panel);
+  font-size: 11px; letter-spacing: .07em; text-transform: uppercase;
+  color: var(--ok); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.sync::before { content: ''; flex: none; width: 6px; height: 6px; background: currentColor; }
+.sync.saving { color: var(--accent); border-color: var(--accent-line); }
+.sync.saving::before { animation: pulse 1s ease-in-out infinite; }
+.sync.err { color: var(--danger); border-color: var(--danger-line); }
+/* Which build is on screen, next to the light. Quiet on purpose: it is there
+   when you go looking for it and invisible the rest of the time. */
+.build { font-family: var(--font-mono); font-size: 11px; color: var(--muted); opacity: .7; white-space: nowrap; }
 
 /* ---------- layout ---------- */
 .layout { display: flex; gap: 8px; max-width: 1060px; margin: 0 auto; align-items: flex-start; }
@@ -145,6 +306,21 @@ button { cursor: pointer; border-radius: 0; border: 1px solid transparent; paddi
 .linkish { background: transparent; border: 0; color: var(--accent); font-size: 12px; padding: 0; text-transform: none; letter-spacing: 0; }
 .facet { margin-bottom: 18px; }
 .facet h3 { margin: 0 0 6px; padding: 0 6px; font-size: 12.5px; font-weight: 600; color: var(--muted); }
+.facet-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 6px; }
+.facet-head h3 { margin: 0; white-space: nowrap; padding: 0; }
+/* The whole heading is the fold button, so the click target is the obvious one. */
+.facet-toggle {
+  display: inline-flex; align-items: center; gap: 3px;
+  background: transparent; border: 0; padding: 0 6px; color: inherit; font: inherit;
+}
+.facet-toggle:hover { color: var(--text); }
+.facet-toggle .tree-toggle { width: 12px; }
+/* Its own row, on the filter field's box: side by side with the heading they
+   were cramped and wrapped at the panel's width. */
+.facet-actions { display: flex; justify-content: center; gap: 12px; padding: 0 6px 8px; }
+.facet-actions .linkish:disabled { color: var(--muted); opacity: .55; }
+/* The one control a flat list needs: the cap, and a way past it. */
+.facet-more { display: block; width: 100%; text-align: left; padding: 6px 8px; font-size: 12px; }
 .facet-empty { margin: 0 0 4px; padding: 0 6px; font-size: 12px; color: var(--muted); opacity: .7; }
 .facet-row {
   display: flex; align-items: center; gap: 8px; width: 100%;
@@ -154,18 +330,51 @@ button { cursor: pointer; border-radius: 0; border: 1px solid transparent; paddi
 .facet-row:hover { background: var(--panel); }
 .facet-row.on { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
 .facet-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.facet-count { flex: none; font-size: 11.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.facet-count { flex: none; font-size: 11.5px; color: var(--muted); font-variant-numeric: tabular-nums; font-family: var(--font-mono); }
 .facet-row.on .facet-count { color: inherit; }
 
-/* Folder tree: indentation via --nivel, arrow only on nodes with children. */
-.tree-row { display: flex; align-items: center; gap: 2px; padding-left: calc(var(--nivel, 0) * 13px); }
+/* Folder tree: indentation via --level, arrow only on nodes with children. */
+.tree-row { display: flex; align-items: center; gap: 2px; padding-left: calc(var(--level, 0) * 13px); }
 .tree-toggle {
   flex: none; width: 16px; padding: 0; background: transparent; border: 0;
   color: var(--muted); font-size: 10px; line-height: 1; border-radius: 0;
 }
 .tree-toggle:hover { color: var(--text); }
-.tree-toggle.vazio { visibility: hidden; }
+.tree-toggle.emptyText { visibility: hidden; }
+/* The folder tree wears the wordmark's font: a path is an identifier, and it
+   reads better with the columns lining up. */
 .tree-item { min-width: 0; }
+.tree .facet-name { font-family: var(--font-mono); font-size: 12.5px; letter-spacing: -.02em; }
+.tree .facet-count { font-family: var(--font-mono); }
+
+/* Dragging a folder into another one. The row being dragged fades, the row
+   under the pointer is outlined, and a label follows the cursor. */
+.tree-row, .tree-row [role="button"] { cursor: grab; }
+/* Mid-drag it must not answer elementFromPoint, or the row under the pointer
+   would always be the one being dragged. */
+.tree-row.dragging { pointer-events: none; }
+.drag-ghost {
+  position: fixed; top: 0; left: 0; z-index: 50; pointer-events: none;
+  padding: 4px 9px; font-family: var(--font-mono); font-size: 12px;
+  background: var(--panel-2); border: 1px solid var(--accent); color: var(--accent);
+}
+/* The tree rows are divs now: the focus ring a button had comes back by hand. */
+.facet-row[role="button"]:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
+.tree-row.dragging { opacity: .4; }
+/* No text selection while dragging across the panel. */
+#browse-body.dragging { user-select: none; }
+.tree-row.drop-into, .tree-root-drop.drop-into {
+  outline: 1px solid var(--accent); background: var(--accent-soft);
+}
+/* Pinned to the bottom of the panel instead of sitting in the list: appearing
+   in the flow would push every row down mid-drag and the drop would land on
+   the folder next door. The panel is a fixed-width column, so are these. */
+.tree-root-drop {
+  display: none; position: fixed; z-index: 6; left: 16px; bottom: 14px; width: 216px;
+  padding: 8px 10px; text-align: center; font-size: 12px;
+  background: var(--panel); border: 1px dashed var(--line); color: var(--muted);
+}
+#browse-body.dragging .tree-root-drop { display: block; }
 
 /* Mini search for each section of the panel. */
 .facet-search { padding: 0 6px 6px; }
@@ -176,7 +385,7 @@ button { cursor: pointer; border-radius: 0; border: 1px solid transparent; paddi
 .facet-search input::-webkit-search-cancel-button { cursor: pointer; }
 
 /* ---------- search ---------- */
-.searchwrap { max-width: 720px; margin: 0 auto; padding: 34px 20px 8px; }
+.searchwrap { max-width: 720px; margin: 0 auto; padding: 34px 20px 8px; position: relative; }
 .searchbar {
   display: flex; align-items: center; gap: 10px;
   background: var(--panel); border: 1px solid var(--line);
@@ -185,7 +394,8 @@ button { cursor: pointer; border-radius: 0; border: 1px solid transparent; paddi
   transition: border-color .12s, box-shadow .12s;
 }
 .searchbar:focus-within { border-color: var(--accent); box-shadow: 0 0 0 4px var(--accent-soft); }
-.searchbar .icon { color: var(--muted); font-size: 20px; }
+.searchbar .icon { display: flex; flex: none; color: var(--muted); }
+.searchbar:focus-within .icon { color: var(--accent); }
 #q { border: 0; background: transparent; padding: 12px 0; font-size: 17px; }
 #q:focus { box-shadow: none; }
 .clear { background: transparent; color: var(--muted); border: 0; font-size: 22px; line-height: 1; padding: 0 4px; }
@@ -206,25 +416,97 @@ button { cursor: pointer; border-radius: 0; border: 1px solid transparent; paddi
 }
 kbd { background: var(--panel-2); border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 0; padding: 1px 5px; font: 11px ui-monospace, monospace; margin: 0 1px; }
 
+/* ---------- search history ---------- */
+/* Sits over the page, not in the flow: the results must not jump down every
+   time a suggestion appears. */
+.suggest {
+  position: absolute; z-index: 5; left: 20px; right: 20px;
+  list-style: none; margin: -1px 0 0; padding: 4px 0;
+  background: var(--panel); border: 1px solid var(--line);
+  box-shadow: 0 6px 20px rgba(0,0,0,.28);
+  max-height: 320px; overflow-y: auto;
+}
+.suggest-row { display: flex; align-items: center; }
+.suggest-row:hover { background: var(--panel-2); }
+.suggest-use {
+  flex: 1; min-width: 0; text-align: left; background: transparent; border: 0;
+  color: var(--text); padding: 7px 12px; font-size: 13.5px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.suggest-drop {
+  flex: none; background: transparent; border: 0; color: var(--muted);
+  padding: 6px 10px; font-size: 15px; line-height: 1; opacity: 0;
+}
+.suggest-row:hover .suggest-drop, .suggest-drop:focus-visible { opacity: 1; }
+.suggest-drop:hover { color: var(--danger); }
+@media (hover: none) { .suggest-drop { opacity: 1; } }
+
+/* ---------- insights ---------- */
+.insights-card { max-width: 620px; gap: 0; }
+.ins-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.ins-range { display: flex; gap: 10px; font-family: var(--font-mono); }
+.ins-range .on { color: var(--text); text-decoration: underline; }
+
+/* A bar per day. Heights are percentages of the tallest day, so the shape is
+   what carries the meaning; the exact number sits on top of each bar. */
+.ins-chart {
+  display: flex; align-items: flex-end; gap: 4px;
+  height: 132px; margin: 6px 0 4px; padding-top: 14px;
+}
+.ins-col { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; height: 100%; gap: 3px; }
+.ins-value { font-family: var(--font-mono); font-size: 10.5px; color: var(--muted); line-height: 1; }
+.ins-bar { width: 100%; min-height: 2px; background: var(--accent); opacity: .85; }
+.ins-bar.empty { background: var(--line); min-height: 1px; }
+.ins-day { font-family: var(--font-mono); font-size: 10px; color: var(--muted); white-space: nowrap; }
+
+.ins-top, .ins-log { list-style: none; margin: 4px 0 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+.ins-log { max-height: 220px; overflow-y: auto; }
+.ins-row { display: flex; align-items: baseline; gap: 10px; padding: 5px 8px; font-size: 12.5px; }
+.ins-row:hover { background: var(--panel-2); }
+.ins-link {
+  flex: 1; min-width: 0; text-align: left; background: transparent; border: 0; color: var(--text);
+  padding: 0; font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.ins-link:hover { color: var(--accent); }
+.ins-count { flex: none; font-family: var(--font-mono); font-size: 11px; color: var(--muted); }
+.ins-when { flex: none; font-family: var(--font-mono); font-size: 11px; color: var(--muted); }
+.ins-what { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ---------- help ---------- */
+/* Not under the search bar any more: it shows up on demand, from the topbar
+   button or by typing `help`. */
+.help { margin-top: 10px; border: 1px solid var(--line); background: var(--panel); padding: 10px 14px 6px; }
+.help-head {
+  display: flex; align-items: baseline; justify-content: space-between;
+  font-family: var(--font-mono); font-size: 11.5px; text-transform: uppercase;
+  letter-spacing: .08em; color: var(--muted); margin-bottom: 8px;
+}
+
 /* ---------- results ---------- */
-.count { max-width: 720px; margin: 18px auto 0; padding: 0 22px; font-size: 12px; color: var(--muted); }
+.count { max-width: 720px; margin: 18px auto 0; padding: 0 22px; font-size: 12px; color: var(--muted); font-family: var(--font-mono); }
 .results { list-style: none; max-width: 720px; margin: 6px auto 60px; padding: 0 20px; }
 .item {
-  display: flex; align-items: center; gap: 12px;
+  display: flex; align-items: flex-start; gap: 12px;
   padding: 11px 14px; border: 1px solid transparent; border-radius: 0;
   cursor: pointer;
 }
 .item:hover { background: var(--panel); }
 .item.sel { background: var(--panel); border-color: var(--accent); }
-.favicon { width: 18px; height: 18px; flex: none; border-radius: 0; }
+.favicon { width: 18px; height: 18px; flex: none; border-radius: 0; margin-top: 1px; }
 .item-main { min-width: 0; flex: 1; }
 .item-title { font-weight: 550; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.item-url { color: var(--muted); font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.item-meta { display: flex; gap: 6px; flex: none; align-items: center; }
-.badge { font-size: 11.5px; padding: 2px 8px; border-radius: 0; border: 1px solid var(--line); color: var(--muted); white-space: nowrap; }
-.badge.cat { color: #f0b86e; border-color: rgba(240,184,110,.35); }
-.badge.tag { color: var(--accent); border-color: rgba(110,168,254,.35); }
-.badge.folder { color: #7ee0a1; border-color: rgba(126,224,161,.35); }
+/* A row of its own so the counter is not swallowed by the URL's ellipsis. */
+.item-url { display: flex; align-items: baseline; gap: 8px; color: var(--muted); font-family: var(--font-mono); font-size: 12px; }
+.item-url-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.item-opens { flex: none; color: var(--accent); font-variant-numeric: tabular-nums; }
+.item-opens:empty { display: none; }
+/* Under the title, wrapping: the row is theirs, so nothing squeezes the title. */
+.item-meta { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px; }
+.badge { font-family: var(--font-mono); font-size: 11px; letter-spacing: -.02em; padding: 2px 8px; border-radius: 0; border: 1px solid var(--line); color: var(--muted); white-space: nowrap; cursor: pointer; }
+.badge:hover { border-color: currentColor; }
+.badge.cat { color: var(--warn); border-color: var(--warn-line); }
+.badge.tag { color: var(--accent); border-color: var(--accent-line); }
+.badge.folder { color: var(--ok); border-color: var(--ok-line); }
 .item-actions { display: flex; gap: 2px; flex: none; margin-left: 2px; }
 .icon-btn {
   background: transparent; border: 0; color: var(--muted);
@@ -250,7 +532,21 @@ mark { background: var(--accent-soft); color: inherit; border-radius: 0; padding
 textarea { resize: vertical; }
 
 /* ---------- import / export ---------- */
-.io-card { max-width: 520px; gap: 0; }
+/* This modal is a short list of choices, not a form filled top to bottom, so
+   everything in it sits on the centre line: headings, hints, buttons and rows. */
+.io-card { max-width: 520px; gap: 0; text-align: center; }
+.io-card .io-buttons,
+.io-card .io-file,
+.io-card .modal-actions,
+.io-card .io-modes label { justify-content: center; }
+/* The spacer exists to push the buttons right, which is the opposite of this. */
+.io-card .modal-actions .spacer { display: none; }
+/* A coloured edge on the left of a centred line has nothing to sit against. */
+.io-card .io-line { border-left: 0; border-top: 3px solid var(--line); }
+.io-card .io-create { border-top-color: var(--ok); }
+.io-card .io-update { border-top-color: var(--accent); }
+.io-card .io-remove { border-top-color: var(--danger); }
+.io-card .io-modes legend { width: 100%; text-align: center; }
 .io-section { border-top: 1px solid var(--line); padding: 16px 0 4px; }
 .io-section:first-of-type { border-top: 0; padding-top: 4px; }
 .io-section h3 { margin: 0 0 4px; font-size: 14px; }
@@ -308,13 +604,13 @@ textarea { resize: vertical; }
   display: block; font-style: normal; font-size: 11px; color: var(--muted);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.io-create { border-left-color: #7ee0a1; }
+.io-create { border-left-color: var(--ok); }
 .io-update { border-left-color: var(--accent); }
 .io-remove { border-left-color: var(--danger); }
 
 .io-warn {
   margin: 10px 0 0; padding: 9px 11px; border-radius: 0; font-size: 12.5px;
-  background: rgba(255, 107, 107, .12); border: 1px solid rgba(255, 107, 107, .35);
+  background: var(--danger-soft); border: 1px solid var(--danger-line);
   color: var(--danger);
 }
 
@@ -346,6 +642,7 @@ textarea { resize: vertical; }
   .content { order: 1; width: 100%; }
   .facet { margin-bottom: 12px; }
   .facet h3 { padding: 0; }
+  .facet-actions { padding: 0 0 8px; justify-content: flex-start; }
   .facet-row {
     display: inline-flex; width: auto; margin: 0 5px 5px 0;
     border-color: var(--line); background: var(--panel-2); border-radius: 0;
@@ -355,14 +652,8 @@ textarea { resize: vertical; }
 }
 
 @media (max-width: 640px) {
-  /* With no physical keyboard, the shortcut hints only take up space. */
-  .hint:not(.syntax) { display: none; }
   .fab { display: block; }
   #btn-new { display: none; }
-  /* Little room in the topbar: the label goes, the icon stays. */
-  #btn-io { font-size: 0; padding: 9px 11px; }
-  #btn-io::before { content: '⇅'; font-size: 15px; }
-
   /* dvh follows the address bar collapsing; vh does not. */
   .auth { min-height: 100dvh; }
 
@@ -381,16 +672,16 @@ textarea { resize: vertical; }
   .results { padding: 0 10px; margin-bottom: 20px; }
   .count { padding: 0 12px; margin-top: 12px; }
   .browse { padding: 10px 12px calc(90px + env(safe-area-inset-bottom)); }
-  #btn-browse { font-size: 0; padding: 9px 11px; }
-  #btn-browse::before { content: '☰'; font-size: 15px; }
+  /* Little room in the topbar: tighter gaps, all labels still readable. */
+  .topbar-actions { gap: 11px; }
+  .topbar-actions .ghost { height: 26px; font-size: 11.5px; }
+  .topbar-actions select.ghost { width: 80px; padding-right: 14px; }
+  .brand { font-size: 16px; }
 
   .item {
-    align-items: flex-start;
     padding: 12px;
     min-height: 44px;          /* comfortable touch target */
-    flex-wrap: wrap;
   }
-  .item-meta { width: 100%; flex-wrap: wrap; margin-top: 6px; }
   .item-title { white-space: normal; }
   .item-url { white-space: nowrap; }
 

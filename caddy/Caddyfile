@@ -15,8 +15,8 @@
 	admin off
 }
 
-# VAULTMARKS_SITE = how you reach it: a hostname, or the machine's LAN IP.
-{$VAULTMARKS_SITE:vaultmarks.local} {
+# BOOKMARKS_SITE = how you reach it: a hostname, or the machine's LAN IP.
+{$BOOKMARKS_SITE:bookmarks.local} {
 	tls internal
 
 	encode zstd gzip
@@ -29,12 +29,12 @@
 		-Server
 	}
 
-	reverse_proxy vaultmarks:8787
+	reverse_proxy bookmarks:8787
 }
 
 # HTTP is only there to hand out the root CA: before trusting it, the phone
 # obviously cannot open the HTTPS.
-http://{$VAULTMARKS_SITE:vaultmarks.local} {
+http://{$BOOKMARKS_SITE:bookmarks.local} {
 	handle /root.crt {
 		root * /data/caddy/pki/authorities/local
 		rewrite * /root.crt

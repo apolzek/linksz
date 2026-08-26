@@ -6,15 +6,39 @@
 const $ = (s) => document.querySelector(s);
 const API = '';
 
+// The browser storage keys were prefixed vm_ when the project had another name.
+// This carries over what is already on the machine (session, theme, history)
+// once, so renaming the project does not sign anyone out.
+(function renameStorageKeys() {
+  const keys = ['token', 'theme', 'closed_folders', 'closed_sections', 'expanded_facets', 'history', 'browse'];
+  try {
+    for (const k of keys) {
+      const old = localStorage.getItem('vm_' + k);
+      if (old !== null && localStorage.getItem('bookmarks_' + k) === null) {
+        localStorage.setItem('bookmarks_' + k, old);
+      }
+      if (old !== null) localStorage.removeItem('vm_' + k);
+    }
+  } catch { /* storage blocked: nothing to carry over */ }
+})();
+
 const state = {
-  token: localStorage.getItem('vm_token') || '',
+  token: localStorage.getItem('bookmarks_token') || '',
   items: [],          // every live bookmark
   results: [],
   sel: 0,
   editing: null,
   lastSync: 0,
   panelFilter: {},   // filters for the panel lists (they do not filter bookmarks)
-  closedFolders: new Set(JSON.parse(localStorage.getItem('vm_closed_folders') || '[]')),
+  closedFolders: new Set(JSON.parse(localStorage.getItem('bookmarks_closed_folders') || '[]')),
+  closedSections: new Set(JSON.parse(localStorage.getItem('bookmarks_closed_sections') || '[]')),
+  helpOpen: false,
+  // Flat lists (categories, tags) start capped: 1798 tags in one column is a
+  // scroll, not a panel. `expand all` lifts the cap.
+  expandedFacets: new Set(JSON.parse(localStorage.getItem('bookmarks_expanded_facets') || '[]')),
+  // [{ q, n, t }]: the query, how many times it was used, when it was last used.
+  history: JSON.parse(localStorage.getItem('bookmarks_history') || '[]'),
+  suggestOff: false,   // hidden until the next keystroke (Esc, or one was picked)
 };
 
 /* ---------------- http ---------------- */
@@ -31,6 +55,102 @@ async function api(path, opts = {}) {
   if (!res.ok) throw new Error(body.error || `error ${res.status}`);
   return body;
 }
+
+/* ---------------- search history ---------------- */
+// The last searches, ranked by how often they were used. Kept in the browser:
+// it is a habit, not vault data, and it never leaves this device.
+const HISTORY_KEEP = 50;    // how many are stored
+const HISTORY_SHOW = 10;    // how many are offered at once
+
+function rememberQuery(raw) {
+  const q = String(raw).trim();
+  // Two characters is where a search starts being a search, and `help` is a
+  // command, not one.
+  if (q.length < 2 || BookmarksSearch.norm(q) === 'help') return;
+
+  const i = state.history.findIndex((h) => h.q === q);
+  if (i >= 0) state.history[i] = { q, n: state.history[i].n + 1, t: Date.now() };
+  else state.history.push({ q, n: 1, t: Date.now() });
+
+  // Most used first, ties by recency, and the tail falls off.
+  state.history.sort((a, b) => (b.n - a.n) || (b.t - a.t));
+  state.history = state.history.slice(0, HISTORY_KEEP);
+  localStorage.setItem('bookmarks_history', JSON.stringify(state.history));
+}
+
+function forgetQuery(q) {
+  state.history = state.history.filter((h) => h.q !== q);
+  localStorage.setItem('bookmarks_history', JSON.stringify(state.history));
+}
+
+function renderSuggest() {
+  const box = $('#suggest');
+  const typed = $('#q').value.trim();
+  const term = BookmarksSearch.norm(typed);
+  box.innerHTML = '';
+
+  // Only while typing, and never offering back exactly what is already there.
+  const matches = (!state.suggestOff && term)
+    ? state.history.filter((h) => BookmarksSearch.norm(h.q).includes(term) && h.q !== typed).slice(0, HISTORY_SHOW)
+    : [];
+  box.classList.toggle('hidden', !matches.length);
+  if (!matches.length) return;
+
+  for (const h of matches) {
+    const li = document.createElement('li');
+    li.className = 'suggest-row';
+
+    const use = document.createElement('button');
+    use.type = 'button';
+    use.className = 'suggest-use';
+    use.append(highlight(h.q, BookmarksSearch.parseQuery(typed)));
+    use.onmousedown = (e) => e.preventDefault();     // keeps the field focused
+    use.onclick = () => { state.suggestOff = true; setQuery(h.q); };
+
+    const drop = document.createElement('button');
+    drop.type = 'button';
+    drop.className = 'suggest-drop';
+    drop.textContent = '×';
+    drop.title = 'Forget this search';
+    drop.onmousedown = (e) => e.preventDefault();
+    drop.onclick = () => { forgetQuery(h.q); renderSuggest(); };
+
+    li.append(use, drop);
+    box.append(li);
+  }
+}
+
+/* ---------------- theme ---------------- */
+// `auto` follows the system; the rest are the Catppuccin flavours declared in
+// style.css. The value is read again in the <head> so the choice survives a
+// reload without a flash of the default palette.
+const THEMES = ['auto', 'latte', 'frappe', 'macchiato', 'mocha', 'matrix'];
+
+function applyTheme(name) {
+  const theme = THEMES.includes(name) ? name : 'auto';
+  const root = document.documentElement;
+  if (theme === 'auto') delete root.dataset.theme; else root.dataset.theme = theme;
+  try { localStorage.setItem('bookmarks_theme', theme); } catch {}
+  // The browser chrome (address bar, task switcher) reads this tag, and only
+  // the computed value knows which palette actually won.
+  const bg = getComputedStyle(root).getPropertyValue('--bg').trim();
+  if (bg) document.querySelector('meta[name="theme-color"]')?.setAttribute('content', bg);
+}
+
+function setupTheme() {
+  let saved = 'auto';
+  try { saved = localStorage.getItem('bookmarks_theme') || 'auto'; } catch {}
+  const select = $('#theme');
+  select.value = THEMES.includes(saved) ? saved : 'auto';
+  select.onchange = () => applyTheme(select.value);
+  // On `auto`, the system flipping to light changes --bg under our feet.
+  matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+    if (!document.documentElement.dataset.theme) applyTheme('auto');
+  });
+  applyTheme(select.value);
+}
+
+setupTheme();
 
 function setSync(text, cls = '') {
   const el = $('#sync-state');
@@ -100,7 +220,7 @@ async function signIn(credentials, mode = authMode) {
   try {
     const r = await api(`/api/auth/${mode}`, { method: 'POST', body: JSON.stringify(credentials) });
     state.token = r.token;
-    localStorage.setItem('vm_token', r.token);
+    localStorage.setItem('bookmarks_token', r.token);
     $('#auth-offline').classList.add('hidden');
     await enterApp();
   } catch (err) {
@@ -127,6 +247,23 @@ function paintStatus(status, text) {
   $('#auth-status-text').textContent = text;
 }
 
+// The build stamp next to the sync light: short commit and the day it went out.
+// Both come from the server, so the page never claims a version of its own.
+function showBuild(build) {
+  const el = $('#build');
+  if (!build?.commit) { el.classList.add('hidden'); return; }
+
+  const when = build.deployed_at ? new Date(build.deployed_at) : null;
+  const day = when && !isNaN(when)
+    ? when.toLocaleDateString(undefined, { day: '2-digit', month: 'short' })
+    : '';
+  el.textContent = day ? `${build.commit} · ${day}` : build.commit;
+  el.title = when && !isNaN(when)
+    ? `frontend ${build.commit}, deployed ${when.toLocaleString()} (${build.source})`
+    : `frontend ${build.commit} (${build.source})`;
+  el.classList.remove('hidden');
+}
+
 async function checkServer() {
   $('#auth-origin').textContent = location.origin;
   paintStatus('checking', 'checking the backend…');
@@ -135,6 +272,8 @@ async function checkServer() {
     const body = await r.json();
     $('#auth-offline').classList.add('hidden');
     paintStatus('up', `backend up at ${location.origin}`);
+
+    showBuild(body.build);
 
     const demo = $('#auth-demo');
     if (body.demo?.login) {
@@ -168,9 +307,21 @@ $('#auth-retry').onclick = async () => {
 
 $('#auth-demo').onclick = () => signIn({ login: 'teste', password: 'teste123' }, 'login');
 
+// The panel is open when the button says so or when the query is the `help`
+// command, so closing it has to undo whichever one opened it.
+function setHelp(open) {
+  const byCommand = BookmarksSearch.norm($('#q').value).trim() === 'help';
+  state.helpOpen = open;
+  if (!open && byCommand) setQuery('');   // setQuery renders on its own
+  else render();
+}
+
+$('#btn-help').onclick = () => setHelp($('#help').classList.contains('hidden'));
+$('#help-close').onclick = () => setHelp(false);
+
 $('#btn-logout').onclick = async () => {
   try { await api('/api/auth/logout', { method: 'POST' }); } catch {}
-  localStorage.removeItem('vm_token');
+  localStorage.removeItem('bookmarks_token');
   state.token = '';
   state.items = [];
   location.reload();
@@ -223,7 +374,7 @@ function refreshDatalists() {
 /* ---------------- render ---------------- */
 function highlight(text, terms) {
   const frag = document.createDocumentFragment();
-  const plain = VMSearch.norm(text);
+  const plain = BookmarksSearch.norm(text);
   const spans = [];
   for (const t of terms) {
     if (!t.value) continue;
@@ -284,22 +435,52 @@ function badge(cls, text, onClick) {
   return el;
 }
 
+// Moving the selection repaints two rows, not the screen. Going through
+// render() meant re-searching the vault, rebuilding every result row and the
+// whole folder panel on each arrow key, which is what made holding the key crawl.
+function moveSel(delta) {
+  if (!state.results.length) return;
+  const next = Math.min(Math.max(state.sel + delta, 0), state.results.length - 1);
+  if (next === state.sel) return;
+
+  const rows = $('#results').children;
+  rows[state.sel]?.classList.remove('sel');
+  state.sel = next;
+  const row = rows[state.sel];
+  if (!row) return render();     // list out of step with the results: rebuild
+  row.classList.add('sel');
+  row.scrollIntoView({ block: 'nearest' });
+}
+
 function render() {
   const q = $('#q').value;
-  const terms = VMSearch.parseQuery(q);
+  const terms = BookmarksSearch.parseQuery(q);
   // No cap: the panel exists to sweep the whole vault, and cutting at 50 would
   // hide exactly the tail someone is looking for.
-  state.results = VMSearch.search(state.items, q, state.items.length || 1);
+  state.results = BookmarksSearch.search(state.items, q, state.items.length || 1);
   if (state.sel >= state.results.length) state.sel = Math.max(0, state.results.length - 1);
 
   $('#q-clear').classList.toggle('hidden', !q);
+  // `help` typed in the search box is a command, not a search: the panel opens
+  // and the results below still answer the query, so nothing is taken away.
+  $('#help').classList.toggle('hidden', !state.helpOpen && BookmarksSearch.norm(q).trim() !== 'help');
 
   const ul = $('#results');
   ul.innerHTML = '';
   for (const [i, b] of state.results.entries()) {
     const li = document.createElement('li');
     li.className = 'item' + (i === state.sel ? ' sel' : '');
-    li.onclick = (e) => { state.sel = i; openSelected(e.ctrlKey || e.metaKey); };
+    // Selecting the title to copy it ends in a click on the row, which used to
+    // open the link and wipe the selection. A pointer that travelled, or any
+    // text left selected, means the gesture was a selection.
+    li.onpointerdown = (e) => { li.dataset.px = e.clientX; li.dataset.py = e.clientY; };
+    li.onclick = (e) => {
+      const moved = Math.hypot(e.clientX - Number(li.dataset.px || e.clientX),
+                               e.clientY - Number(li.dataset.py || e.clientY));
+      if (moved > 4 || String(getSelection())) return;
+      state.sel = i;
+      openSelected(e.ctrlKey || e.metaKey);
+    };
     li.oncontextmenu = (e) => { e.preventDefault(); openModal(b); };
 
     if (b.url) {
@@ -315,20 +496,27 @@ function render() {
     const title = document.createElement('div');
     title.className = 'item-title';
     title.append(highlight(b.title || b.url, terms));
+    // The URL line carries the counter: how many times this link was opened
+    // from here, with Enter, Ctrl+Enter or a click.
     const url = document.createElement('div');
     url.className = 'item-url';
-    url.append(highlight(b.url, terms));
+    const urlText = document.createElement('span');
+    urlText.className = 'item-url-text';
+    urlText.append(highlight(b.url, terms));
+    url.append(urlText, opensLabel(b));
     main.append(title, url);
-    li.append(main);
 
+    // On its own line under the title: sharing the line meant a long URL left
+    // the title with a couple of readable characters.
     const meta = document.createElement('div');
     meta.className = 'item-meta';
     if (b.folder) meta.append(badge('folder', '/' + b.folder, () => toggleToken('/' + b.folder)));
     if (b.category) meta.append(badge('cat', '@' + b.category, () => toggleToken('@' + b.category)));
-    for (const t of b.tags.split(',').filter(Boolean).slice(0, 3)) {
+    for (const t of b.tags.split(',').filter(Boolean).slice(0, 6)) {
       meta.append(badge('tag', '#' + t, () => toggleToken('#' + t)));
     }
-    li.append(meta);
+    if (meta.childElementCount) main.append(meta);
+    li.append(main);
 
     // Editing only via right-click and the `e` key is undiscoverable, and on a
     // phone it does not exist at all: that is why the buttons sit on the row.
@@ -357,12 +545,13 @@ function render() {
     empty.classList.remove('hidden');
     empty.textContent = state.items.length
       ? `no bookmark matches "${q}"`
-      : 'no bookmarks yet: click "+ new" or press n';
+      : 'no bookmarks yet: click "new" or press n';
   } else {
     empty.classList.add('hidden');
   }
 
   renderChips();
+  renderSuggest();
   renderBrowse();
   document.querySelector('.item.sel')?.scrollIntoView({ block: 'nearest' });
 }
@@ -379,13 +568,48 @@ function facets(values) {
   return [...counts.entries()].sort((a, b) => (b[1] - a[1]) || a[0].localeCompare(b[0]));
 }
 
+// The heading of a panel section, which is also the button that folds it away.
+// With 361 folders open, Categories and Tags are a long scroll below.
+function sectionHead(key, heading, count) {
+  const head = document.createElement('div');
+  head.className = 'facet-head';
+  const isOpen = !state.closedSections.has(key);
+
+  const toggle = document.createElement('button');
+  toggle.type = 'button';
+  toggle.className = 'facet-toggle';
+  toggle.setAttribute('aria-expanded', String(isOpen));
+  toggle.title = isOpen ? `Collapse ${heading}` : `Expand ${heading}`;
+
+  const arrow = document.createElement('span');
+  arrow.className = 'tree-toggle';
+  arrow.textContent = isOpen ? '▾' : '▸';
+  const label = document.createElement('span');
+  label.textContent = `${heading} (${count})`;
+  toggle.append(arrow, label);
+  toggle.onclick = () => {
+    if (isOpen) state.closedSections.add(key); else state.closedSections.delete(key);
+    localStorage.setItem('bookmarks_closed_sections', JSON.stringify([...state.closedSections]));
+    renderBrowse();
+  };
+
+  const h = document.createElement('h3');
+  h.append(toggle);
+  head.append(h);
+  return { head, isOpen };
+}
+
+// How many rows a flat list shows before `expand all`.
+const FACET_CAP = 40;
+
 function browseSection(heading, prefix, entries, emptyText, filter) {
   const sec = document.createElement('section');
   sec.className = 'facet';
 
-  const h = document.createElement('h3');
-  h.textContent = `${heading} (${entries.length})`;
-  sec.append(h);
+  const key = heading.toLowerCase();
+  const { head, isOpen } = sectionHead(key, heading, entries.length);
+  sec.append(head);
+  if (!isOpen) return sec;
   if (filter) sec.append(filter);
 
   if (!entries.length) {
@@ -396,7 +620,11 @@ function browseSection(heading, prefix, entries, emptyText, filter) {
     return sec;
   }
 
-  for (const [name, n] of entries) {
+  // No expand/collapse pair here: a flat list has nothing to unfold. What it
+  // has is a cap, and one line at the end that lifts it.
+  const expanded = state.expandedFacets.has(key);
+
+  for (const [name, n] of (expanded ? entries : entries.slice(0, FACET_CAP))) {
     const token = prefix + name;
     const b = document.createElement('button');
     b.className = 'facet-row' + (activeToken(token) ? ' on' : '');
@@ -413,6 +641,19 @@ function browseSection(heading, prefix, entries, emptyText, filter) {
     b.append(label, qty);
     b.onclick = () => toggleToken(token);
     sec.append(b);
+  }
+
+  if (entries.length > FACET_CAP) {
+    const flip = document.createElement('button');
+    flip.type = 'button';
+    flip.className = 'linkish facet-more';
+    flip.textContent = expanded ? 'show fewer' : `show all ${entries.length}`;
+    flip.onclick = () => {
+      if (expanded) state.expandedFacets.delete(key); else state.expandedFacets.add(key);
+      localStorage.setItem('bookmarks_expanded_facets', JSON.stringify([...state.expandedFacets]));
+      renderBrowse();
+    };
+    sec.append(flip);
   }
   return sec;
 }
@@ -443,10 +684,150 @@ function countNodes(level) {
   return n;
 }
 
+// Every node that has children, i.e. every row that shows an arrow. These are
+// the paths the "expand all" / "collapse all" buttons flip at once.
+function branchPaths(level, out = []) {
+  for (const node of level.values()) {
+    if (!node.children.size) continue;
+    out.push(node.path);
+    branchPaths(node.children, out);
+  }
+  return out;
+}
+
+function saveClosedFolders() {
+  localStorage.setItem('bookmarks_closed_folders', JSON.stringify([...state.closedFolders]));
+}
+
+// Dragging a folder onto another one, on pointer events rather than HTML5 drag
+// and drop. The native API refuses to start a drag on a <button>, behaves
+// differently across browsers and cannot be driven by a test; this is a
+// mousedown, a threshold and an elementFromPoint, and it is the same code path
+// for every pointer.
+const drag = {
+  path: null,        // folder being dragged
+  row: null,         // its row
+  from: null,        // where the gesture started, to measure the threshold
+  active: false,     // past the threshold: it is a drag, not a click
+  target: null,      // row currently under the pointer, or the root strip
+  ghost: null,       // the label following the pointer
+};
+
+const DRAG_THRESHOLD = 5;   // px before a click becomes a drag
+
+function parentOf(path) {
+  return path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '';
+}
+
+// `to` is '' for the root. A folder cannot land inside itself, and moving it
+// where it already is would only cost a reload.
+function canDropFolder(from, to) {
+  if (!from || from === to) return false;
+  if (to === from || to.startsWith(from + '/')) return false;
+  return parentOf(from) !== to;
+}
+
+// The path is a plain string on every bookmark below the folder, so the server
+// rewrites the prefix and the whole branch travels with it.
+async function moveFolder(from, to) {
+  if (!canDropFolder(from, to)) return;
+  setSync('moving…', 'saving');
+  try {
+    const r = await api('/api/folders/move', { method: 'POST', body: JSON.stringify({ from, to }) });
+    // The destination and its ancestors open, otherwise the folder appears to
+    // have vanished instead of having moved.
+    for (let p = r.to; p; p = parentOf(p)) state.closedFolders.delete(p);
+    saveClosedFolders();
+    await loadAll();
+    setSync(`moved to /${r.to}`);
+    setTimeout(() => setSync('synced'), 3000);
+  } catch (err) {
+    setSync(err.message || 'move failed', 'err');
+  }
+}
+
+// What is under the pointer: a folder row, the root strip, or nothing.
+function dropTargetAt(x, y) {
+  const el = document.elementFromPoint(x, y);
+  if (!el) return null;
+  const root = el.closest('.tree-root-drop');
+  if (root) return canDropFolder(drag.path, '') ? { el: root, to: '' } : null;
+  const row = el.closest('.tree-row');
+  if (!row || !row.dataset.path) return null;
+  return canDropFolder(drag.path, row.dataset.path) ? { el: row, to: row.dataset.path } : null;
+}
+
+function highlightTarget(next) {
+  if (drag.target?.el === next?.el) { drag.target = next; return; }
+  drag.target?.el.classList.remove('drop-into');
+  next?.el.classList.add('drop-into');
+  drag.target = next;
+}
+
+function beginDrag(pointerId) {
+  drag.active = true;
+  // Captured only now: taking the pointer on mousedown would send the click
+  // that follows a plain tap to the row instead of the folder button.
+  drag.row.setPointerCapture(pointerId);
+  drag.row.classList.add('dragging');
+  $('#browse-body').classList.add('dragging');
+
+  drag.ghost = document.createElement('div');
+  drag.ghost.className = 'drag-ghost';
+  drag.ghost.textContent = '/' + drag.path;
+  document.body.append(drag.ghost);
+}
+
+function endDrag(drop) {
+  const { path, target, active } = drag;
+  drag.ghost?.remove();
+  drag.row?.classList.remove('dragging');
+  drag.target?.el.classList.remove('drop-into');
+  $('#browse-body').classList.remove('dragging');
+  Object.assign(drag, { path: null, row: null, from: null, active: false, target: null, ghost: null });
+  if (drop && active && target) moveFolder(path, target.to);
+  return active;
+}
+
+// Turns a row into a drag source. The drop side is resolved by coordinates, so
+// only the source needs wiring.
+function wireFolderDrag(row, path) {
+  row.dataset.path = path;
+
+  row.onpointerdown = (e) => {
+    // Left button only, and never from the expand arrow: that one has a job.
+    if (e.button !== 0 || e.target.closest('.tree-toggle')) return;
+    // Touch keeps scrolling the panel; a finger drag would fight the scroll.
+    if (e.pointerType === 'touch') return;
+    Object.assign(drag, { path, row, from: { x: e.clientX, y: e.clientY }, active: false });
+  };
+
+  row.onpointermove = (e) => {
+    if (drag.row !== row) return;
+    if (!drag.active) {
+      if (Math.hypot(e.clientX - drag.from.x, e.clientY - drag.from.y) < DRAG_THRESHOLD) return;
+      beginDrag(e.pointerId);
+    }
+    drag.ghost.style.transform = `translate(${e.clientX + 12}px, ${e.clientY + 10}px)`;
+    // The row under the pointer is the dragged one otherwise, since the capture
+    // keeps the events here: .dragging turns off its pointer events.
+    highlightTarget(dropTargetAt(e.clientX, e.clientY));
+  };
+
+  row.onpointerup = (e) => {
+    if (drag.row !== row) return;
+    if (row.hasPointerCapture(e.pointerId)) row.releasePointerCapture(e.pointerId);
+    // A drag that ends is not also a click on the folder.
+    if (endDrag(true)) { e.preventDefault(); e.stopPropagation(); }
+  };
+
+  row.onpointercancel = () => { if (drag.row === row) endDrag(false); };
+}
+
 function treeRows(level, depth, destino, filter) {
   for (const node of [...level.values()].sort((a, b) => (b.total - a.total) || a.name.localeCompare(b.name))) {
     // A node stays visible when it matches the filter, or when a descendant does.
-    const selfMatch = !filter || VMSearch.norm(node.name).includes(filter);
+    const selfMatch = !filter || BookmarksSearch.norm(node.name).includes(filter);
     const branch = document.createElement('div');
     const children = document.createElement('div');
     if (node.children.size) treeRows(node.children, depth + 1, children, filter);
@@ -467,7 +848,7 @@ function treeRows(level, depth, destino, filter) {
       arrow.title = isOpen ? 'Collapse' : 'Expand';
       arrow.onclick = () => {
         if (isOpen) state.closedFolders.add(node.path); else state.closedFolders.delete(node.path);
-        localStorage.setItem('vm_closed_folders', JSON.stringify([...state.closedFolders]));
+        saveClosedFolders();
         renderBrowse();
       };
       linha.append(arrow);
@@ -477,9 +858,12 @@ function treeRows(level, depth, destino, filter) {
       linha.append(emptyText);
     }
 
-    const b = document.createElement('button');
-    b.type = 'button';
+    // A <div role="button">, not a <button>: Chrome refuses to start a drag on a
+    // form control, and this row has to be draggable to nest folders.
+    const b = document.createElement('div');
     b.className = 'facet-row tree-item' + (activeToken(token) ? ' on' : '');
+    b.setAttribute('role', 'button');
+    b.tabIndex = 0;
     const name = document.createElement('span');
     name.className = 'facet-name';
     name.textContent = node.name;
@@ -488,8 +872,15 @@ function treeRows(level, depth, destino, filter) {
     qty.textContent = node.total;
     b.append(name, qty);
     b.onclick = () => toggleToken(token);
+    // What the <button> gave for free and the div has to spell out.
+    b.onkeydown = (e) => {
+      if (e.key !== 'Enter' && e.key !== ' ') return;
+      e.preventDefault();
+      toggleToken(token);
+    };
     b.title = '/' + node.path;
     linha.append(b);
+    wireFolderDrag(linha, node.path);
 
     branch.append(linha);
     // With a filter on, collapsing the branch would hide exactly what matched.
@@ -498,13 +889,45 @@ function treeRows(level, depth, destino, filter) {
   }
 }
 
+// One button of the "expand all" / "collapse all" pair, used by the folder tree
+// and by the flat lists. It comes disabled when it would not change anything,
+// so the pair also reads as the current state.
+function allButton(label, title, noop, apply) {
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.className = 'linkish';
+  b.textContent = label;
+  b.title = title;
+  b.disabled = noop;
+  b.onclick = () => { apply(); renderBrowse(); };
+  return b;
+}
+
 function treeSection(root, total, filter) {
   const sec = document.createElement('section');
   sec.className = 'facet';
 
-  const h = document.createElement('h3');
-  h.textContent = `Folders (${total})`;
-  sec.append(h, filterField('filter-folders', 'filter folders…', renderBrowse));
+  const { head, isOpen } = sectionHead('folders', 'Folders', total);
+  sec.append(head);
+  if (!isOpen) return sec;
+  sec.append(filterField('filter-folders', 'filter folders…', renderBrowse));
+
+  // Under the filter field and lined up with it: only worth showing when some
+  // folder has children, because a flat list has nothing to expand.
+  const branches = branchPaths(root);
+  if (branches.length) {
+    const closed = branches.filter((path) => state.closedFolders.has(path)).length;
+    const actions = document.createElement('div');
+    actions.className = 'facet-actions';
+    actions.append(
+      // Clearing the set also drops paths of folders that no longer exist.
+      allButton('expand all', 'Open every folder', closed === 0,
+                () => { state.closedFolders.clear(); saveClosedFolders(); }),
+      allButton('collapse all', 'Close every folder', closed === branches.length,
+                () => { for (const path of branches) state.closedFolders.add(path); saveClosedFolders(); }),
+    );
+    sec.append(actions);
+  }
 
   if (!total) {
     const p = document.createElement('p');
@@ -516,8 +939,15 @@ function treeSection(root, total, filter) {
 
   const tree = document.createElement('div');
   tree.className = 'tree';
+
+  // Only reachable mid-drag, which is the only moment it means anything.
+  const rootDrop = document.createElement('div');
+  rootDrop.className = 'tree-root-drop';
+  rootDrop.textContent = 'drop here to move to the root';
+  tree.append(rootDrop);
+
   treeRows(root, 0, tree, filter);
-  if (!tree.childElementCount) {
+  if (tree.childElementCount === 1) {
     const p = document.createElement('p');
     p.className = 'facet-empty';
     p.textContent = 'no folder matches the filter';
@@ -557,12 +987,12 @@ function renderBrowse() {
   const root = folderTree(state.items);
   const tags = state.items.flatMap((b) => b.tags.split(',').filter(Boolean));
   const filterEntries = (list, key) => {
-    const term = VMSearch.norm(state.panelFilter[key] || '');
-    return term ? list.filter(([name]) => VMSearch.norm(name).includes(term)) : list;
+    const term = BookmarksSearch.norm(state.panelFilter[key] || '');
+    return term ? list.filter(([name]) => BookmarksSearch.norm(name).includes(term)) : list;
   };
 
   body.append(
-    treeSection(root, countNodes(root), VMSearch.norm(state.panelFilter['filter-folders'] || '')),
+    treeSection(root, countNodes(root), BookmarksSearch.norm(state.panelFilter['filter-folders'] || '')),
     browseSection('Categories', '@', filterEntries(facets(state.items.map((b) => b.category)), 'filter-categories'),
                 'no categories yet', filterField('filter-categories', 'filter categories…', renderBrowse)),
     browseSection('Tags', '#', filterEntries(facets(tags), 'filter-tags'),
@@ -581,7 +1011,7 @@ function renderBrowse() {
 function setBrowseOpen(isOpen) {
   $('#browse').classList.toggle('off', !isOpen);
   $('#btn-browse').setAttribute('aria-expanded', String(isOpen));
-  localStorage.setItem('vm_browse', isOpen ? '1' : '0');
+  localStorage.setItem('bookmarks_browse', isOpen ? '1' : '0');
 }
 
 $('#btn-browse').onclick = () => setBrowseOpen($('#browse').classList.contains('off'));
@@ -614,6 +1044,7 @@ function setQuery(v) {
   $('#q').value = v;
   state.sel = 0;
   render();
+  state.suggestOff = false;
   $('#q').focus();
 }
 
@@ -622,8 +1053,47 @@ function openSelected(newTab = true) {
   const b = state.results[state.sel];
   if (!b?.url) return;
   const url = /^https?:\/\//i.test(b.url) ? b.url : 'https://' + b.url;
+  rememberQuery($('#q').value);      // the search that found it is worth keeping
+  registerOpen(b);
   if (newTab) window.open(url, '_blank', 'noopener');
   else location.href = url;
+}
+
+// Clicking again because the page is taking its time is one visit, not two:
+// the same bookmark only counts once per window.
+const OPEN_DEBOUNCE = 3000;
+const lastOpen = new Map();
+
+// Usage ranking: the count is bumped locally first so the order reacts right
+// away, and the server call is fire and forget because a bookmark that opened
+// must not wait on, or fail because of, a statistic.
+function registerOpen(b) {
+  const now = Date.now();
+  if (now - (lastOpen.get(b.id) || 0) < OPEN_DEBOUNCE) return;
+  lastOpen.set(b.id, now);
+
+  b.opens = (Number(b.opens) || 0) + 1;
+  b.last_open_at = Date.now();
+  const label = $('#results').children[state.results.indexOf(b)]?.querySelector('.item-opens');
+  if (label) { label.textContent = `${b.opens}×`; label.title = `opened ${b.opens} times from here`; }
+  api('/api/bookmarks/open', { method: 'POST', body: JSON.stringify({ id: b.id }) })
+    .then((r) => {
+      // The server is the authority on the count: another device may have
+      // opened the same link since the last sync.
+      if (r.item) { b.opens = r.item.opens; b.updated_at = r.item.updated_at; }
+    })
+    .catch(() => {});
+}
+
+// Empty until the link has been opened at least once: a `0×` on every row is
+// noise, and the whole point is spotting the ones you keep going back to.
+function opensLabel(b) {
+  const n = Number(b.opens) || 0;
+  const el = document.createElement('span');
+  el.className = 'item-opens';
+  el.textContent = n ? `${n}×` : '';
+  el.title = n ? `opened ${n} time${n > 1 ? 's' : ''} from here` : '';
+  return el;
 }
 
 function openModal(b = null) {
@@ -704,10 +1174,30 @@ $('#bm-cancel').onclick = closeModal;
 $('#btn-new').onclick = () => openModal();
 $('#fab').onclick = () => openModal();
 $('#q-clear').onclick = () => setQuery('');
-$('#q').oninput = () => { state.sel = 0; render(); };
+let historyTimer = null;
+$('#q').oninput = () => {
+  state.sel = 0;
+  state.suggestOff = false;
+  render();
+  // Recorded after a pause: `k`, `ku`, `kub` are not three searches, the one
+  // you stopped at is. And only if it found something, so typos are not kept.
+  clearTimeout(historyTimer);
+  historyTimer = setTimeout(() => {
+    if (state.results.length) rememberQuery($('#q').value);
+  }, 1200);
+};
+
+$('#q').onfocus = () => { state.suggestOff = false; renderSuggest(); };
+// A click on a suggestion runs before this, because both buttons cancel the
+// mousedown that would blur the field.
+$('#q').onblur = () => { state.suggestOff = true; renderSuggest(); };
 
 /* ---------------- keyboard ---------------- */
 document.addEventListener('keydown', (e) => {
+  if (!$('#insights-modal').classList.contains('hidden')) {
+    if (e.key === 'Escape') closeInsights();
+    return;
+  }
   if (!$('#io-modal').classList.contains('hidden')) {
     if (e.key === 'Escape') closeIo();
     return;
@@ -720,18 +1210,28 @@ document.addEventListener('keydown', (e) => {
 
   const inSearch = document.activeElement === $('#q');
 
+  // Ctrl+C with the caret in the search box wipes the search. With a selection
+  // it still copies, which is what Ctrl+C is for.
+  if (inSearch && (e.ctrlKey || e.metaKey) && (e.key === 'c' || e.key === 'C') && !String(getSelection())) {
+    e.preventDefault();
+    setQuery('');
+    return;
+  }
+
   if (e.key === 'ArrowDown' || (e.ctrlKey && e.key === 'n')) {
     e.preventDefault();
-    state.sel = Math.min(state.sel + 1, state.results.length - 1);
-    render();
+    moveSel(1);
   } else if (e.key === 'ArrowUp' || (e.ctrlKey && e.key === 'p')) {
     e.preventDefault();
-    state.sel = Math.max(state.sel - 1, 0);
-    render();
+    moveSel(-1);
   } else if (e.key === 'Enter' && state.results.length) {
     e.preventDefault();
     openSelected(e.ctrlKey || e.metaKey || true);
   } else if (e.key === 'Escape') {
+    if (!$('#help').classList.contains('hidden')) { $('#help-close').onclick(); return; }
+    // The suggestions go first: Esc closing them is not the same as Esc
+    // throwing away what was typed.
+    if (!$('#suggest').classList.contains('hidden')) { state.suggestOff = true; renderSuggest(); return; }
     if ($('#q').value) setQuery(''); else $('#q').blur();
   } else if (!inSearch && (e.key === 'n' || e.key === '/')) {
     e.preventDefault();
@@ -749,6 +1249,128 @@ document.addEventListener('keydown', (e) => {
     $('#q').focus();
   }
 });
+
+/* ---------------- insights ---------------- */
+// What actually gets opened, from the server's log: a bar per day, the most
+// opened links, and the raw list. No library: the bars are divs.
+const insights = { days: 7 };
+
+function openInsights(days = insights.days) {
+  insights.days = days;
+  $('#insights-modal').classList.remove('hidden');
+  $('#ins-days').textContent = days;
+  for (const b of document.querySelectorAll('.ins-range button')) {
+    b.classList.toggle('on', Number(b.dataset.days) === days);
+  }
+  loadInsights();
+}
+
+async function loadInsights() {
+  const chart = $('#ins-chart');
+  chart.textContent = 'loading…';
+  try {
+    const r = await api(`/api/insights?days=${insights.days}`);
+    renderInsights(r);
+  } catch (err) {
+    chart.textContent = err.message || 'could not load';
+  }
+}
+
+function renderInsights(r) {
+  $('#ins-total').textContent = r.total;
+
+  // The tallest day sets the scale; with nothing opened every bar is empty.
+  const chart = $('#ins-chart');
+  const peak = Math.max(1, ...r.daily.map((d) => d.count));
+  // Thirty labels in a narrow modal overlap into a smudge: past a week only
+  // every nth day is written, and the last one always is.
+  const every = Math.ceil(r.daily.length / 8);
+  chart.innerHTML = '';
+  for (const [i, d] of r.daily.entries()) {
+    const col = document.createElement('div');
+    col.className = 'ins-col';
+    col.title = `${d.day}: ${d.count} open${d.count === 1 ? '' : 's'}`;
+
+    const value = document.createElement('span');
+    value.className = 'ins-value';
+    value.textContent = d.count || '';
+
+    const bar = document.createElement('div');
+    bar.className = 'ins-bar';
+    bar.style.height = `${Math.round((d.count / peak) * 100)}%`;
+    if (!d.count) bar.classList.add('empty');
+
+    const label = document.createElement('span');
+    label.className = 'ins-day';
+    // Day and month only: the year is the same for every bar on screen.
+    const [, m, day] = d.day.split('-');
+    const shown = (r.daily.length - 1 - i) % every === 0;
+    label.textContent = shown ? `${day}/${m}` : '';
+
+    // The number on top of every bar would crowd a month as well.
+    if (!shown && r.daily.length > 14) value.textContent = '';
+    col.append(value, bar, label);
+    chart.append(col);
+  }
+
+  const top = $('#ins-top');
+  top.innerHTML = '';
+  const ever = new Map(r.top_ever.map((b) => [b.id, b.total]));
+  const list = r.top.length ? r.top : r.top_ever.map((b) => ({ ...b, hits: 0 }));
+  if (!list.length) {
+    top.innerHTML = '<li class="facet-empty">nothing opened yet</li>';
+  }
+  for (const b of list) {
+    const li = document.createElement('li');
+    li.className = 'ins-row';
+
+    const link = document.createElement('button');
+    link.type = 'button';
+    link.className = 'ins-link';
+    link.textContent = b.title || b.url;
+    link.title = b.url;
+    // Jumps to the bookmark in the list instead of opening it: from here you
+    // are looking at your habits, not following a link.
+    link.onclick = () => { closeInsights(); setQuery(b.title || b.url); };
+
+    const count = document.createElement('span');
+    count.className = 'ins-count';
+    const total = ever.get(b.id) ?? b.total ?? 0;
+    count.textContent = b.hits ? `${b.hits}× · ${total} total` : `${total} total`;
+
+    li.append(link, count);
+    top.append(li);
+  }
+
+  const log = $('#ins-log');
+  log.innerHTML = '';
+  if (!r.log.length) log.innerHTML = '<li class="facet-empty">no opens in this window</li>';
+  for (const row of r.log) {
+    const li = document.createElement('li');
+    li.className = 'ins-row';
+    const when = document.createElement('span');
+    when.className = 'ins-when';
+    const d = new Date(row.at);
+    when.textContent = d.toLocaleString(undefined,
+      { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+    const what = document.createElement('span');
+    what.className = 'ins-what';
+    what.textContent = row.title || row.url;
+    what.title = row.url;
+    li.append(when, what);
+    log.append(li);
+  }
+}
+
+function closeInsights() {
+  $('#insights-modal').classList.add('hidden');
+}
+
+$('#btn-insights').onclick = () => openInsights();
+$('#ins-close').onclick = closeInsights;
+for (const b of document.querySelectorAll('.ins-range button')) {
+  b.onclick = () => openInsights(Number(b.dataset.days));
+}
 
 /* ---------------- import / export ---------------- */
 const io = { content: '', name: '', plan: null };
@@ -775,7 +1397,7 @@ async function exportVault(format) {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = fileName(res, `vaultmarks.${format}`);
+    a.download = fileName(res, `bookmarks.${format}`);
     document.body.append(a);
     a.click();
     a.remove();
@@ -963,6 +1585,10 @@ function queryFromHash() {
 }
 
 async function enterApp() {
+  // The login screen is where checkServer runs; someone with a live session
+  // goes straight in, so the stamp is fetched here too.
+  fetch('/api/health', { cache: 'no-store' })
+    .then((r) => r.json()).then((b) => showBuild(b.build)).catch(() => {});
   $('#auth').classList.add('hidden');
   $('#app').classList.remove('hidden');
   await loadAll();
@@ -1000,7 +1626,7 @@ function showLogin() {
   window.addEventListener('resize', fitPlaceholder);
   renderAuthMode();
   // On a phone the panel starts closed: there it pushes the results down.
-  const choice = localStorage.getItem('vm_browse');
+  const choice = localStorage.getItem('bookmarks_browse');
   setBrowseOpen(choice === null ? window.innerWidth >= 900 : choice === '1');
   if (!state.token) return showLogin();
 
@@ -1011,7 +1637,7 @@ function showLogin() {
   } catch (err) {
     const network = err instanceof TypeError || /failed to fetch|networkerror|load failed/i.test(err.message || '');
     if (!network) {
-      localStorage.removeItem('vm_token');
+      localStorage.removeItem('bookmarks_token');
       state.token = '';
     }
     return showLogin();

@@ -13,16 +13,17 @@ import urllib.error
 import urllib.request
 import uuid
 
-import vmplatform
+import bookmarks_platform
 
-CONFIG_DIR = vmplatform.config_dir()
-DATA_DIR = vmplatform.data_dir()
+CONFIG_DIR = bookmarks_platform.config_dir()
+DATA_DIR = bookmarks_platform.data_dir()
 CONFIG_PATH = os.path.join(CONFIG_DIR, "config.yaml")
 LEGACY_CONFIG_PATH = os.path.join(CONFIG_DIR, "config.json")
 CACHE_PATH = os.path.join(DATA_DIR, "cache.db")
-DEFAULT_SERVER = os.environ.get("VAULTMARKS_SERVER", "http://127.0.0.1:8787")
+DEFAULT_SERVER = os.environ.get("BOOKMARKS_SERVER", "http://127.0.0.1:8787")
 
-COLUMNS = ("id", "title", "url", "folder", "category", "tags", "description", "created_at", "updated_at", "deleted")
+COLUMNS = ("id", "title", "url", "folder", "category", "tags", "description", "created_at", "updated_at", "deleted",
+           "opens", "last_open_at")
 
 
 def now_ms():
@@ -82,7 +83,7 @@ class Client:
     def save_config(self):
         os.makedirs(os.path.dirname(self.config_path), exist_ok=True)
         lines = [
-            "# Vaultmarks desktop bar.",
+            "# Bookmarks desktop bar.",
             "#",
             "# The bar is just a search front-end: every bookmark comes from the",
             "# backend below, the same vault the web UI shows. Point `server` at it",
@@ -139,6 +140,9 @@ class Client:
               folder TEXT DEFAULT '', category TEXT DEFAULT '', tags TEXT DEFAULT '',
               description TEXT DEFAULT '', created_at INTEGER, updated_at INTEGER,
               deleted INTEGER DEFAULT 0,
+              -- Usage ranking. Both only grow and are merged with MAX on each
+              -- side, so opening a link offline never loses the other device's count.
+              opens INTEGER DEFAULT 0, last_open_at INTEGER DEFAULT 0,
               dirty INTEGER DEFAULT 0   -- 1 = still has to be pushed to the server
             );
             CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT);
@@ -149,6 +153,11 @@ class Client:
         columns = [c["name"] for c in db.execute("PRAGMA table_info(bookmarks)")]
         if "notes" in columns and "description" not in columns:
             db.execute("ALTER TABLE bookmarks RENAME COLUMN notes TO description")
+        # A cache created before usage ranking has no counters.
+        if "opens" not in columns:
+            db.execute("ALTER TABLE bookmarks ADD COLUMN opens INTEGER DEFAULT 0")
+        if "last_open_at" not in columns:
+            db.execute("ALTER TABLE bookmarks ADD COLUMN last_open_at INTEGER DEFAULT 0")
         db.commit()
         return db
 
@@ -167,17 +176,32 @@ class Client:
 
     def _upsert_local(self, b, dirty=0):
         self.db.execute(
-            """INSERT INTO bookmarks (id,title,url,folder,category,tags,description,created_at,updated_at,deleted,dirty)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?)
+            """INSERT INTO bookmarks (id,title,url,folder,category,tags,description,created_at,updated_at,deleted,opens,last_open_at,dirty)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
                ON CONFLICT(id) DO UPDATE SET
                  title=excluded.title, url=excluded.url, folder=excluded.folder,
                  category=excluded.category, tags=excluded.tags, description=excluded.description,
-                 updated_at=excluded.updated_at, deleted=excluded.deleted, dirty=excluded.dirty""",
+                 updated_at=excluded.updated_at, deleted=excluded.deleted, dirty=excluded.dirty,
+                 opens=MAX(excluded.opens, bookmarks.opens),
+                 last_open_at=MAX(excluded.last_open_at, bookmarks.last_open_at)""",
             (b["id"], b.get("title", ""), b.get("url", ""), b.get("folder", ""), b.get("category", ""),
              b.get("tags", ""), b.get("description", ""), b.get("created_at") or now_ms(),
-             b.get("updated_at") or now_ms(), 1 if b.get("deleted") else 0, dirty),
+             b.get("updated_at") or now_ms(), 1 if b.get("deleted") else 0,
+             _counter(b.get("opens")), _counter(b.get("last_open_at")), dirty),
         )
         self.db.commit()
+
+    def register_open(self, bookmark_id):
+        """Counts one open, for the usage ranking. Local and dirty: it works
+        with the server down and the next sync carries the count."""
+        ts = now_ms()
+        cur = self.db.execute(
+            """UPDATE bookmarks SET opens = opens + 1, last_open_at = ?, updated_at = ?, dirty = 1
+               WHERE id = ? AND deleted = 0""",
+            (ts, ts, bookmark_id),
+        )
+        self.db.commit()
+        return cur.rowcount > 0
 
     # ---------------- local writes ----------------
     def add(self, url="", title="", folder="", category="", tags="", description=""):
@@ -283,6 +307,15 @@ class Client:
 
         self._set_meta("last_sync", r.get("now", now_ms()))
         return applied
+
+
+def _counter(v):
+    """A usage counter coming from outside: never negative, never fractional."""
+    try:
+        n = int(v or 0)
+    except (TypeError, ValueError):
+        return 0
+    return n if n > 0 else 0
 
 
 def normalize_tags(v):

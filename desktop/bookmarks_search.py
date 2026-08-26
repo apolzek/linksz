@@ -31,6 +31,13 @@ ANY_WEIGHTS = (
     ("description", 20),
 )
 
+# Usage ranking. A bookmark you keep opening is the one you probably want, so
+# its score gets a bonus. It saturates on purpose: after USAGE_CAP opens an old
+# favourite stops climbing, otherwise it would bury better matches forever.
+# Integers only, because the JavaScript twin has to produce the same order.
+USAGE_STEP = 3
+USAGE_CAP = 12
+
 SIGILS = {"#": "tags", "@": "category", "/": "folder"}
 
 FIELD_ALIASES = {
@@ -200,6 +207,14 @@ def _updated_at(b):
         return 0
 
 
+def _usage_boost(b):
+    try:
+        opens = int(b.get("opens") or 0)
+    except (TypeError, ValueError):
+        return 0
+    return min(opens, USAGE_CAP) * USAGE_STEP if opens > 0 else 0
+
+
 def search(bookmarks, q, limit=50):
     terms = parse_query(q)
     out = []
@@ -224,8 +239,10 @@ def search(bookmarks, q, limit=50):
             else:
                 total += s
 
+        # With no query every match scores 0, so the plain list is ranked by
+        # usage too, which is what the bar shows the moment it opens.
         if ok:
-            out.append((total, _updated_at(b), b))
+            out.append((total + _usage_boost(b), _updated_at(b), b))
 
     # Ties break by recency. Beyond that the sort is stable in both languages, so
     # input order decides the rest and parity holds.

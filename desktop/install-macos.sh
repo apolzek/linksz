@@ -2,8 +2,8 @@
 # Installs on macOS (Intel or Apple Silicon):
 #   1. backend LaunchAgent (starts at login)
 #   2. bar daemon LaunchAgent (resident, so it opens instantly)
-#   3. Vaultmarks Bar.app  wakes the bar (this is what you bind the key to)
-#   4. Vaultmarks.app      opens the vault in its own window (the PWA)
+#   3. Bookmarks Bar.app  wakes the bar (this is what you bind the key to)
+#   4. Bookmarks.app      opens your bookmarks in their own window (the PWA)
 #
 # macOS does not let an arbitrary process register a global shortcut, so the
 # last step (binding the key) is manual; the script explains how at the end.
@@ -14,10 +14,10 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PYTHON="$(command -v python3)"
 NODE="$(command -v node || true)"
-URL="${VAULTMARKS_URL:-http://127.0.0.1:8787}"
+URL="${BOOKMARKS_URL:-http://127.0.0.1:8787}"
 AGENTS="$HOME/Library/LaunchAgents"
 APPS="$HOME/Applications"
-LOGS="$HOME/Library/Logs/vaultmarks"
+LOGS="$HOME/Library/Logs/bookmarks"
 
 say() { printf '\033[1;34m›\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m!\033[0m %s\n' "$*"; }
@@ -67,19 +67,19 @@ EOF
 
 # ---------- 1. backend LaunchAgent ----------
 if [[ -n "$NODE" ]]; then
-  cat > "$AGENTS/dev.vaultmarks.server.plist" <<EOF
+  cat > "$AGENTS/dev.bookmarks.server.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <key>Label</key><string>dev.vaultmarks.server</string>
+  <key>Label</key><string>dev.bookmarks.server</string>
   <key>ProgramArguments</key>
   <array>
     <string>$NODE</string>
     <string>$ROOT/server/server.js</string>
   </array>
   <key>EnvironmentVariables</key>
-  <dict><key>VAULTMARKS_PORT</key><string>8787</string></dict>
+  <dict><key>BOOKMARKS_PORT</key><string>8787</string></dict>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
   <key>StandardOutPath</key><string>$LOGS/server.log</string>
@@ -87,24 +87,24 @@ if [[ -n "$NODE" ]]; then
 </dict>
 </plist>
 EOF
-  launchctl bootout "gui/$(id -u)/dev.vaultmarks.server" 2>/dev/null || true
-  launchctl bootstrap "gui/$(id -u)" "$AGENTS/dev.vaultmarks.server.plist" 2>/dev/null \
-    || launchctl load -w "$AGENTS/dev.vaultmarks.server.plist" 2>/dev/null \
+  launchctl bootout "gui/$(id -u)/dev.bookmarks.server" 2>/dev/null || true
+  launchctl bootstrap "gui/$(id -u)" "$AGENTS/dev.bookmarks.server.plist" 2>/dev/null \
+    || launchctl load -w "$AGENTS/dev.bookmarks.server.plist" 2>/dev/null \
     || warn "could not load the backend LaunchAgent"
   say "backend registered at login ($URL)"
 fi
 
 # ---------- 2. bar daemon LaunchAgent ----------
-cat > "$AGENTS/dev.vaultmarks.bar.plist" <<EOF
+cat > "$AGENTS/dev.bookmarks.bar.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <key>Label</key><string>dev.vaultmarks.bar</string>
+  <key>Label</key><string>dev.bookmarks.bar</string>
   <key>ProgramArguments</key>
   <array>
     <string>$PYTHON</string>
-    <string>$ROOT/desktop/vaultmarks_bar.py</string>
+    <string>$ROOT/desktop/bookmarks_bar.py</string>
     <string>--daemon</string>
   </array>
   <key>RunAtLoad</key><true/>
@@ -114,16 +114,16 @@ cat > "$AGENTS/dev.vaultmarks.bar.plist" <<EOF
 </dict>
 </plist>
 EOF
-launchctl bootout "gui/$(id -u)/dev.vaultmarks.bar" 2>/dev/null || true
-launchctl bootstrap "gui/$(id -u)" "$AGENTS/dev.vaultmarks.bar.plist" 2>/dev/null \
-  || launchctl load -w "$AGENTS/dev.vaultmarks.bar.plist" 2>/dev/null \
+launchctl bootout "gui/$(id -u)/dev.bookmarks.bar" 2>/dev/null || true
+launchctl bootstrap "gui/$(id -u)" "$AGENTS/dev.bookmarks.bar.plist" 2>/dev/null \
+  || launchctl load -w "$AGENTS/dev.bookmarks.bar.plist" 2>/dev/null \
   || warn "could not load the bar LaunchAgent"
 say "bar daemon registered at login"
 
 # ---------- 3. the app that wakes the bar ----------
 # Runs the same script: it finds the daemon over the socket and only sends "show".
-make_app "Vaultmarks Bar" "dev.vaultmarks.bar.launcher" \
-  "exec \"$PYTHON\" \"$ROOT/desktop/vaultmarks_bar.py\" \"\$@\"" "true"
+make_app "Bookmarks Bar" "dev.bookmarks.bar.launcher" \
+  "exec \"$PYTHON\" \"$ROOT/desktop/bookmarks_bar.py\" \"\$@\"" "true"
 
 # ---------- 4. web window app (PWA) ----------
 CHROME=""
@@ -136,7 +136,7 @@ for candidate in \
 done
 
 if [[ -n "$CHROME" ]]; then
-  make_app "Vaultmarks" "dev.vaultmarks.web" \
+  make_app "Bookmarks" "dev.bookmarks.web" \
     "exec \"$CHROME\" --app=$URL" "false"
   say "web window using $(basename "$(dirname "$(dirname "$CHROME")")")"
 else
@@ -153,14 +153,14 @@ Pick one path:
 
   Shortcuts.app (native, nothing to install)
     1. Open the Shortcuts app > new shortcut
-    2. Action "Open app" > $APPS/Vaultmarks Bar.app
+    2. Action "Open app" > $APPS/Bookmarks Bar.app
     3. In the details panel, set a Keyboard Shortcut (e.g. Cmd+Space)
 
   skhd (if you already use it)
-    echo 'cmd - space : open -a "Vaultmarks Bar"' >> ~/.skhdrc && skhd --restart-service
+    echo 'cmd - space : open -a "Bookmarks Bar"' >> ~/.skhdrc && skhd --restart-service
 
   Raycast / Alfred
-    point a hotkey at the "Vaultmarks Bar" app
+    point a hotkey at the "Bookmarks Bar" app
 
 Web: $URL
 Logs: $LOGS

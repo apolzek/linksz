@@ -254,3 +254,42 @@ test('missing fields do not break anything', () => {
   assert.equal(search(items, '').length, 1);
   assert.equal(search(items, 'qualquer').length, 0);
 });
+
+/* ---------------- usage ranking ---------------- */
+
+// The bookmark you keep opening is the one the launcher should offer first.
+const RANKED = [
+  { id: 'novo', title: 'go novo', url: '', tags: '', category: '', folder: '', description: '', updated_at: 100 },
+  { id: 'usado', title: 'go usado', url: '', tags: '', category: '', folder: '', description: '', updated_at: 1, opens: 5 },
+];
+const ids = (items, q) => search(items, q).map((b) => b.id);
+
+test('the most used one comes before the most recent one', () => {
+  assert.deepEqual(ids(RANKED, ''), ['usado', 'novo'], 'with no query too');
+  assert.deepEqual(ids(RANKED, 'go'), ['usado', 'novo']);
+});
+
+test('with no opens the order is still by recency', () => {
+  const none = RANKED.map((b) => ({ ...b, opens: 0 }));
+  assert.deepEqual(ids(none, ''), ['novo', 'usado']);
+});
+
+test('the boost saturates, so a favourite cannot bury a better match', () => {
+  // 999 opens on a description match still loses to a title match: the boost
+  // stops at 36 and the gap between the fields is larger than that.
+  const items = [
+    { id: 'titulo', title: 'grafana', url: '', tags: '', category: '', folder: '', description: '', updated_at: 1 },
+    { id: 'desc', title: 'outro', url: '', tags: '', category: '', folder: '', description: 'grafana', updated_at: 1, opens: 999 },
+  ];
+  assert.deepEqual(ids(items, 'grafana'), ['titulo', 'desc']);
+});
+
+test('a broken counter counts as zero', () => {
+  for (const opens of [null, undefined, -5, 'abc', NaN, {}]) {
+    const items = [
+      { id: 'a', title: 'x', url: '', tags: '', category: '', folder: '', description: '', updated_at: 2, opens },
+      { id: 'b', title: 'x', url: '', tags: '', category: '', folder: '', description: '', updated_at: 1 },
+    ];
+    assert.deepEqual(ids(items, 'x'), ['a', 'b'], `opens = ${String(opens)}`);
+  }
+});
