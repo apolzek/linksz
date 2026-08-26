@@ -730,6 +730,28 @@ function canDropFolder(from, to) {
   return parentOf(from) !== to;
 }
 
+// A filter pinned to the folder that just moved has to move with it. Otherwise
+// the search bar keeps pointing at where the folder was, the list empties out,
+// and clicking the folder in its new place only adds a second filter on top of
+// the stale one.
+function retargetFolderTokens(from, to) {
+  const before = $('#q').value;
+  const lower = from.toLowerCase();
+
+  const after = before.split(/\s+/).filter(Boolean).map((token) => {
+    const negated = token.startsWith('-');
+    const body = negated ? token.slice(1) : token;
+    if (body[0] !== '/') return token;
+
+    const path = body.slice(1).toLowerCase();
+    // The folder itself, or anything that lived under it.
+    if (path !== lower && !path.startsWith(lower + '/')) return token;
+    return `${negated ? '-' : ''}/${to}${body.slice(1 + from.length)}`;
+  }).join(' ');
+
+  if (after !== before) setQuery(after);
+}
+
 // The path is a plain string on every bookmark below the folder, so the server
 // rewrites the prefix and the whole branch travels with it.
 async function moveFolder(from, to) {
@@ -742,6 +764,7 @@ async function moveFolder(from, to) {
     for (let p = r.to; p; p = parentOf(p)) state.closedFolders.delete(p);
     saveClosedFolders();
     await loadAll();
+    retargetFolderTokens(from, r.to);
     setSync(`moved to /${r.to}`);
     setTimeout(() => setSync('synced'), 3000);
   } catch (err) {
