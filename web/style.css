@@ -676,6 +676,10 @@ textarea { resize: vertical; }
   padding: 6px 9px; border-radius: 0; cursor: pointer;
   border: 1px solid transparent;
 }
+/* `.hidden` is (0,1,0) and the rule above is (0,1,1): between two !important
+   declarations specificity decides, so the generic one loses and hiding a mode
+   does nothing at all. Spelled out here, where it wins. */
+.io-modes label.hidden { display: none !important; }
 .io-modes label:hover { background: var(--panel-2); }
 .io-modes label:has(input:checked) { background: var(--accent-soft); border-color: var(--accent); }
 .io-modes input { width: auto; margin: 0; flex: none; accent-color: var(--accent); }

@@ -202,17 +202,13 @@ group('import: two flows');
 await ev("document.querySelector('#btn-io').click()");
 await sleep(700);
 is(await ev("document.querySelector('[data-io-source].on').dataset.ioSource"), 'native', 'opens on the vault flow');
-is(await ev("document.querySelector('#io-prefix-row').classList.contains('hidden')"), true,
+is(await ev("document.querySelector('#io-prefix-row').offsetParent === null"), true,
   'a vault file is not dropped under a folder');
-is(await ev("!document.querySelector('#io-mode-replace').classList.contains('hidden')"), true,
-  'and it may replace the vault');
 
 await ev("document.querySelector('#io-src-browser').click()");
 await sleep(400);
 is(await ev("document.querySelector('[data-io-source].on').dataset.ioSource"), 'browser', 'switches to the browser flow');
-is(await ev("!document.querySelector('#io-prefix-row').classList.contains('hidden')"), true, 'which offers a folder to land in');
-is(await ev("document.querySelector('#io-mode-replace').classList.contains('hidden')"), true,
-  'and may never replace the vault');
+is(await ev("document.querySelector('#io-prefix-row').offsetParent !== null"), true, 'which offers a folder to land in');
 is(await ev("document.querySelector('#io-file').accept"), '',
   'no file filter: the browser\'s own Bookmarks has no extension');
 
@@ -244,6 +240,33 @@ await sleep(400);
 await pickFile(`${fixtures}/browser-export.html`);
 is((await ev("document.querySelector('#io-error').textContent")).includes('From a browser'), true,
   'and the other way round as well');
+
+// The modes only exist once a file has been read, so what each flow offers is
+// asked here and not at the moment the modal opens, where the whole block is
+// hidden and every answer would be "invisible".
+//
+// And asked of the layout, never of the class list. `hidden` sat on this label
+// while it stayed on screen: `.io-modes label` carries display:flex !important
+// and beats the generic `.hidden` on specificity. A test that reads the class
+// list agrees with the bug.
+group('import: what each flow may do, with a plan on screen');
+await pickFile(`${fixtures}/vault.yaml`);
+is(await ev("document.querySelector('#io-plan').offsetParent !== null"), true, 'a vault file gives a plan');
+is(await ev("getComputedStyle(document.querySelector('#io-mode-replace')).display !== 'none'"), true,
+  'and the vault flow may replace the vault');
+is(await ev("document.querySelector('#io-browser-note').offsetParent === null"), true,
+  'the browser-only promise is not shown here');
+
+await ev("document.querySelector('#io-src-browser').click()");
+await sleep(400);
+await pickFile(`${fixtures}/browser-export.html`);
+is(await ev("document.querySelector('#io-plan').offsetParent !== null"), true, 'a browser file gives a plan');
+is(await ev("getComputedStyle(document.querySelector('#io-mode-replace')).display"), 'none',
+  'and the browser flow may never replace the vault');
+is(await ev("document.querySelector('input[name=\"io-mode\"]:checked').value"), 'add',
+  'defaulting to the merge that only adds what is missing');
+is(await ev("document.querySelector('#io-browser-note').offsetParent !== null"), true,
+  'with the promise that nothing is removed spelled out');
 
 group('nothing threw');
 is(jsErrors, [], 'no uncaught error in the console');
