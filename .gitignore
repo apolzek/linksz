@@ -1,6 +1,15 @@
-__pycache__/
-*.pyc
 node_modules/
+*.log
+__pycache__/
+
+# Machine-specific settings: where the vault lives, which uid runs the api.
+# .env.example is the committed shape of it.
+.env
+
+# The default vault directory, when .env does not point somewhere else.
+data/
+
+# Vaults and their sidecar files, wherever they land.
 *.db
 *.db-wal
 *.db-shm

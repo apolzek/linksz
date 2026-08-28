@@ -1,34 +1,23 @@
+# Node is here for the test suite: the app itself runs in containers.
 [tools]
 node = "24"
-python = "3.12"
 
-[env]
-BOOKMARKS_PORT = "8787"
+[tasks.up]
+description = "Starts the stack (api + web) on http://localhost:8080"
+run = "docker compose up -d --build"
 
-[tasks.server]
-description = "Starts the backend + web UI (http://localhost:8787)"
-run = "node api/server.js"
+[tasks.down]
+description = "Stops the stack"
+run = "docker compose down"
 
-[tasks.bar]
-description = "Opens the desktop search bar"
-run = "python3 desktop/bookmarks_bar.py"
-
-[tasks.install]
-description = "Installs on the desktop (detects Linux or macOS)"
-run = "bash desktop/install.sh"
+[tasks.logs]
+description = "Follows the logs of both containers"
+run = "docker compose logs -f"
 
 [tasks.test]
 description = "Runs the test suite"
 run = "bash tests/run.sh"
 
 [tasks.test-all]
-description = "Full suite, including the Docker stack"
-run = "bash tests/run.sh --compose"
-
-[tasks.up]
-description = "Starts the Docker stack (backend + Caddy with TLS) for the phone"
-run = "docker compose up -d --build"
-
-[tasks.down]
-description = "Stops the Docker stack"
-run = "docker compose down"
+description = "Full suite: node, the browser and the Docker stack"
+run = "bash tests/run.sh --all"

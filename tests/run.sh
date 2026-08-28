@@ -1,10 +1,19 @@
 #!/usr/bin/env bash
 # Runs the whole suite.
 #
-#   bash tests/run.sh              backend + search + desktop
-#   bash tests/run.sh --compose    includes the Docker stack (slower)
+#   bash tests/run.sh              api, search, yaml and import/export
+#   bash tests/run.sh --web        adds the browser tests (needs Chrome)
+#   bash tests/run.sh --compose    adds the Docker stack (needs Docker)
+#   bash tests/run.sh --all        both
+#
+# Node built-ins only, no test framework and nothing to install. The two extras
+# are opt in because each needs something the machine may not have, and each
+# skips itself rather than failing when it is missing.
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
+
+ARGS=" ${*:-} "
+want() { case "$ARGS" in *" $1 "*|*" --all "*) return 0;; *) return 1;; esac; }
 
 heading() { printf '\n\033[1m── %s %s\033[0m\n' "$1" "$(printf '─%.0s' $(seq $((50 - ${#1}))))"; }
 
@@ -17,11 +26,15 @@ node --test tests/yaml.test.js tests/portability.test.js
 heading "backend, api and pwa (node:test)"
 node --test tests/api.test.js
 
-heading "desktop and yaml interop (unittest)"
-python3 -m unittest discover -s tests -p 'test_*.py' -v
+if want --web; then
+  heading "web: the app in a browser"
+  bash tests/web.sh
+else
+  printf '\n\033[2m(browser not tested, use: bash tests/run.sh --web)\033[0m\n'
+fi
 
-if [[ "${1:-}" == "--compose" ]]; then
-  heading "compose: tls, pwa and api on docker"
+if want --compose; then
+  heading "compose: the pwa and the api behind nginx"
   bash tests/compose.sh
 else
   printf '\n\033[2m(compose not tested, use: bash tests/run.sh --compose)\033[0m\n'

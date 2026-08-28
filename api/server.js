@@ -5,8 +5,8 @@
 // "METHOD /path", and anything not under /api/ is served as a static file.
 //
 // Authentication is an opaque token in the `Authorization: Bearer` header,
-// stored in the `sessions` table. There is no cookie and no CSRF to consider,
-// because the desktop bar talks to this same API from another origin.
+// stored in the `sessions` table. There is no cookie, so there is no CSRF to
+// consider: a cross-site request carries no credentials of its own.
 //
 // Neighbours:
 //   db.js             schema and connection
@@ -167,6 +167,22 @@ function createApp(dbPath) {
   // state, not database state.
   const runtime = { demo: null };
 
+  // Which origins may drive this API from a browser, read from
+  // BOOKMARKS_ALLOWED_ORIGINS (comma separated). Empty is the default and the
+  // right answer for the shipped stack: nginx serves the PWA and proxies /api
+  // on one origin, so the browser never makes a cross-origin request and no
+  // CORS header is needed for the app to work.
+  //
+  // `*` puts it back to answering everyone, which is a decision someone has to
+  // write down rather than something inherited.
+  const allowedOrigins = new Set(
+    String(process.env.BOOKMARKS_ALLOWED_ORIGINS || '')
+      .split(',')
+      .map((o) => o.trim().replace(/\/+$/, ''))
+      .filter(Boolean),
+  );
+  const anyOriginAllowed = allowedOrigins.has('*');
+
   const q = {
     userByLogin: db.prepare('SELECT * FROM users WHERE email = ? OR username = ?'),
     userById: db.prepare('SELECT id, email, username, created_at FROM users WHERE id = ?'),
@@ -232,7 +248,7 @@ function createApp(dbPath) {
   }
 
   // Writes a bookmark coming from a client. The client's `updated_at` wins when
-  // it is newer (last-write-wins), which is what keeps web and desktop converging.
+  // it is newer (last-write-wins), which is what keeps two clients converging.
   //
   // `revive` is what a sync push does not get. A push carries the whole record,
   // including rows the other side only touched to count an open, and a counter
@@ -347,17 +363,41 @@ function createApp(dbPath) {
         return json(res, 400, { error: `mode must be one of: ${portability.MODES.join(', ')}` });
       }
 
+      const source = String(b.source || 'native');
+      if (!portability.SOURCES.includes(source)) {
+        return json(res, 400, { error: `source must be one of: ${portability.SOURCES.join(', ')}` });
+      }
+      // A browser file is a partial view of a vault: no ids, no categories, and
+      // tags only where the browser wrote them. Letting it replace the vault
+      // would delete every bookmark the browser never knew about, which nobody
+      // importing from Chrome is asking for.
+      if (source === 'browser' && mode === 'replace') {
+        return json(res, 400, {
+          error: 'a browser file cannot replace the vault: it does not carry everything a bookmark has',
+        });
+      }
+
       let parsed;
       try {
-        parsed = portability.parseImport(content, String(b.format || 'auto'));
+        parsed = portability.readImport(content, { source, folderPrefix: b.folderPrefix });
       } catch (err) {
-        return json(res, 400, { error: `could not read the file: ${err.message}` });
+        // The wrong flow is not a broken file, and saying "could not read" would
+        // send someone looking for corruption in an export that is perfectly fine.
+        const prefix = err instanceof portability.WrongSourceError ? '' : 'could not read the file: ';
+        return json(res, 400, { error: `${prefix}${err.message}` });
       }
 
       const existing = q.allBookmarks.all(user.id);
-      const plan = portability.planImport(existing, parsed.items, mode);
+      const plan = portability.planImport(existing, parsed.items, mode, {
+        // A browser file cannot speak about categories, and only sometimes
+        // about tags and descriptions. It may add, never take away.
+        partialFields: source === 'browser' ? portability.BROWSER_PARTIAL_FIELDS : [],
+      });
       const preview = {
+        source: parsed.source,
         format: parsed.format,
+        // What the file itself carried, before deciding what to do with it.
+        file: { ...parsed.stats, prefix: parsed.prefix },
         summary: plan.summary,
         // A sample so the UI can show what will happen without dumping everything.
         examples: {
@@ -538,10 +578,22 @@ function createApp(dbPath) {
     const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
     const { pathname } = url;
 
-    // CORS is open: the desktop bar and other origins hit this same API.
-    res.setHeader('access-control-allow-origin', req.headers.origin || '*');
-    res.setHeader('access-control-allow-headers', 'content-type, authorization');
-    res.setHeader('access-control-allow-methods', 'GET, POST, PUT, DELETE, OPTIONS');
+    // No CORS unless someone asked for it. What the old open policy allowed was
+    // any page in the browser reading this API with a token the person had
+    // already pasted into it; the app itself never needed it, being same-origin
+    // behind nginx. A refused origin gets no header, which is what makes the
+    // browser block the response.
+    const origin = req.headers.origin;
+    if (origin && (anyOriginAllowed || allowedOrigins.has(origin.replace(/\/+$/, '')))) {
+      res.setHeader('access-control-allow-origin', origin);
+      res.setHeader('access-control-allow-headers', 'content-type, authorization');
+      res.setHeader('access-control-allow-methods', 'GET, POST, PUT, DELETE, OPTIONS');
+      res.setHeader('access-control-max-age', '600');
+    }
+    // Set even when the origin is refused: the answer depends on Origin either
+    // way, and a shared cache that does not know that hands one site the
+    // response meant for another.
+    res.setHeader('vary', 'Origin');
     if (req.method === 'OPTIONS') { res.writeHead(204); return res.end(); }
 
     try {
@@ -580,8 +632,8 @@ function createApp(dbPath) {
 // password, and it never touches that account's bookmarks.
 //
 // The password is known by design, so this is for local development and
-// testing. Before publishing the instance on a network (compose + Caddy), turn
-// it off with BOOKMARKS_SEED=0, or anyone who reads this file can log in.
+// testing. Before putting the instance anywhere else can reach it, turn it off
+// with BOOKMARKS_SEED=0, or anyone who reads this file can log in.
 function ensureSeedUser(db) {
   if (process.env.BOOKMARKS_SEED === '0') return null;
 

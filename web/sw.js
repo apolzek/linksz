@@ -12,7 +12,7 @@
 'use strict';
 
 // Bump this version whenever a shell file changes.
-const VERSION = 'v40';
+const VERSION = 'v52';
 const SHELL_CACHE = `bookmarks-shell-${VERSION}`;
 
 const SHELL = [
@@ -95,9 +95,4 @@ self.addEventListener('fetch', (event) => {
     return;
   }
   event.respondWith(staleWhileRevalidate(request));
-});
-
-// The page sends this after updating, so it does not wait for the next boot.
-self.addEventListener('message', (event) => {
-  if (event.data === 'skip-waiting') self.skipWaiting();
 });

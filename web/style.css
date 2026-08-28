@@ -144,12 +144,14 @@ body {
 /* ---------- login ---------- */
 .auth { min-height: 100vh; display: grid; place-items: center; padding: 24px; }
 .auth-card { width: 100%; max-width: 360px; background: var(--panel); border: 1px solid var(--line); border-radius: 0; padding: 28px; }
-.logo { margin: 0; font-size: 26px; }
-.sub { margin: 4px 0 20px; color: var(--muted); font-size: 13px; }
+/* The bottom margin used to belong to the tagline under it, which is gone. */
+.logo { margin: 0 0 20px; font-size: 26px; }
 .tabs { display: flex; gap: 4px; background: var(--panel-2); padding: 4px; border-radius: 0; margin-bottom: 16px; }
 .tab { flex: 1; padding: 8px; border: 0; border-radius: 0; background: transparent; color: var(--muted); font: inherit; font-size: 14px; cursor: pointer; }
 .tab.active { background: var(--panel); color: var(--text); box-shadow: 0 1px 3px rgba(0,0,0,.2); }
-/* Backend status light: colour + text, because colour alone fails colour-blind users. */
+/* Backend status: colour + text, because colour alone fails colour-blind users.
+   There is no `up` rule because a backend that answers says nothing at all: the
+   block is hidden in that state, and only checking and down ever paint. */
 .status {
   display: flex; align-items: center; gap: 7px;
   margin: 0 0 16px; padding: 7px 11px; border-radius: 0;
@@ -157,8 +159,6 @@ body {
   color: var(--muted); overflow-wrap: anywhere;
 }
 .status .dot { flex: none; width: 7px; height: 7px; background: var(--muted); }
-.status.up { color: var(--ok); border-color: var(--ok-line); }
-.status.up .dot { background: var(--ok); }
 .status.down { color: var(--danger); border-color: var(--danger-line); }
 .status.down .dot { background: var(--danger); }
 .status.checking .dot { animation: pulse 1s ease-in-out infinite; }
@@ -272,7 +272,9 @@ select.ghost option { background: var(--panel); color: var(--text); }
 }
 @keyframes blink { 50% { opacity: 0; } }
 /* A light, not a word in the corner: colour says the state at a glance and the
-   label still spells it out, which colour alone would not do for everyone. */
+   label still spells it out, which colour alone would not do for everyone.
+   Hidden while everything is synced, so the corner is empty when there is
+   nothing to report. */
 .sync {
   display: inline-flex; align-items: center; gap: 7px;
   padding: 4px 10px; border: 1px solid var(--line); background: var(--panel);
@@ -324,6 +326,11 @@ select.ghost option { background: var(--panel); color: var(--text); }
    were cramped and wrapped at the panel's width. */
 .facet-actions { display: flex; justify-content: center; gap: 12px; padding: 0 6px 8px; }
 .facet-actions .linkish:disabled { color: var(--muted); opacity: .55; }
+
+/* A button that cannot be pressed should not look like it can. The import
+   button spends real time disabled now: the wrong file in a flow leaves it
+   that way until another one is chosen. */
+button:disabled { cursor: not-allowed; opacity: .45; }
 /* The one control a flat list needs: the cap, and a way past it. */
 .facet-more { display: block; width: 100%; text-align: left; padding: 6px 8px; font-size: 12px; }
 .facet-empty { margin: 0 0 4px; padding: 0 6px; font-size: 12px; color: var(--muted); opacity: .7; }
@@ -449,7 +456,29 @@ kbd { background: var(--panel-2); border: 1px solid var(--line); border-bottom-w
 @media (hover: none) { .suggest-drop { opacity: 1; } }
 
 /* ---------- insights ---------- */
-.insights-card { max-width: 620px; gap: 0; }
+/* The widest thing in the app: a chart, a ranking and a log. At 620px the two
+   lists truncated every title into an ellipsis and the log was a column of
+   crumbs. */
+/* Two class names on purpose: this block sits above `.modal-card` in the file,
+   and at equal specificity the later rule wins. That is how the old 620px here
+   lost to the generic 440px and the modal stayed narrow no matter what this
+   said. */
+.modal-card.insights-card { max-width: min(1040px, 94vw); gap: 0; padding-top: 0; }
+
+/* Sticky, so the close stays reachable however far down the log goes. The card
+   gives up its own top padding to it, which is what lets top: 0 sit flush. */
+.modal-head {
+  position: sticky; top: 0; z-index: 1;
+  display: flex; align-items: center; gap: 12px;
+  padding: 18px 0 12px; background: var(--panel);
+  border-bottom: 1px solid var(--line);
+}
+.modal-head h2 { flex: 1; margin: 0; font-size: 17px; }
+.icon-close {
+  flex: none; padding: 0 4px; border: 0; background: transparent;
+  color: var(--muted); font-size: 24px; line-height: 1; cursor: pointer;
+}
+.icon-close:hover, .icon-close:focus-visible { color: var(--danger); }
 .ins-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
 .ins-range { display: flex; gap: 10px; font-family: var(--font-mono); }
 .ins-range .on { color: var(--text); text-decoration: underline; }
@@ -458,16 +487,31 @@ kbd { background: var(--panel-2); border: 1px solid var(--line); border-bottom-w
    what carries the meaning; the exact number sits on top of each bar. */
 .ins-chart {
   display: flex; align-items: flex-end; gap: 4px;
-  height: 132px; margin: 6px 0 4px; padding-top: 14px;
+  height: 168px; margin: 6px 0 4px; padding-top: 14px;
 }
 .ins-col { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; height: 100%; gap: 3px; }
 .ins-value { font-family: var(--font-mono); font-size: 10.5px; color: var(--muted); line-height: 1; }
-.ins-bar { width: 100%; min-height: 2px; background: var(--accent); opacity: .85; }
+/* Capped, because the column is a seventh of a 1040px card: without this the
+   bars stop reading as bars and become slabs. */
+.ins-bar { width: 100%; max-width: 56px; min-height: 2px; background: var(--accent); opacity: .85; }
 .ins-bar.empty { background: var(--line); min-height: 1px; }
 .ins-day { font-family: var(--font-mono); font-size: 10px; color: var(--muted); white-space: nowrap; }
 
+.ins-split { display: grid; gap: 0 26px; }
 .ins-top, .ins-log { list-style: none; margin: 4px 0 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
 .ins-log { max-height: 220px; overflow-y: auto; }
+
+/* Two columns once they fit. Both lists scroll to the same height so the
+   columns end level instead of one trailing far below the other. */
+@media (min-width: 900px) {
+  .ins-split { grid-template-columns: 1fr 1fr; }
+  /* Side by side, one section with a rule on top and one without read as a
+     mistake, so the first one gets its border back. */
+  .ins-split .io-section:first-of-type { border-top: 1px solid var(--line); padding-top: 16px; }
+  /* Clamped, not a bare vh: on a short window 40vh left the two lists fighting
+     the card's own scrollbar for the same few pixels. */
+  .ins-split .ins-top, .ins-split .ins-log { max-height: clamp(200px, 38vh, 360px); overflow-y: auto; }
+}
 .ins-row { display: flex; align-items: baseline; gap: 10px; padding: 5px 8px; font-size: 12.5px; }
 .ins-row:hover { background: var(--panel-2); }
 .ins-link {
@@ -536,6 +580,15 @@ mark { background: var(--accent-soft); color: inherit; border-radius: 0; padding
 .row { display: flex; gap: 12px; }
 .row label { flex: 1; }
 .modal-actions { display: flex; gap: 8px; align-items: center; margin-top: 4px; }
+/* The confirm is one question, so it is narrower than the forms. */
+.confirm-card { max-width: 380px; }
+.confirm-lead { margin: 0; font-size: 12.5px; color: var(--muted); }
+/* A title can be a bare URL, which has no spaces to break on. */
+.confirm-what {
+  margin: 0; padding: 9px 11px; background: var(--panel-2);
+  border: 1px solid var(--line); border-left: 2px solid var(--danger);
+  font-size: 13px; color: var(--text); overflow-wrap: anywhere;
+}
 textarea { resize: vertical; }
 
 /* ---------- import / export ---------- */
@@ -554,6 +607,36 @@ textarea { resize: vertical; }
 .io-card .io-update { border-top-color: var(--accent); }
 .io-card .io-remove { border-top-color: var(--danger); }
 .io-card .io-modes legend { width: 100%; text-align: center; }
+/* Two flows for two different files, chosen before the file is picked. */
+.io-sources { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 0 0 12px; }
+.io-sources button {
+  display: flex; flex-direction: column; align-items: center; gap: 3px;
+  padding: 10px 12px; border: 1px solid var(--line); background: var(--panel-2);
+  color: var(--muted); font: inherit; text-align: center; cursor: pointer;
+}
+.io-sources button b { font-size: 13px; color: var(--text); }
+.io-sources button em { font-style: normal; font-size: 11.5px; line-height: 1.35; }
+.io-sources button:hover { border-color: var(--accent-line); }
+.io-sources button.on { border-color: var(--accent); background: var(--panel); box-shadow: inset 0 -2px 0 var(--accent); }
+.io-sources button.on b { color: var(--accent); }
+
+/* The card centres its text; these read as prose and need the left edge. */
+.io-src-hint, .io-filestats { text-align: left; }
+
+/* The honest answer to "what am I about to import", before anything is written.
+   It is where a browser file admits what it does not have. */
+.io-filestats {
+  margin: 0 0 10px; padding: 8px 10px;
+  background: var(--panel-2); border-left: 2px solid var(--accent);
+  font-size: 12.5px; color: var(--text);
+}
+
+.io-prefix { display: flex; flex-direction: column; gap: 5px; margin: 0 0 12px; text-align: left; }
+.io-prefix > span { font-size: 12.5px; color: var(--muted); }
+.io-prefix-field { display: flex; gap: 6px; }
+.io-prefix-field input { flex: 1; min-width: 0; }
+.io-prefix-field button { flex: none; white-space: nowrap; font-size: 12px; padding: 0 10px; }
+
 .io-section { border-top: 1px solid var(--line); padding: 16px 0 4px; }
 .io-section:first-of-type { border-top: 0; padding-top: 4px; }
 .io-section h3 { margin: 0 0 4px; font-size: 14px; }
@@ -659,6 +742,9 @@ textarea { resize: vertical; }
 }
 
 @media (max-width: 640px) {
+  /* Side by side these two become two columns of broken words. */
+  .io-sources { grid-template-columns: 1fr; }
+
   .fab { display: block; }
   #btn-new { display: none; }
   /* dvh follows the address bar collapsing; vh does not. */

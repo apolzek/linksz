@@ -2,7 +2,7 @@
   "id": "/",
   "name": "Bookmarks",
   "short_name": "Bookmarks",
-  "description": "Your bookmarks, one keystroke away. Self-hosted, with instant substring search.",
+  "description": "Self-hosted bookmark manager with instant substring search.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

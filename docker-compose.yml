@@ -1,24 +1,22 @@
-# Three services: api is the backend, web is nginx with the PWA and /api proxied
-# to it, proxy is caddy terminating TLS.
+# Two services: api is the backend, web is nginx with the PWA and /api proxied
+# to it.
 #
-#   1. find this machine's IP:  ip route get 1 | awk '{print $7; exit}'
-#   2. BOOKMARKS_SITE=192.168.0.10 docker compose up -d
-#   3. on the phone, open http://192.168.0.10/root.crt and install the certificate
-#   4. open https://192.168.0.10 and use "Add to home screen"
+#   docker compose up -d --build
+#   open http://localhost:8080
 #
-# The proxy is not decoration. A PWA only installs, and a service worker only
-# registers, in a secure context: https, or localhost. Over the LAN in plain
-# HTTP the browser does not even expose navigator.serviceWorker, so there is no
-# offline mode and no install. Caddy issues the certificate from its own CA and
-# hands that CA out at http://<ip>/root.crt, which is step 3.
+# The vault is a directory on this machine, mounted into the api container, so
+# the SQLite file stays somewhere you can back up, copy and read without going
+# through docker. Where it lives is BOOKMARKS_VAULT_DIR in .env; the default is
+# ./data next to this file.
 #
-# Using it only from this machine, at http://localhost:8080? Then localhost is
-# already a secure context and the proxy adds nothing:
-#
-#   docker compose up -d api web
-#
-# A local install (systemd, mise run server) runs none of this: there the
-# backend serves the PWA itself on 8787.
+# Why localhost and not the machine's IP: a PWA only installs, and a service
+# worker only registers, in a secure context, which means https or localhost.
+# On this machine localhost is trusted by definition and everything works. Over
+# the LAN in plain HTTP the browser does not even expose
+# navigator.serviceWorker, so there you get a website, not an app. Reaching it
+# from a phone means putting TLS in front, and that is deliberately not this
+# file's job: use a tunnel that already terminates TLS (Tailscale, Cloudflare)
+# or a reverse proxy you already run, and point it at web:80.
 
 name: bookmarks
 
@@ -29,16 +27,29 @@ services:
       dockerfile: api/Dockerfile
     image: bookmarks-api:local
     restart: unless-stopped
+    # The image's own user owns /data, which is the wrong answer for a bind
+    # mount: what matters there is the ownership on the host. Running as the
+    # user who owns the vault directory is what keeps the file readable and
+    # writable from both sides. `id -u` and `id -g` on this machine.
+    user: "${BOOKMARKS_UID:-1000}:${BOOKMARKS_GID:-1000}"
     environment:
       BOOKMARKS_HOST: 0.0.0.0
       BOOKMARKS_PORT: "8787"
       BOOKMARKS_DB: /data/bookmarks.db
+      # Which origins may drive the API from a browser. Empty is correct here:
+      # nginx serves the PWA and proxies /api on one origin, so the app never
+      # makes a cross-origin request. Fill it in (comma separated, or `*`) only
+      # for something else that has to reach this API from a page.
+      BOOKMARKS_ALLOWED_ORIGINS: ${BOOKMARKS_ALLOWED_ORIGINS:-}
       # Test account created on every boot (default: teste / teste123).
-      # This stack is exposed on the local network: change the password, or turn
-      # it off with BOOKMARKS_SEED=0, before leaving it running.
+      # Change the password, or turn it off with BOOKMARKS_SEED=0, before
+      # putting this anywhere else can reach.
       BOOKMARKS_SEED_PASSWORD: ${BOOKMARKS_SEED_PASSWORD:-teste123}
     volumes:
-      - bookmarks-data:/data
+      # The vault directory, not the file: SQLite writes bookmarks.db-wal and
+      # bookmarks.db-shm next to it, and mounting the single file would strand
+      # those inside the container.
+      - ${BOOKMARKS_VAULT_DIR:-./data}:/data
     # No ports: the web container is what talks to it. To reach the API
     # directly (debugging), uncomment:
     # ports:
@@ -56,37 +67,12 @@ services:
       api:
         condition: service_healthy
     ports:
-      # Published because this is the front door without the TLS hop. With the
-      # tls profile on, the proxy is what you open and this stays reachable for
-      # debugging.
-      - "${BOOKMARKS_PORT:-8080}:80"
+      # The front door. Its own variable, not BOOKMARKS_PORT: that one is the
+      # port the API listens on inside its container, and reusing the name here
+      # meant anything exporting it in the shell silently moved this one too.
+      - "${BOOKMARKS_WEB_PORT:-8080}:80"
     networks:
       - bookmarks
-
-  # What makes the PWA installable anywhere that is not localhost.
-  proxy:
-    build: ./proxy          # the Caddyfile is baked in, see proxy/Dockerfile
-    image: bookmarks-proxy:local
-    restart: unless-stopped
-    depends_on:
-      web:
-        condition: service_healthy
-    environment:
-      # The hostname or IP you use to reach it. The certificate is issued for it.
-      BOOKMARKS_SITE: ${BOOKMARKS_SITE:-bookmarks.local}
-    ports:
-      - "${BOOKMARKS_HTTP_PORT:-80}:80"
-      - "${BOOKMARKS_HTTPS_PORT:-443}:443"
-    volumes:
-      - caddy-data:/data       # holds the CA: deleting it means recertifying everything
-      - caddy-config:/config
-    networks:
-      - bookmarks
-
-volumes:
-  bookmarks-data:
-  caddy-data:
-  caddy-config:
 
 networks:
   bookmarks:

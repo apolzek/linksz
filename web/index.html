@@ -6,7 +6,7 @@
      the iPhone notch and gesture bar once installed. -->
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Bookmarks</title>
-<meta name="description" content="Your bookmarks, one keystroke away. Self-hosted, with instant substring search.">
+<meta name="description" content="Self-hosted bookmark manager with instant substring search.">
 
 <link rel="icon" href="/icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
@@ -42,7 +42,6 @@
 <section id="auth" class="auth hidden">
   <div class="auth-card">
     <h1 class="logo brand">bookmarks<i>_</i></h1>
-    <p class="sub">your bookmarks, one keystroke away</p>
 
     <!-- Backend status, checked when the screen opens: whoever is signing in
          should not have to guess whether the server is up. -->
@@ -87,8 +86,8 @@
     <div id="auth-offline" class="offline hidden">
       <b>The backend is not responding</b>
       <p>Nothing answered at <code id="auth-origin"></code>.</p>
-      <p class="dim">Start it with <code>systemctl --user start bookmarks</code> or
-        <code>mise run server</code>. If you opened another port, check the address.</p>
+      <p class="dim">Start it with <code>docker compose up -d</code>. If you opened
+        another port, check the address.</p>
       <button type="button" id="auth-retry" class="ghost">check again</button>
     </div>
 
@@ -105,7 +104,7 @@
        there however wide the buttons on the right get. -->
   <header class="topbar">
     <div class="topbar-side">
-      <span id="sync-state" class="sync">synced</span>
+      <span id="sync-state" class="sync hidden">synced</span>
       <!-- Which build is on screen. Filled from /api/health, which a pipeline
            feeds through BOOKMARKS_COMMIT and BOOKMARKS_DEPLOYED_AT. -->
       <span id="build" class="build hidden"></span>
@@ -169,7 +168,9 @@
         <span>help</span>
         <button id="help-close" class="linkish" title="Close (Esc)">close</button>
       </div>
-      <p class="hint"><kbd>↑</kbd><kbd>↓</kbd> move · <kbd>Enter</kbd> open · <kbd>Ctrl</kbd>+<kbd>Enter</kbd> new tab · <kbd>e</kbd> edit · <kbd>Del</kbd> delete · <kbd>n</kbd> new · <kbd>b</kbd> browse · <kbd>/</kbd> search</p>
+      <p class="hint"><kbd>↑</kbd><kbd>↓</kbd> move · <kbd>Enter</kbd> open · <kbd>Ctrl</kbd>+<kbd>Enter</kbd> new tab · <kbd>F2</kbd> edit · <kbd>Ctrl</kbd>+<kbd>Del</kbd> delete · <kbd>n</kbd> new · <kbd>b</kbd> browse · <kbd>/</kbd> search</p>
+      <p class="hint dim">With the caret out of the search box, <kbd>e</kbd> and <kbd>Del</kbd> do the same two.</p>
+      <p class="hint dim">On a row: wheel click opens it in a new tab, right click edits it.</p>
       <p class="hint syntax"><code>#tag</code> <code>@category</code> <code>/folder</code> <code>title:something</code> <code>"exact phrase"</code> <code>-exclude</code></p>
       <p class="hint">Terms combine with AND. Everything is substring, case and accent insensitive.
          Drag a folder onto another one in the panel to nest it.</p>
@@ -210,12 +211,36 @@
   </form>
 </div>
 
+<!-- ---------- CONFIRMAR ---------- -->
+<!-- Deleting is the only destructive action here and Ctrl+Del reaches it from
+     the keyboard, so it asks in the app's own frame instead of the browser's
+     confirm(): that one freezes the page and looks like the browser asking,
+     not us. Cancel holds the focus, so a stray Enter cancels. -->
+<div id="confirm-modal" class="modal hidden">
+  <div class="modal-card confirm-card" role="alertdialog" aria-modal="true"
+       aria-labelledby="confirm-title" aria-describedby="confirm-what">
+    <h2 id="confirm-title">Delete bookmark</h2>
+    <p class="confirm-lead">This cannot be undone.</p>
+    <p id="confirm-what" class="confirm-what"></p>
+    <div class="modal-actions">
+      <div class="spacer"></div>
+      <button type="button" id="confirm-cancel" class="ghost">cancel</button>
+      <button type="button" id="confirm-ok" class="danger">delete</button>
+    </div>
+  </div>
+</div>
+
 <!-- ---------- IMPORTAR / EXPORTAR ---------- -->
 <!-- Browsing habits: what gets opened and when. The data comes from the
      server's opens log, so it is the same on every device. -->
 <div id="insights-modal" class="modal hidden">
-  <div class="modal-card insights-card">
-    <h2>Insights</h2>
+  <div class="modal-card insights-card" role="dialog" aria-modal="true" aria-label="Insights">
+    <!-- The card scrolls, so the way out rides along at the top instead of
+         waiting at the end of the access log. -->
+    <div class="modal-head">
+      <h2>Insights</h2>
+      <button type="button" id="ins-close" class="icon-close" title="Close (Esc)" aria-label="Close">&times;</button>
+    </div>
 
     <section class="io-section">
       <div class="ins-head">
@@ -230,21 +255,20 @@
       <div id="ins-chart" class="ins-chart"></div>
     </section>
 
-    <section class="io-section">
-      <h3>Most opened</h3>
-      <p class="io-hint">In the window, and all time next to it.</p>
-      <ol id="ins-top" class="ins-top"></ol>
-    </section>
+    <!-- Two lists of the same shape: side by side once there is room, stacked
+         when there is not. -->
+    <div class="ins-split">
+      <section class="io-section">
+        <h3>Most opened</h3>
+        <p class="io-hint">In the window, and all time next to it.</p>
+        <ol id="ins-top" class="ins-top"></ol>
+      </section>
 
-    <section class="io-section">
-      <h3>Access log</h3>
-      <p class="io-hint">Every open in the window, newest first.</p>
-      <ul id="ins-log" class="ins-log"></ul>
-    </section>
-
-    <div class="modal-actions">
-      <div class="spacer"></div>
-      <button type="button" id="ins-close" class="ghost">close</button>
+      <section class="io-section">
+        <h3>Access log</h3>
+        <p class="io-hint">Every open in the window, newest first.</p>
+        <ul id="ins-log" class="ins-log"></ul>
+      </section>
     </div>
   </div>
 </div>
@@ -266,18 +290,52 @@
 
     <section class="io-section">
       <h3>Import</h3>
-      <p class="io-hint">Takes the YAML from here and the file your browser exports.<br>
-         Edited a YAML by hand? Choose <b>Use the file</b> below, or the edits are skipped.</p>
+      <p class="io-hint">Two different files, so two different flows. Say where this one came from.</p>
+
+      <!-- The choice is made before the file is picked, not discovered in an
+           error afterwards. A browser export is a weaker file than a vault
+           export, and the form changes to match what it can actually do. -->
+      <div class="io-sources" role="tablist" aria-label="Where the file came from">
+        <button type="button" role="tab" class="on" id="io-src-native" data-io-source="native" aria-selected="true">
+          <b>From this app</b><em>YAML or JSON exported here</em>
+        </button>
+        <button type="button" role="tab" id="io-src-browser" data-io-source="browser" aria-selected="false">
+          <b>From a browser</b><em>the HTML Chrome, Firefox, Edge or Safari exports</em>
+        </button>
+      </div>
+
+      <p class="io-hint io-src-hint" id="io-src-native-hint">
+        The vault's own format: ids, folders, categories, tags, descriptions and
+        counters all survive.<br>
+        Edited a YAML by hand? Choose <b>Use the file</b> below, or the edits are skipped.
+      </p>
       <label class="io-file">
-        <input type="file" id="io-file" accept=".yaml,.yml,.html,.htm,.json,application/json,text/html">
+        <input type="file" id="io-file" accept=".yaml,.yml,.json,application/json">
         <span class="io-file-btn">choose file…</span>
         <span class="io-file-name" id="io-filename">no file chosen</span>
       </label>
 
+      <div class="io-prefix hidden" id="io-prefix-row">
+        <span>Put the whole tree inside</span>
+        <span class="io-prefix-field">
+          <input type="text" id="io-prefix" placeholder="optional: leave empty and the folders land at the root"
+                 maxlength="300" autocomplete="off" spellcheck="false">
+          <button type="button" id="io-prefix-dated" class="ghost">Imported-today</button>
+        </span>
+      </div>
+
       <div id="io-plan" class="hidden">
+        <p class="io-hint io-label">What the file carries</p>
+        <p id="io-file-stats" class="io-filestats"></p>
         <p class="io-hint io-label">What will happen</p>
         <ul id="io-summary" class="io-summary"></ul>
         <p id="io-warn" class="io-warn hidden"></p>
+
+        <p class="io-hint dim hidden" id="io-browser-note">
+          Nothing is removed by a browser import: it cannot replace the vault,
+          and what the format has no way to express, categories above all, is
+          left alone on the bookmarks you already have.
+        </p>
 
         <fieldset class="io-modes">
           <legend>If the bookmark already exists in the vault</legend>
@@ -293,7 +351,7 @@
             <input type="radio" name="io-mode" value="newest">
             <span><b>Keep the newest</b><em>last edited wins</em></span>
           </label>
-          <label>
+          <label id="io-mode-replace">
             <input type="radio" name="io-mode" value="replace">
             <span><b>Replace everything</b><em>anything not in the file is removed</em></span>
           </label>

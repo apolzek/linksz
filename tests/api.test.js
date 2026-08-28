@@ -269,15 +269,15 @@ test('isolation between users', async () => {
   assert.equal(still.body.item.title, 'Grafana', 'the owner still has the bookmark intact');
 });
 
-test('two-way sync between two clients (web <-> desktop)', async () => {
+test('two-way sync between two clients', async () => {
   const a = await call('POST', '/api/sync', {
     token,
-    body: { since: 0, changes: [{ id: 'uuid-desktop-1', url: 'https://zed.dev', title: 'Zed', tags: 'editor', category: 'dev', updated_at: Date.now() }] },
+    body: { since: 0, changes: [{ id: 'uuid-client-1', url: 'https://zed.dev', title: 'Zed', tags: 'editor', category: 'dev', updated_at: Date.now() }] },
   });
   assert.equal(a.body.pushed, 1);
 
   const b = await call('POST', '/api/sync', { token, body: { since: 0, changes: [] } });
-  assert.ok(b.body.changes.some((c) => c.id === 'uuid-desktop-1'));
+  assert.ok(b.body.changes.some((c) => c.id === 'uuid-client-1'));
 
   const c = await call('POST', '/api/sync', { token, body: { since: b.body.now, changes: [] } });
   assert.equal(c.body.changes.length, 0, 'an incremental sync does not resend what was already seen');
@@ -398,18 +398,115 @@ test('importing our own export changes nothing', async () => {
   assert.ok(r.body.summary.same > 0, 'everything matches itself');
 });
 
-test('import reads the browser format', async () => {
-  const html = `<!DOCTYPE NETSCAPE-Bookmark-file-1>
+const CHROME_FILE = `<!DOCTYPE NETSCAPE-Bookmark-file-1>
 <DL><p>
     <DT><H3>navegador</H3>
     <DL><p>
         <DT><A HREF="https://veio-do-chrome.com" ADD_DATE="1700000000">Do Chrome</A>
     </DL><p>
 </DL><p>`;
-  const r = await call('POST', '/api/import', { token, body: { content: html, apply: true } });
+
+test('the browser flow reads the browser format', async () => {
+  const r = await call('POST', '/api/import', {
+    token,
+    body: { content: CHROME_FILE, source: 'browser', apply: true },
+  });
+  assert.equal(r.body.source, 'browser');
   assert.equal(r.body.format, 'html');
   assert.equal(r.body.summary.create, 1);
   assert.deepEqual(await q('/navegador'), ['Do Chrome'], 'the browser folder became the vault folder');
+});
+
+test('the browser flow can drop the whole tree under a folder', async () => {
+  const r = await call('POST', '/api/import', {
+    token,
+    body: { content: CHROME_FILE, source: 'browser', folderPrefix: '/chrome//', apply: false },
+  });
+  assert.equal(r.body.file.prefix, 'chrome', 'the prefix is normalised the way a folder is');
+  assert.equal(r.body.file.count, 1);
+  assert.equal(r.body.file.folders, 1);
+});
+
+test('the browser flow also reads the browser\'s own profile file', async () => {
+  const profile = JSON.stringify({
+    checksum: 'x',
+    roots: {
+      bookmark_bar: {
+        type: 'folder',
+        name: 'Bookmarks bar',
+        children: [{
+          type: 'folder',
+          name: 'Perfil',
+          children: [{ type: 'url', name: 'Do perfil', url: 'https://veio-do-perfil.com', date_added: '13428098755418102' }],
+        }],
+      },
+      other: { type: 'folder', name: 'Other bookmarks', children: [] },
+    },
+  });
+  const r = await call('POST', '/api/import', {
+    token,
+    body: { content: profile, source: 'browser', apply: true },
+  });
+  assert.equal(r.body.format, 'chrome', 'told apart from the vault\'s own JSON');
+  assert.equal(r.body.summary.create, 1);
+  // No "Bookmarks bar" above it: the browser's roots are not folders.
+  assert.deepEqual(await q('/Perfil'), ['Do perfil']);
+});
+
+test('a file in the wrong flow is refused, and told where it belongs', async () => {
+  const asVault = await call('POST', '/api/import', { token, body: { content: CHROME_FILE } });
+  assert.equal(asVault.status, 400);
+  assert.match(asVault.body.error, /From a browser/, 'it points at the other flow');
+  assert.doesNotMatch(asVault.body.error, /could not read/, 'the file is not broken, only misfiled');
+
+  const asBrowser = await call('POST', '/api/import', {
+    token,
+    body: { content: 'bookmarks: []', source: 'browser' },
+  });
+  assert.equal(asBrowser.status, 400);
+  assert.match(asBrowser.body.error, /From this app/);
+});
+
+test('a browser file may never replace the vault', async () => {
+  const r = await call('POST', '/api/import', {
+    token,
+    body: { content: CHROME_FILE, source: 'browser', mode: 'replace' },
+  });
+  assert.equal(r.status, 400);
+  assert.match(r.body.error, /cannot replace the vault/);
+});
+
+test('a browser import brings no category, whatever the file says', async () => {
+  const withTags = `<!DOCTYPE NETSCAPE-Bookmark-file-1>
+<DL><p>
+    <DT><H3>infra</H3>
+    <DL><p>
+        <DT><A HREF="https://k8s.io" TAGS="k8s,devops">Kubernetes</A>
+    </DL><p>
+</DL><p>`;
+  const r = await call('POST', '/api/import', {
+    token,
+    body: { content: withTags, source: 'browser', folderPrefix: 'chrome', apply: true },
+  });
+  assert.equal(r.body.summary.create, 1);
+  assert.equal(r.body.file.tagged, 1, 'tags survive when the browser wrote them');
+
+  const found = await call('GET', '/api/bookmarks?q=kubernetes', { token });
+  const b = found.body.items.find((x) => x.url.includes('k8s.io'));
+  assert.equal(b.category, '', 'the format has no categories, so neither does the import');
+  assert.equal(b.folder, 'chrome/infra', 'the prefix sits above the browser tree');
+});
+
+test('the preview says what the file carries before anything is written', async () => {
+  const r = await call('POST', '/api/import', {
+    token,
+    body: { content: CHROME_FILE, source: 'browser' },
+  });
+  assert.deepEqual(
+    { count: r.body.file.count, folders: r.body.file.folders, unfiled: r.body.file.unfiled },
+    { count: 1, folders: 1, unfiled: 0 },
+  );
+  assert.equal(r.body.applied, false);
 });
 
 test('import gives a useful error on a broken file', async () => {
@@ -545,6 +642,85 @@ test('index points at the manifest, the icon and a mobile viewport', async () =>
   assert.match(html, /apple-touch-icon/, 'iOS uses this icon on the home screen');
   assert.match(html, /viewport-fit=cover/, 'sem isso o content some atras do notch');
   assert.match(html, /theme-color/);
+});
+
+/* ---------------- cors ---------------- */
+
+// Boots an app on a throwaway database with the environment of the moment, so
+// each case sees the allowlist it is about.
+async function withApp(env, fn) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bookmarks-cors-'));
+  const before = {};
+  for (const [k, v] of Object.entries(env)) { before[k] = process.env[k]; process.env[k] = v; }
+  const app = createApp(path.join(dir, 'bookmarks.db'));
+  try {
+    await new Promise((r) => app.server.listen(0, '127.0.0.1', r));
+    await fn(`http://127.0.0.1:${app.server.address().port}`);
+  } finally {
+    app.server.close();
+    app.db.close();
+    for (const [k, v] of Object.entries(before)) {
+      if (v === undefined) delete process.env[k]; else process.env[k] = v;
+    }
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+test('by default no origin is allowed to read the API from a browser', async () => {
+  await withApp({}, async (url) => {
+    const r = await fetch(url + '/api/health', { headers: { origin: 'https://evil.example' } });
+    assert.equal(r.status, 200, 'the request still answers, curl and scripts are not the threat');
+    assert.equal(r.headers.get('access-control-allow-origin'), null,
+      'without this header the browser refuses to hand the body to the page');
+    assert.equal(r.headers.get('vary'), 'Origin');
+  });
+});
+
+test('a listed origin is allowed, one letter off is not', async () => {
+  await withApp({ BOOKMARKS_ALLOWED_ORIGINS: 'https://app.example, https://other.example/' }, async (url) => {
+    const yes = await fetch(url + '/api/health', { headers: { origin: 'https://app.example' } });
+    assert.equal(yes.headers.get('access-control-allow-origin'), 'https://app.example');
+
+    // The trailing slash in the variable is tolerated; the origin still matches.
+    const slash = await fetch(url + '/api/health', { headers: { origin: 'https://other.example' } });
+    assert.equal(slash.headers.get('access-control-allow-origin'), 'https://other.example');
+
+    const no = await fetch(url + '/api/health', { headers: { origin: 'https://app.example.evil' } });
+    assert.equal(no.headers.get('access-control-allow-origin'), null);
+  });
+});
+
+test('the preflight answers only for an allowed origin', async () => {
+  await withApp({ BOOKMARKS_ALLOWED_ORIGINS: 'https://app.example' }, async (url) => {
+    const yes = await fetch(url + '/api/bookmarks', {
+      method: 'OPTIONS',
+      headers: { origin: 'https://app.example', 'access-control-request-method': 'POST' },
+    });
+    assert.equal(yes.status, 204);
+    assert.equal(yes.headers.get('access-control-allow-origin'), 'https://app.example');
+    assert.match(yes.headers.get('access-control-allow-methods'), /POST/);
+
+    const no = await fetch(url + '/api/bookmarks', {
+      method: 'OPTIONS',
+      headers: { origin: 'https://evil.example', 'access-control-request-method': 'POST' },
+    });
+    assert.equal(no.headers.get('access-control-allow-origin'), null);
+  });
+});
+
+test('* opens it back up, for whoever decides they want that', async () => {
+  await withApp({ BOOKMARKS_ALLOWED_ORIGINS: '*' }, async (url) => {
+    const r = await fetch(url + '/api/health', { headers: { origin: 'https://anywhere.example' } });
+    assert.equal(r.headers.get('access-control-allow-origin'), 'https://anywhere.example');
+  });
+});
+
+test('the static files carry no CORS header either', async () => {
+  await withApp({}, async (url) => {
+    const r = await fetch(url + '/manifest.webmanifest', { headers: { origin: 'https://evil.example' } });
+    assert.equal(r.status, 200);
+    assert.equal(r.headers.get('access-control-allow-origin'), null);
+  });
 });
 
 /* ---------------- test account ---------------- */

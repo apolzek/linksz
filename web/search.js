@@ -1,6 +1,6 @@
 // Shared search engine: runs on Node (server) and in the browser (web).
-// The equivalent Python version lives in desktop/bookmarks_search.py and MUST return
-// exactly the same results; tests/test_desktop.py compares the two.
+// One file, two runtimes: the api image copies it out of web/, which is why the
+// api is built from the repository root.
 'use strict';
 
 // ---------------------------------------------------------------------------
@@ -32,7 +32,7 @@ const ANY_WEIGHTS = [
 // Usage ranking. A bookmark you keep opening is the one you probably want, so
 // its score gets a bonus. It saturates on purpose: after USAGE_CAP opens an old
 // favourite stops climbing, otherwise it would bury better matches forever.
-// Integers only, because the Python twin has to produce the same order.
+// Integers only, so the order is exactly reproducible.
 const USAGE_STEP = 3;
 const USAGE_CAP = 12;
 
@@ -57,9 +57,9 @@ const FIELD_ALIASES = {
 
 const QUOTES = '"\'';
 
-// Whitespace spelled out by hand (instead of /\s/ and isspace()) because the
-// two languages disagree on corners like U+0085 and U+FEFF, and JS <-> Python
-// parity has to hold for any input.
+// Whitespace spelled out by hand instead of /\s/: the regex class has moved
+// between engine versions on corners like U+0085 and U+FEFF, and tokenizing has
+// to be stable for any input.
 const WHITESPACE =
   ' \t\n\v\f\r\u00a0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006'
   + '\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000\ufeff';
@@ -222,7 +222,7 @@ function search(bookmarks, q, limit = 50) {
   }
 
   // Ties break by recency. Beyond that the sort is stable in both languages, so
-  // input order decides the rest and parity holds.
+  // input order decides the rest and the sort stays stable.
   out.sort((a, b) =>
     (b.score - a.score) ||
     ((Number(b.bookmark.updated_at) || 0) - (Number(a.bookmark.updated_at) || 0)));

@@ -8,7 +8,7 @@ ARG BOOKMARKS_COMMIT=""
 ARG BOOKMARKS_DEPLOYED_AT=""
 
 LABEL org.opencontainers.image.title="Bookmarks web" \
-      org.opencontainers.image.description="Your bookmarks, one keystroke away" \
+      org.opencontainers.image.description="Self-hosted bookmark manager with instant substring search" \
       org.opencontainers.image.source="https://github.com/nochaosio/bookmarks.nochaos.io" \
       org.opencontainers.image.revision="${BOOKMARKS_COMMIT}" \
       org.opencontainers.image.created="${BOOKMARKS_DEPLOYED_AT}"

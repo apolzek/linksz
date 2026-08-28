@@ -1,36 +1,76 @@
-# Running in containers
+# Running it
 
-Three images, each versioned by the last commit that touched it:
+Two images, each versioned by the last commit that touched it:
 
     nochaos/bookmarks-api      the backend
     nochaos/bookmarks-web      nginx: the PWA, and /api proxied to the api
-    nochaos/bookmarks-proxy    caddy: TLS, so the PWA installs anywhere
 
+From a clone that builds them:
+
+    git clone git@github.com:nochaosio/bookmarks.nochaos.io.git
+    cd bookmarks.nochaos.io
+    cp .env.example .env        # optional, see The vault below
     docker compose up -d --build
 
-From a clone that builds them, or from the published ones with no clone at all:
+Then open http://localhost:8080 and sign in with `teste` / `teste123`, or
+register your own account.
+
+From the published images, with no clone at all:
 
     services:
       api:
         image: nochaos/bookmarks-api:latest
+        user: "1000:1000"
         environment:
           BOOKMARKS_HOST: 0.0.0.0
           BOOKMARKS_DB: /data/bookmarks.db
-        volumes: [bookmarks-data:/data]
+        volumes: ["./data:/data"]
       web:
         image: nochaos/bookmarks-web:latest
         depends_on: { api: { condition: service_healthy } }
-      proxy:
-        image: nochaos/bookmarks-proxy:latest
-        depends_on: { web: { condition: service_healthy } }
-        environment:
-          BOOKMARKS_SITE: 192.168.0.10
-        ports: ["80:80", "443:443"]
-        volumes: [caddy-data:/data, caddy-config:/config]
+        ports: ["8080:80"]
 
-## The PWA does work here
+## The vault
 
-It is worth stating plainly, because the shape of the stack suggests otherwise.
+`BOOKMARKS_VAULT_DIR` is a directory on the host, mounted at `/data` in the api
+container, and `bookmarks.db` inside it is the whole vault. Without a `.env` it
+is `./data` next to the compose file; `.env.example` is the shape of the file
+that moves it:
+
+    BOOKMARKS_VAULT_DIR=/home/you/.local/share/bookmarks
+    BOOKMARKS_UID=1000        # id -u
+    BOOKMARKS_GID=1000        # id -g
+
+A directory and not the file itself, because SQLite writes `bookmarks.db-wal`
+and `bookmarks.db-shm` next to it, and a single-file mount would strand those
+inside the container.
+
+The uid matters. The image has its own unprivileged user, which owns nothing on
+your disk, so the api runs as `BOOKMARKS_UID:BOOKMARKS_GID` instead: the user
+who owns the vault directory. Get them wrong and the api starts and then fails
+to open the database.
+
+Copying a vault in is copying a file:
+
+    docker compose down
+    cp somewhere/bookmarks.db "$BOOKMARKS_VAULT_DIR/bookmarks.db"
+    docker compose up -d
+
+Copy the `-wal` file with it, or checkpoint it first, or the last writes are
+still in it and not in the vault:
+
+    node -e "new (require('node:sqlite').DatabaseSync)('bookmarks.db').prepare('PRAGMA wal_checkpoint(TRUNCATE)').get()"
+
+## Why two containers
+
+nginx serves the PWA and proxies `/api` to the backend, so the browser talks to
+one origin: same-origin is what the session token and the service worker want,
+and it is why the api publishes no port of its own. The api image carries the
+backend and `web/search.js`, the one file both sides share, not the whole
+frontend.
+
+## The PWA installs here
+
 A PWA installs, and a service worker registers, only in a **secure context**,
 which means https or localhost. Measured on this stack, same build, same
 browser:
@@ -38,56 +78,65 @@ browser:
     http://localhost:8080          secure context: yes    service worker: registers
     http://192.168.0.10:8080       secure context: no     navigator.serviceWorker: absent
 
-So there are two ways to get the app, and both work:
+So on the machine running it, http://localhost:8080 is an app: installable,
+with the shell cached and working offline. The data still comes from the API,
+because a bookmark changes and must not be served stale.
 
-* **On this machine**, http://localhost:8080 is already a secure context. The
-  proxy adds nothing: `docker compose up -d api web`.
-* **From a phone, or any other machine**, you need TLS, which is the proxy's
-  entire reason to exist.
-
-## The phone
-
-    1. find this machine's IP:  ip route get 1 | awk '{print $7; exit}'
-    2. BOOKMARKS_SITE=192.168.0.10 docker compose up -d
-    3. on the phone, open http://192.168.0.10/root.crt and install the certificate
-    4. open https://192.168.0.10 and use "Add to home screen"
-
-Step 3 is not optional. Caddy issues the certificate from a CA it generates on
-first boot, and a phone that has not been told to trust that CA refuses the
-HTTPS. On iOS, installing the profile is two steps: Settings > Profile
-Downloaded, then Settings > General > About > Certificate Trust Settings.
-
-The CA lives in the `caddy-data` volume. Deleting that volume issues a new CA
-and every device has to trust the new one.
-
-With a real domain, or a tunnel that already terminates TLS (Tailscale,
-Cloudflare), drop the proxy and point your existing TLS at `web:80`.
+Reaching it from a phone, or from another machine, means putting TLS in front.
+This stack deliberately does not ship one: use a tunnel that already terminates
+TLS (Tailscale, Cloudflare) or a reverse proxy you already run, and point it at
+`web:80`. Over plain HTTP on a LAN address the browser does not even expose
+`navigator.serviceWorker`, so there you get a website, not an app.
 
 ## Environment
 
+    BOOKMARKS_VAULT_DIR       host directory holding bookmarks.db, default ./data
+    BOOKMARKS_UID             uid the api runs as, must own that directory
+    BOOKMARKS_GID             gid to go with it
     BOOKMARKS_HOST            interface the api binds to, 0.0.0.0 in a container
-    BOOKMARKS_PORT            api port, default 8787
-    BOOKMARKS_DB              path to the vault, default /data/bookmarks.db
+    BOOKMARKS_PORT            port the api listens on inside its container, default 8787
+    BOOKMARKS_WEB_PORT        host port nginx is published on, default 8080
+    BOOKMARKS_DB              path to the vault inside the container, default /data/bookmarks.db
+    BOOKMARKS_ALLOWED_ORIGINS origins allowed to call the API from a browser, empty by default
     BOOKMARKS_SEED=0          do not create the test account
     BOOKMARKS_SEED_PASSWORD   password for it, default teste123
-    BOOKMARKS_SITE            hostname or IP the certificate is issued for
     BOOKMARKS_COMMIT          build stamp shown next to the sync light
     BOOKMARKS_DEPLOYED_AT     the other half of that stamp
+
+`BOOKMARKS_PORT` and `BOOKMARKS_WEB_PORT` are different things on purpose: the
+first is internal to the api container, the second is the only port that
+reaches your machine.
 
 The stack seeds a `teste` / `teste123` account on every boot. On a network
 anyone else can reach, set `BOOKMARKS_SEED=0` or change the password before
 leaving it running.
 
-## Data
+## CORS
 
-The vault is a SQLite file in the `bookmarks-data` volume. To back it up
-consistently, without stopping the container:
+The API answers no cross-origin request unless you name the origin. The app
+never needs it: nginx serves the PWA and proxies `/api`, so the browser only
+ever talks to one origin. Something else driving the API from a page is what
+the variable is for, comma separated:
+
+    BOOKMARKS_ALLOWED_ORIGINS=https://notes.example,https://dash.example
+
+`*` answers everyone. A refused origin still gets a normal response on the
+wire, which is why `curl` and scripts are unaffected: what a browser withholds
+from the page is the body of a response with no matching header.
+
+## Backups
+
+The vault is a SQLite file in `BOOKMARKS_VAULT_DIR`, so a copy is a copy. To
+take one consistently, without stopping the container:
 
     docker compose exec api node -e "
       const { DatabaseSync } = require('node:sqlite');
       new DatabaseSync(process.env.BOOKMARKS_DB, { readOnly: true })
         .exec(\"VACUUM INTO '/data/backup.db'\")"
-    docker compose cp api:/data/backup.db ./backup.db
+
+It lands in `BOOKMARKS_VAULT_DIR` next to the vault, because that directory is
+the mount. Copying `bookmarks.db` while the container runs is not a backup: the
+`-wal` beside it holds writes the file does not have yet.
 
 Or export YAML from the web UI, which is the portable form and reads back into
 any vault.
@@ -98,4 +147,14 @@ The published images are `linux/amd64`. On Apple Silicon or a Raspberry Pi they
 run under emulation, when they run at all. Build them locally for your platform
 until the pipeline publishes arm64:
 
-    docker compose build
+    docker compose up -d --build
+
+## Day to day
+
+    docker compose up -d --build     start, or apply a change
+    docker compose logs -f           follow both containers
+    docker compose ps                what is up and healthy
+    docker compose down              stop; the vault is a file on disk and stays
+
+A change under `web/` needs `docker compose up -d --build web`: the PWA is
+baked into the image, not mounted.

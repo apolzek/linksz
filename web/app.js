@@ -1,6 +1,6 @@
 /* Web UI. Strategy: load everything into memory and search locally (instant,
-   no round-trip). Writes go to the server and the sync runs in the background
-   to converge with the desktop app. */
+   no round-trip). Writes go to the server and the sync runs in the background,
+   so two tabs or two browsers converge on the same vault. */
 'use strict';
 
 const $ = (s) => document.querySelector(s);
@@ -152,10 +152,15 @@ function setupTheme() {
 
 setupTheme();
 
+// The light only lights up when there is something to say. `synced` is where it
+// sits almost all the time, and a badge that is always on says nothing; what
+// this element is actually for is work in progress, a failure, and the one-off
+// notes like "moved to /x". Those still show.
 function setSync(text, cls = '') {
   const el = $('#sync-state');
   el.textContent = text;
   el.className = 'sync ' + cls;
+  el.classList.toggle('hidden', text === 'synced');
 }
 
 /* ---------------- auth ---------------- */
@@ -240,11 +245,14 @@ $('#auth-form').onsubmit = (e) => {
 };
 
 // Says up front whether the backend answers, instead of waiting for someone to
-// mistype a password to find out the problem was something else.
+// mistype a password to find out the problem was something else. A backend that
+// is up is the expected case and says nothing: the block appears only while the
+// answer is unknown, or when it is bad news.
 function paintStatus(status, text) {
   const el = $('#auth-status');
   el.className = `status ${status}`;
-  $('#auth-status-text').textContent = text;
+  el.classList.toggle('hidden', status === 'up');
+  $('#auth-status-text').textContent = text || '';
 }
 
 // The build stamp next to the sync light: short commit and the day it went out.
@@ -271,7 +279,7 @@ async function checkServer() {
     const r = await fetch('/api/health', { cache: 'no-store' });
     const body = await r.json();
     $('#auth-offline').classList.add('hidden');
-    paintStatus('up', `backend up at ${location.origin}`);
+    paintStatus('up');
 
     showBuild(body.build);
 
@@ -286,7 +294,7 @@ async function checkServer() {
   } catch {
     $('#auth-offline').classList.remove('hidden');
     $('#auth-demo').classList.add('hidden');
-    paintStatus('down', `backend down at ${location.origin}`);
+    paintStatus('down', 'the backend is not answering');
     return false;
   }
 }
@@ -336,7 +344,7 @@ async function loadAll() {
   render();
 }
 
-// Pulls only what changed since the last sync (including desktop changes).
+// Pulls only what changed since the last sync, including another client's writes.
 async function pullChanges() {
   try {
     const r = await api('/api/sync', {
@@ -480,6 +488,17 @@ function render() {
       if (moved > 4 || String(getSelection())) return;
       state.sel = i;
       openSelected(e.ctrlKey || e.metaKey);
+    };
+    // The wheel button opens in a new tab everywhere else on the web, so it does
+    // here too, the same as Ctrl+Enter. Two things it needs: the event is
+    // `auxclick`, not `click`, and the mousedown has to be swallowed or the
+    // browser starts its autoscroll on top of the result.
+    li.onmousedown = (e) => { if (e.button === 1) e.preventDefault(); };
+    li.onauxclick = (e) => {
+      if (e.button !== 1) return;
+      e.preventDefault();
+      state.sel = i;
+      openSelected(true);
     };
     li.oncontextmenu = (e) => { e.preventDefault(); openModal(b); };
 
@@ -1213,8 +1232,37 @@ $('#bm-form').onsubmit = async (e) => {
   }
 };
 
+// Asks in the app's own modal and answers with a promise, so the callers read
+// like the confirm() they replaced. Only one question can be open at a time,
+// which is all this app ever needs.
+let pendingConfirm = null;
+
+function askDelete(what) {
+  $('#confirm-what').textContent = what;
+  $('#confirm-modal').classList.remove('hidden');
+  // Cancel takes the focus on purpose: Ctrl+Del is one keystroke away from
+  // here, and Enter landing on `delete` would make the question decorative.
+  $('#confirm-cancel').focus();
+  return new Promise((resolve) => { pendingConfirm = resolve; });
+}
+
+function closeConfirm(answer) {
+  if (!pendingConfirm) return;
+  const resolve = pendingConfirm;
+  pendingConfirm = null;
+  $('#confirm-modal').classList.add('hidden');
+  $('#q').focus();
+  resolve(answer);
+}
+
+$('#confirm-ok').onclick = () => closeConfirm(true);
+$('#confirm-cancel').onclick = () => closeConfirm(false);
+// The backdrop is everything outside the card, and clicking it is a cancel.
+$('#confirm-modal').onclick = (e) => { if (e.target === $('#confirm-modal')) closeConfirm(false); };
+
 async function removeBookmark(b) {
-  if (!b || !confirm(`Delete "${b.title || b.url}"?`)) return;
+  if (!b) return;
+  if (!await askDelete(b.title || b.url)) return;
   setSync('saving…', 'saving');
   try {
     await api(`/api/bookmarks/${b.id}`, { method: 'DELETE' });
@@ -1255,6 +1303,19 @@ $('#q').onblur = () => { state.suggestOff = true; renderSuggest(); };
 
 /* ---------------- keyboard ---------------- */
 document.addEventListener('keydown', (e) => {
+  // The question comes first: while it is open nothing else may act, or Esc
+  // would close something underneath and leave it hanging.
+  if (!$('#confirm-modal').classList.contains('hidden')) {
+    if (e.key === 'Escape') closeConfirm(false);
+    // Enter means "the button under the focus", spelled out instead of left to
+    // the browser's native activation, which does not fire for every way a key
+    // can arrive. Focus starts on cancel, so Enter answers no until you Tab.
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      closeConfirm(document.activeElement === $('#confirm-ok'));
+    }
+    return;
+  }
   if (!$('#insights-modal').classList.contains('hidden')) {
     if (e.key === 'Escape') closeInsights();
     return;
@@ -1279,6 +1340,26 @@ document.addEventListener('keydown', (e) => {
     return;
   }
 
+  // Edit and delete need to work while typing, which is where the caret spends
+  // its whole life here: the search box takes focus on boot and after most
+  // actions. A letter cannot do that job, so each one has a key that is not a
+  // letter, and keeps its letter for when the caret is somewhere else.
+  //
+  // F2 is the rename key everywhere else, and no browser claims it. Delete gets
+  // Ctrl, because deleting by accident costs more than one keystroke saved.
+  if (e.key === 'F2' || (!inSearch && e.key === 'e')) {
+    e.preventDefault();
+    if (state.results[state.sel]) openModal(state.results[state.sel]);
+    return;
+  }
+  // Delete on its own is the forward-delete of a text field. Firing it there
+  // asked, mid-word, whether to throw away a bookmark nobody was looking at.
+  if (e.key === 'Delete' && (e.ctrlKey || e.metaKey || !inSearch)) {
+    e.preventDefault();
+    removeBookmark(state.results[state.sel]);
+    return;
+  }
+
   if (e.key === 'ArrowDown' || (e.ctrlKey && e.key === 'n')) {
     e.preventDefault();
     moveSel(1);
@@ -1300,12 +1381,6 @@ document.addEventListener('keydown', (e) => {
   } else if (!inSearch && e.key === 'b') {
     e.preventDefault();
     setBrowseOpen($('#browse').classList.contains('off'));
-  } else if (!inSearch && e.key === 'e') {
-    e.preventDefault();
-    if (state.results[state.sel]) openModal(state.results[state.sel]);
-  } else if (e.key === 'Delete') {
-    e.preventDefault();
-    removeBookmark(state.results[state.sel]);
   } else if (!inSearch && e.key.length === 1) {
     $('#q').focus();
   }
@@ -1425,6 +1500,8 @@ function renderInsights(r) {
 
 function closeInsights() {
   $('#insights-modal').classList.add('hidden');
+  // Like the other two: the caret goes back where the app expects it.
+  $('#q').focus();
 }
 
 $('#btn-insights').onclick = () => openInsights();
@@ -1434,7 +1511,7 @@ for (const b of document.querySelectorAll('.ins-range button')) {
 }
 
 /* ---------------- import / export ---------------- */
-const io = { content: '', name: '', plan: null };
+const io = { content: '', name: '', plan: null, source: 'native' };
 
 function fileName(res, fallback) {
   const m = /filename="([^"]+)"/.exec(res.headers.get('content-disposition') || '');
@@ -1478,7 +1555,16 @@ function chosenMode() {
 async function requestPlan({ apply = false } = {}) {
   return api('/api/import', {
     method: 'POST',
-    body: JSON.stringify({ content: io.content, mode: chosenMode(), apply }),
+    body: JSON.stringify({
+      content: io.content,
+      mode: chosenMode(),
+      apply,
+      // Which of the two questions is being asked. The server refuses the file
+      // that belongs to the other one instead of guessing, because a browser
+      // file read as a vault file looks like a vault that lost its categories.
+      source: io.source,
+      folderPrefix: io.source === 'browser' ? $('#io-prefix').value : '',
+    }),
   });
 }
 
@@ -1490,8 +1576,23 @@ const LABELS = {
   remove: ['removed from the vault', 'removed from the vault'],
 };
 
+// What the file turned out to carry, said before what will be done with it.
+// For a browser export this is where "no categories" stops being something
+// discovered later, in the vault.
+function renderFileStats(plan) {
+  const f = plan.file || {};
+  const parts = [`${f.count} bookmark(s)`, `${f.folders} folder(s)`];
+  if (f.unfiled) parts.push(`${f.unfiled} outside any folder`);
+  parts.push(f.tagged ? `${f.tagged} with tags` : 'no tags');
+  if (plan.source === 'browser') parts.push('no categories, the format has none');
+  else if (f.described) parts.push(`${f.described} with a description`);
+  if (f.prefix) parts.push(`all of it under /${f.prefix}`);
+  $('#io-file-stats').textContent = parts.join(' · ');
+}
+
 function renderPlan(plan) {
   io.plan = plan;
+  renderFileStats(plan);
   const r = plan.summary;
   const ul = $('#io-summary');
   ul.innerHTML = '';
@@ -1544,7 +1645,7 @@ async function previewFile() {
   }
 }
 
-function openIo() {
+function resetIoFile() {
   io.content = '';
   io.name = '';
   io.plan = null;
@@ -1553,6 +1654,43 @@ function openIo() {
   $('#io-error').textContent = '';
   $('#io-plan').classList.add('hidden');
   $('#io-apply').disabled = true;
+  $('#io-apply').textContent = 'import';
+}
+
+// Picks which of the two imports is being done and reshapes the form around it.
+// The two files have different powers, so the questions asked about them differ:
+// only a browser tree can be dropped under a folder of your own, and only a
+// vault file is allowed to replace the vault.
+function setIoSource(source) {
+  io.source = source;
+  for (const tab of document.querySelectorAll('[data-io-source]')) {
+    const on = tab.dataset.ioSource === source;
+    tab.classList.toggle('on', on);
+    tab.setAttribute('aria-selected', String(on));
+  }
+  $('#io-src-native-hint').classList.toggle('hidden', source !== 'native');
+  $('#io-prefix-row').classList.toggle('hidden', source !== 'browser');
+
+  // "Replace everything" is off the menu for a browser file: it knows nothing
+  // about the bookmarks it would be deleting. The server refuses it too, and
+  // this keeps that refusal from being how anyone finds out.
+  $('#io-mode-replace').classList.toggle('hidden', source === 'browser');
+  $('#io-browser-note').classList.toggle('hidden', source !== 'browser');
+  if (source === 'browser' && chosenMode() === 'replace') {
+    document.querySelector('input[name="io-mode"][value="add"]').checked = true;
+  }
+
+  // No filter on the browser flow: one of the two files it reads is the
+  // browser's own `Bookmarks`, which has no extension at all, and an accept
+  // list would hide exactly the file people go looking for first.
+  $('#io-file').accept = source === 'browser' ? '' : '.yaml,.yml,.json,application/json';
+
+  // Whatever was loaded was an answer to the other question.
+  resetIoFile();
+}
+
+function openIo() {
+  setIoSource('native');
   $('#io-modal').classList.remove('hidden');
 }
 
@@ -1578,6 +1716,27 @@ document.querySelectorAll('input[name="io-mode"]').forEach((r) => {
   // Switching the mode recomputes the plan: the numbers change in front of the user.
   r.onchange = previewFile;
 });
+
+document.querySelectorAll('[data-io-source]').forEach((tab) => {
+  tab.onclick = () => setIoSource(tab.dataset.ioSource);
+});
+
+// A prefix moves every folder in the file, so the plan is recomputed as it is
+// typed. Debounced, because otherwise each keystroke re-parses a file that can
+// be megabytes.
+// One click for the common wish: keep this import together, and dated, so it
+// can be found and undone later without guessing which folders came from where.
+$('#io-prefix-dated').onclick = () => {
+  const today = new Date().toISOString().slice(0, 10);
+  $('#io-prefix').value = `Imported-${today}`;
+  if (io.content) previewFile();
+};
+
+let prefixTimer = null;
+$('#io-prefix').oninput = () => {
+  clearTimeout(prefixTimer);
+  prefixTimer = setTimeout(() => { if (io.content) previewFile(); }, 400);
+};
 
 $('#io-apply').onclick = async () => {
   const btn = $('#io-apply');
@@ -1614,8 +1773,27 @@ function fitPlaceholder() {
 function registerServiceWorker() {
   if (!('serviceWorker' in navigator)) return;
   // A service worker only exists in a secure context: https or localhost. On
-  // http://<lan-ip> the browser ignores it, which is why the compose adds TLS.
+  // http://<lan-ip> the browser ignores it, so there is nothing to register and
+  // nothing to cache.
   if (!window.isSecureContext) return;
+
+  // Whether a worker is already driving this page decides what happens below.
+  // Read it now: by the time the new one claims, it is too late to tell a first
+  // install apart from a version change.
+  const hadController = !!navigator.serviceWorker.controller;
+  let reloading = false;
+
+  // A new worker takes over as soon as it installs (sw.js calls skipWaiting),
+  // but the page is already painted with whatever the old one served, which is
+  // the previous version of the shell. Without this reload a deploy needs two
+  // of them by hand: one to install the new worker, one to finally see it. On a
+  // first install there is no stale page to replace, so it stays put.
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (!hadController || reloading) return;
+    reloading = true;
+    location.reload();
+  });
+
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('/sw.js').catch(() => {});
   });

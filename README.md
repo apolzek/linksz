@@ -1,32 +1,27 @@
 # Bookmarks
 
-Your bookmarks, one keystroke away.
-
-Self-hosted bookmark manager with instant substring search. Two frontends over
-the same vault: a Spotlight-style launcher bar on Linux, and a PWA in the
-browser served by the same backend. No dependencies, no accounts anywhere but
-your own machine.
+Self-hosted bookmark manager with instant substring search, served as a PWA that
+installs and works offline. No dependencies, no accounts anywhere but your own
+machine.
 
 ## Running it
 
-Linux, macOS or Docker, each with its own page:
-
-    docs/linux.md         systemd service, resident bar, Super+Space
-    docs/macos.md         LaunchAgents, Bookmarks Bar.app, manual shortcut
-    docs/containers.md    the three images, the phone, TLS
-
-The short version on Linux:
+Docker, two containers:
 
     git clone git@github.com:nochaosio/bookmarks.nochaos.io.git
     cd bookmarks.nochaos.io
-    mise install
-    bash desktop/install.sh
+    docker compose up -d --build
 
-That puts the backend on http://127.0.0.1:8787 as a user service, the bar on
-autostart behind Super+Space, and the PWA one click away in the browser. Sign
-in with the test account `teste` / `teste123`, or register your own.
+Open http://localhost:8080 and sign in with the test account `teste` /
+`teste123`, or register your own.
 
-## HTTPS is what makes it an app
+The vault is a plain SQLite file in a directory on your machine, mounted into
+the api container. By default that is `./data`; to point it at one you already
+have, copy `.env.example` to `.env` and set `BOOKMARKS_VAULT_DIR` along with
+the uid that owns it. `docs/containers.md` has the rest: the published images,
+the environment, backups.
+
+## It is an app, not a page
 
 A PWA installs, and a service worker registers, only in a secure context:
 https, or localhost. Measured on this stack, same build, same browser:
@@ -34,33 +29,21 @@ https, or localhost. Measured on this stack, same build, same browser:
     http://localhost:8080          secure context: yes    service worker: registers
     http://192.168.0.10:8080       secure context: no     navigator.serviceWorker: absent
 
-So on your own machine plain HTTP is fine, localhost is trusted by definition.
-From a phone, or any other machine, it is not, and without TLS you get a
-website instead of an app: no offline, no install. That is the whole reason the
-docker stack ships a caddy in front, issuing a certificate from its own CA and
-handing that CA to the phone at http://<ip>/root.crt. See docs/containers.md.
-
-## The bar
-
-Super+Space, type, Enter opens the link. Up and down or Tab navigate, Ctrl+C
-copies the URL, Ctrl+R forces a sync, Esc clears the search and closes when the
-search is already empty.
-
-The bar reads and never writes: creating, editing and deleting live in the web
-UI. It connects to the account in `~/.config/bookmarks/config.json`, so it never
-asks anyone to sign in:
-
-    server: http://127.0.0.1:8787
-    username: your-user
-    password: your-password
-
-After the first run the token is stored there and the password can go.
+On the machine running it, localhost is trusted by definition, so you get the
+install prompt and the shell works offline. Reaching it from a phone or another
+machine needs TLS, and this stack does not ship one: put a tunnel that already
+terminates TLS (Tailscale, Cloudflare) or a reverse proxy you already run in
+front of `web:80`.
 
 ## The web UI
 
-Up and down navigate, Enter opens, Ctrl+Enter opens in a new tab, `e` edits,
-Del deletes, `n` creates, `b` toggles the panel, `/` focuses the search,
-Ctrl+C clears it. Type `help` for the rest.
+Up and down navigate, Enter opens, Ctrl+Enter opens in a new tab, F2 edits the
+selected link, Ctrl+Del deletes it, `n` creates, `b` toggles the panel, `/`
+focuses the search, Ctrl+C clears it. Type `help` for the rest.
+
+Edit and delete are not letters because the caret lives in the search box: it
+takes focus on boot and after most actions, so a letter there is text, not a
+command. With the caret somewhere else, `e` and `Del` do the same two.
 
 The left panel lists every folder, category and tag in the vault. Sections fold
 by clicking their heading. Dragging a folder onto another one nests it, and
@@ -76,8 +59,8 @@ The theme picker carries the four Catppuccin flavours, a matrix one, and
 
 ## Search
 
-The same syntax in the bar, the web UI and the API. Everything is substring,
-case and accent insensitive, and terms combine with AND.
+The same syntax in the web UI and the API. Everything is substring, case and
+accent insensitive, and terms combine with AND.
 
     kuber              title, URL, tags, category, folder or description
     #devops            tags only
@@ -89,8 +72,35 @@ case and accent insensitive, and terms combine with AND.
 
 ## Import and export
 
-YAML, browser HTML and JSON, in both directions. The YAML groups entries by
-folder, so the file is the tree written down:
+Export is YAML, browser HTML or JSON. Import comes in two flows, because the
+two files are not the same thing and pretending otherwise loses data:
+
+    From this app     YAML or JSON exported here. Ids, folders, categories,
+                      tags, descriptions and counters all survive.
+    From a browser    two files work: the HTML Chrome, Firefox, Edge and
+                      Safari export, and the browser's own `Bookmarks` file
+                      from its profile directory, which on Linux is
+                      ~/.config/google-chrome/Default/Bookmarks (no extension,
+                      so pick "All files" if the dialog hides it). Either way
+                      you get the folder tree, the title, the URL and the date.
+                      No categories: the format has none. Tags only where the
+                      browser wrote them. No ids, so an existing bookmark is
+                      matched by its URL.
+
+Pick the flow before the file. A file offered to the wrong one is refused with
+a pointer to the other, never read on a best effort, because a browser file
+read as a vault file looks like a vault that lost its categories, and importing
+that with "Use the file" would erase them for real.
+
+The browser flow can drop the whole imported tree under a folder of your own,
+and it is not allowed to replace the vault: it knows nothing about the
+bookmarks it would be deleting. It also may add but never take away. The
+default, "Keep what is here", only creates what is missing; and even when told
+to overwrite, a browser file cannot blank a category, a tag or a note on a
+bookmark that already has one, because the format has no way to say those and
+silence is not an instruction.
+
+The YAML groups entries by folder, so the file is the tree written down:
 
     folders:
       technology/infrastructure/observability:
@@ -104,56 +114,49 @@ When importing a file you edited by hand, choose "Use the file": with equal
 dates the other modes keep what the vault already has and your edits are
 skipped.
 
-## Run it by hand
-
-    mise run server    backend + web UI on http://127.0.0.1:8787
-    mise run bar       opens the bar
-    mise run test      the whole suite
-    mise run up        the docker stack, api + web + proxy
-
 ## Layout
 
     api/        backend: HTTP, SQLite, import/export. Node built-ins only
-    web/        the PWA, and the nginx image that serves it in Docker
-    proxy/      caddy with TLS, so a phone can install the PWA
-    desktop/    the GTK/Tk bar and its installers
-    docs/       how to run it on linux, on macos, in containers
+    web/        the PWA, and the nginx image that serves it
+    docs/       how to run it
     tests/      one suite for all of it: bash tests/run.sh
+    data/       the vault, unless .env points somewhere else (not committed)
 
-The search engine is written twice, `web/search.js` and
-`desktop/bookmarks_search.py`, so the bar answers offline exactly like the web
-does. A parity test compares them on random vaults and queries.
+## Day to day
 
-## Where things live
+    mise run up        the stack on http://localhost:8080
+    mise run logs      follow both containers
+    mise run down      stop it
+    mise run test      the suite
+    mise run test-all  the suite plus the browser and the docker stack
 
-    ~/.local/share/bookmarks/bookmarks.db    the vault
-    ~/.local/share/bookmarks/cache.db        the bar's local copy
-    ~/.config/bookmarks/config.json          the bar's config
-    systemctl --user status bookmarks        the backend
+`mise` only pins Node 24 for the test suite; the app itself needs nothing but
+Docker. Without mise, the same commands are `docker compose up -d --build` and
+`bash tests/run.sh`.
 
-Environment: `BOOKMARKS_PORT`, `BOOKMARKS_HOST`, `BOOKMARKS_DB`,
-`BOOKMARKS_SEED=0` to skip the test account, and `BOOKMARKS_COMMIT` /
-`BOOKMARKS_DEPLOYED_AT` for a pipeline to stamp the build shown next to the
-sync light.
+Environment variables live in `.env` and are documented in
+`docs/containers.md`. The short version: `BOOKMARKS_VAULT_DIR` is where the
+vault file lives, `BOOKMARKS_WEB_PORT` moves the published port,
+`BOOKMARKS_SEED=0` skips the test account.
+
+The API answers no cross-origin request unless `BOOKMARKS_ALLOWED_ORIGINS`
+names the origin. The app never needs it, being same-origin behind nginx; it is
+there for something else that wants to drive the API from a page.
 
 ## Images
 
-Locally the backend serves the PWA itself on 8787 and there is no proxy. In
-Docker the parts are split, and each one is versioned by the last commit that
-touched it, so a frontend release leaves the other two on the tag they had:
+Each image is versioned by the last commit that touched it, so a frontend
+release leaves the backend on the tag it had:
 
     nochaos/bookmarks-api      the backend
     nochaos/bookmarks-web      nginx: the PWA, and /api proxied to the api
-    nochaos/bookmarks-proxy    caddy: TLS in front, for the phone
 
-`docker compose up -d --build` wires the three together; `mise run up` is the
-same thing. Only using it from this machine, at localhost? Then the proxy adds
-nothing: `docker compose up -d api web`. Details, the phone flow and the
-environment variables are in docs/containers.md.
+nginx serves the PWA and proxies `/api`, so the browser sees one origin, which
+is what the session token and the service worker want. The api publishes no
+port of its own.
 
 ## CI
 
-`.github/workflows/docker.yml` runs the suite, builds the three images, scans
-each with trivy and logs into both registries so a stale credential surfaces on
-an ordinary push. Publishing is opt in: dispatch the workflow with `push`
-checked.
+`.github/workflows/docker.yml` runs the suite, builds both images, scans each
+with trivy and logs into both registries so a stale credential surfaces on an
+ordinary push. Publishing is opt in: dispatch the workflow with `push` checked.

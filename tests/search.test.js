@@ -1,7 +1,7 @@
 'use strict';
 
-// Search engine tests. The Python mirror lives in tests/test_desktop.py, which
-// repeats these cases and also compares the two implementations.
+// Search engine tests. The same engine runs in the browser and in the backend,
+// so these cases cover both.
 
 const test = require('node:test');
 const assert = require('node:assert');

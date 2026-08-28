@@ -17,6 +17,23 @@ const yaml = require('./yaml');
 
 const MODES = ['add', 'update', 'newest', 'replace'];
 
+// Where the file came from, which the caller declares instead of the parser
+// guessing. The two are different jobs: one restores a vault, the other brings
+// in a tree from a browser that never had categories to begin with.
+const SOURCES = ['native', 'browser'];
+
+// Fields a browser file has no way to express. Silence there means "I do not
+// know", never "empty", so an import from one must not take these away from a
+// bookmark that already has them. Without this, importing Chrome over a vault
+// with "Use the file" strips the categories off everything the two have in
+// common, quietly, and the file cannot put them back.
+const BROWSER_PARTIAL_FIELDS = ['category', 'tags', 'description'];
+
+// Thrown when the file belongs to the other flow. Separate from a parse error
+// because the file is not broken, it is only in the wrong queue, and telling
+// someone their export is corrupt would send them hunting for nothing.
+class WrongSourceError extends Error {}
+
 /* ======================= identity ======================= */
 
 // Two entries are "the same" when they share an id, or a normalized URL.
@@ -314,9 +331,13 @@ function parseNetscapeHtml(text) {
 
   const lines = String(text).split(/\r?\n/);
   for (const line of lines) {
-    const h3 = /<DT>\s*<H3[^>]*>(.*?)<\/H3>/i.exec(line);
+    const h3 = /<DT>\s*<H3([^>]*)>(.*?)<\/H3>/i.exec(line);
     if (h3) {
-      stack.push(decodeHtml(h3[1]).trim());
+      // The bookmarks bar is a place in the browser's window, not a folder
+      // anyone filed anything into, so it contributes no level here and its
+      // children land where the user put them. Every browser marks it.
+      const isToolbar = /PERSONAL_TOOLBAR_FOLDER\s*=\s*"true"/i.test(h3[1]);
+      stack.push(isToolbar ? '' : decodeHtml(h3[2]).trim());
       continue;
     }
     if (/<\/DL>/i.test(line)) {
@@ -339,7 +360,7 @@ function parseNetscapeHtml(text) {
       last = normalizeIncoming({
         title: decodeHtml(a[2]),
         url: href,
-        folder: stack.join('/'),
+        folder: stack.filter(Boolean).join('/'),
         tags: attr('TAGS'),
         created_at: seconds(attr('ADD_DATE')),
         updated_at: seconds(attr('LAST_MODIFIED')),
@@ -356,6 +377,78 @@ function parseNetscapeHtml(text) {
   return out;
 }
 
+// Chrome, Chromium, Edge and Brave keep their bookmarks as JSON in the profile
+// directory (~/.config/google-chrome/Default/Bookmarks on Linux). It is not the
+// HTML those browsers export, and it is the file people actually find first, so
+// it is read here too.
+//
+// Timestamps are WebKit epoch: microseconds since 1601-01-01, which is
+// 11644473600 seconds before the Unix one.
+const WEBKIT_EPOCH_OFFSET_MS = 11644473600000;
+
+function webkitTime(v) {
+  const micro = Number(v);
+  if (!Number.isFinite(micro) || micro <= 0) return null;
+  const ms = Math.round(micro / 1000) - WEBKIT_EPOCH_OFFSET_MS;
+  return ms > 0 ? ms : null;
+}
+
+/**
+ * Reads the browser's own profile file.
+ *
+ * The folder tree follows what the same browser writes when it exports HTML, so
+ * the two ways in land in the same shape: the bookmarks bar becomes a folder of
+ * its own name, and "Other bookmarks" is flattened to the root, because that is
+ * where the browser itself puts it.
+ */
+function parseChromeJson(text) {
+  const doc = JSON.parse(text);
+  const roots = doc && doc.roots;
+  if (!roots || typeof roots !== 'object') throw new Error('JSON without a "roots" map');
+
+  const out = [];
+  const walk = (node, path) => {
+    if (!node || typeof node !== 'object') return;
+    if (node.type === 'url') {
+      if (!node.url || /^(javascript|place|chrome):/i.test(node.url)) return;
+      out.push(normalizeIncoming({
+        title: node.name,
+        url: node.url,
+        folder: path.join('/'),
+        created_at: webkitTime(node.date_added),
+        updated_at: webkitTime(node.date_modified) || webkitTime(node.date_added),
+      }));
+      return;
+    }
+    for (const child of node.children || []) walk(child, path);
+  };
+
+  for (const root of Object.values(roots)) {
+    if (!root || typeof root !== 'object' || !Array.isArray(root.children)) continue;
+    // The roots are where the browser keeps things, not folders anyone made:
+    // "Bookmarks bar" and "Other bookmarks" are the window, not the filing. So
+    // what sits inside them comes in at the top, which is where their owner put
+    // it. To gather an import under one folder, use the prefix instead.
+    const base = [];
+    for (const child of root.children) {
+      if (child && child.type === 'folder') {
+        walkFolder(child, base, out);
+      } else {
+        walk(child, base);
+      }
+    }
+  }
+  return out;
+
+  function walkFolder(node, path, sink) {
+    const here = [...path, String(node.name || '').trim()].filter(Boolean);
+    for (const child of node.children || []) {
+      if (child && child.type === 'folder') walkFolder(child, here, sink);
+      else walk(child, here);
+    }
+  }
+}
+
 function parseJsonExport(text) {
   const doc = JSON.parse(text);
   const list = Array.isArray(doc) ? doc : doc.bookmarks;
@@ -366,6 +459,9 @@ function parseJsonExport(text) {
 function detectFormat(text) {
   const head = String(text).slice(0, 2000).trim();
   if (/^<!DOCTYPE NETSCAPE-Bookmark/i.test(head) || /<DT>\s*<A\s/i.test(head)) return 'html';
+  // The browser's own profile file, before the generic JSON check: it is JSON
+  // too, but with a shape of its own and no "bookmarks" list to match on.
+  if (head.startsWith('{') && /"roots"\s*:/.test(head)) return 'chrome';
   if (head.startsWith('{') && /"bookmarks"\s*:/.test(head)) return 'json';
   if (head.startsWith('[')) return 'json';
   return 'yaml';
@@ -373,7 +469,12 @@ function detectFormat(text) {
 
 function parseImport(text, format = 'auto') {
   const chosen = format === 'auto' ? detectFormat(text) : format;
-  const parsers = { yaml: parseYamlExport, html: parseNetscapeHtml, json: parseJsonExport };
+  const parsers = {
+    yaml: parseYamlExport,
+    html: parseNetscapeHtml,
+    json: parseJsonExport,
+    chrome: parseChromeJson,
+  };
   const parser = parsers[chosen];
   if (!parser) throw new Error(`unknown format: ${chosen}`);
 
@@ -393,7 +494,79 @@ function parseImport(text, format = 'auto') {
  *   newest   the larger updated_at wins (merging two vaults).
  *   replace  the file becomes the truth: whatever is not in it is removed.
  */
-function planImport(existing, incoming, mode = 'add') {
+/* ======================= import: sources ======================= */
+
+// A folder path as the vault stores it: no leading or trailing slash, no empty
+// segments, bounded like the column is.
+function normFolder(path) {
+  return String(path ?? '')
+    .split('/')
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .join('/')
+    .slice(0, 300);
+}
+
+// A browser file knows a folder tree and nothing else. Category does not exist
+// in the format, so it is emptied rather than left to whatever happened to be
+// on the object, and the whole tree can be dropped under a folder of the
+// vault's own so an import does not scatter itself across the root.
+function browserEntry(item, prefix) {
+  return {
+    ...item,
+    folder: normFolder(prefix ? `${prefix}/${item.folder || ''}` : item.folder),
+    category: '',
+  };
+}
+
+// What the file turned out to carry, counted before anything is decided.
+// "348 bookmarks in 12 folders, no categories" is the honest answer to "what am
+// I about to import", and it is the answer people need before, not after.
+function fileStats(items) {
+  const folders = new Set();
+  let unfiled = 0;
+  let tagged = 0;
+  let described = 0;
+  for (const b of items) {
+    if (b.folder) folders.add(b.folder); else unfiled += 1;
+    if (b.tags) tagged += 1;
+    if (b.description) described += 1;
+  }
+  return { count: items.length, folders: folders.size, unfiled, tagged, described };
+}
+
+/**
+ * Reads a file for one declared source, refusing the other one's format.
+ *
+ * Being wrong here is expensive. A browser file read as a vault file looks like
+ * a vault that lost every category, and importing that with "use the file"
+ * would erase them for real. So a mismatch is an error pointing at the other
+ * flow, never a best-effort guess.
+ */
+function readImport(text, { source = 'native', folderPrefix = '' } = {}) {
+  if (!SOURCES.includes(source)) throw new Error(`invalid source: ${source}`);
+
+  const detected = detectFormat(text);
+  // Two files count as coming from a browser: the HTML it exports, and the
+  // profile file it keeps for itself.
+  const fromBrowser = detected === 'html' || detected === 'chrome';
+  if (source === 'browser' && !fromBrowser) {
+    throw new WrongSourceError('this is not a browser file: the vault\'s own YAML and JSON come in through "From this app"');
+  }
+  if (source === 'native' && fromBrowser) {
+    throw new WrongSourceError('this file belongs to a browser: bring it in through "From a browser"');
+  }
+
+  const { format, items } = parseImport(text, detected);
+  const prefix = source === 'browser' ? normFolder(folderPrefix) : '';
+  const out = source === 'browser' ? items.map((b) => browserEntry(b, prefix)) : items;
+
+  return { source, format, prefix, items: out, stats: fileStats(out) };
+}
+
+/* ======================= import: plan ======================= */
+
+function planImport(existing, incoming, mode = 'add', { partialFields = [] } = {}) {
   if (!MODES.includes(mode)) throw new Error(`invalid mode: ${mode}`);
 
   const byId = new Map();
@@ -417,10 +590,18 @@ function planImport(existing, incoming, mode = 'add') {
     }
     matched.add(current.id);
 
+    // What the file is silent about, the vault keeps. `partialFields` names the
+    // fields this kind of file cannot carry, so an empty one is not an answer.
+    const filled = { ...item };
+    for (const field of partialFields) {
+      if (!filled[field]) filled[field] = current[field];
+    }
     // Keeps the vault's id: the one in the file may come from another install.
-    const merged = { ...item, id: current.id, created_at: current.created_at };
+    const merged = { ...filled, id: current.id, created_at: current.created_at };
 
-    if (sameContent(current, item)) {
+    // Compared after the merge, so a file that only went quiet about a field
+    // counts as identical instead of as an update that changes nothing.
+    if (sameContent(current, merged)) {
       plan.same.push({ current, incoming: item });
       continue;
     }
@@ -454,6 +635,13 @@ function planImport(existing, incoming, mode = 'add') {
 
 module.exports = {
   MODES,
+  SOURCES,
+  BROWSER_PARTIAL_FIELDS,
+  WrongSourceError,
+  normFolder,
+  browserEntry,
+  fileStats,
+  readImport,
   urlKey,
   toYaml,
   toNetscapeHtml,
@@ -461,6 +649,7 @@ module.exports = {
   parseImport,
   parseYamlExport,
   parseNetscapeHtml,
+  parseChromeJson,
   detectFormat,
   planImport,
   normalizeIncoming,

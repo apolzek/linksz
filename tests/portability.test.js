@@ -211,6 +211,254 @@ const CHROME = `<!DOCTYPE NETSCAPE-Bookmark-file-1>
     <DT><A HREF="https://acento.com">Página com Acentuação &amp; cia</A>
 </DL><p>`;
 
+/* ---------------- a browser file may add, never take away ---------------- */
+
+const CURATED = [{
+  id: 'keep-me',
+  title: 'Titulo que eu escolhi',
+  url: 'https://k8s.io',
+  folder: 'minha/pasta',
+  category: 'infra',
+  tags: 'meu,tag',
+  description: 'minha nota',
+  updated_at: 1000,
+}];
+
+const BROWSER_SAYS = [{
+  title: 'Kubernetes',
+  url: 'https://k8s.io',
+  folder: 'Bookmarks bar',
+  category: '',
+  tags: '',
+  description: '',
+  updated_at: 9000,
+}];
+
+test('the default mode adds and never touches what is already there', () => {
+  const plan = p.planImport(CURATED, BROWSER_SAYS, 'add', { partialFields: p.BROWSER_PARTIAL_FIELDS });
+  assert.equal(plan.summary.create, 0);
+  assert.equal(plan.summary.update, 0);
+  assert.equal(plan.summary.remove, 0, 'nothing is ever removed outside replace');
+  assert.equal(plan.summary.skip, 1);
+});
+
+test('overwriting from a browser file cannot blank a category, a tag or a note', () => {
+  const plan = p.planImport(CURATED, BROWSER_SAYS, 'update', { partialFields: p.BROWSER_PARTIAL_FIELDS });
+  assert.equal(plan.summary.update, 1);
+  const after = plan.update[0].incoming;
+  assert.equal(after.category, 'infra', 'the file has no categories, so it keeps its hands off');
+  assert.equal(after.tags, 'meu,tag');
+  assert.equal(after.description, 'minha nota');
+  assert.equal(after.title, 'Kubernetes', 'what the file does carry still wins');
+  assert.equal(after.folder, 'Bookmarks bar');
+});
+
+test('what the browser file does carry overwrites', () => {
+  const withTags = [{ ...BROWSER_SAYS[0], tags: 'k8s,devops' }];
+  const plan = p.planImport(CURATED, withTags, 'update', { partialFields: p.BROWSER_PARTIAL_FIELDS });
+  assert.equal(plan.update[0].incoming.tags, 'k8s,devops');
+  assert.equal(plan.update[0].incoming.category, 'infra', 'still nothing to say about this one');
+});
+
+test('a file that only went quiet counts as identical, not as an update', () => {
+  const same = [{ ...CURATED[0], category: '', tags: '', description: '', id: '' }];
+  const plan = p.planImport(CURATED, same, 'update', { partialFields: p.BROWSER_PARTIAL_FIELDS });
+  assert.equal(plan.summary.same, 1, 'nothing would change, so nothing is written');
+  assert.equal(plan.summary.update, 0);
+});
+
+test('a vault file has no such protection: it speaks for every field', () => {
+  const plan = p.planImport(CURATED, BROWSER_SAYS, 'update');
+  assert.equal(plan.update[0].incoming.category, '', 'clearing a category here is a real instruction');
+});
+
+/* ---------------- the browser's own profile file ---------------- */
+
+// Shaped like what Chrome, Chromium, Edge and Brave keep in the profile
+// directory. Synthetic on purpose: a real one is somebody's browsing history.
+// date_added is WebKit epoch, microseconds since 1601-01-01.
+const CHROME_PROFILE = JSON.stringify({
+  checksum: 'ignored',
+  version: 1,
+  roots: {
+    bookmark_bar: {
+      type: 'folder',
+      name: 'Bookmarks bar',
+      children: [
+        { type: 'url', name: 'Direto na barra', url: 'https://na-barra.com', date_added: '13428098755418102' },
+        {
+          type: 'folder',
+          name: 'Trabalho',
+          children: [
+            { type: 'url', name: 'Kubernetes', url: 'https://k8s.io', date_added: '13428098755418102' },
+            {
+              type: 'folder',
+              name: 'Cloud',
+              children: [{ type: 'url', name: 'AWS', url: 'https://aws.amazon.com' }],
+            },
+          ],
+        },
+      ],
+    },
+    other: {
+      type: 'folder',
+      name: 'Other bookmarks',
+      children: [
+        { type: 'url', name: 'Solto', url: 'https://solto.com' },
+        { type: 'folder', name: 'Leituras', children: [{ type: 'url', name: 'HN', url: 'https://news.ycombinator.com' }] },
+        { type: 'url', name: 'Bookmarklet', url: 'javascript:void(0)' },
+      ],
+    },
+    synced: { type: 'folder', name: 'Mobile bookmarks', children: [] },
+  },
+});
+
+test('the profile file is told apart from the vault\'s own JSON', () => {
+  assert.equal(p.detectFormat(CHROME_PROFILE), 'chrome');
+  assert.equal(p.detectFormat('{"bookmarks": []}'), 'json');
+});
+
+test('the browser\'s own roots are not folders, so what is inside them comes to the top', () => {
+  const { items } = p.readImport(CHROME_PROFILE, { source: 'browser' });
+  const folder = (url) => items.find((b) => b.url.includes(url)).folder;
+  // "Bookmarks bar" and "Other bookmarks" are where the browser puts its
+  // window, not folders anyone filed into: a bookmark sitting in the bar is
+  // loose, and Trabalho is a top-level folder, which is how its owner sees it.
+  assert.equal(folder('na-barra'), '', 'straight on the bar means no folder');
+  assert.equal(folder('k8s.io'), 'Trabalho', 'a folder on the bar is a folder at the root');
+  assert.equal(folder('aws.amazon'), 'Trabalho/Cloud', 'nesting below it survives');
+  assert.equal(folder('solto.com'), '');
+  assert.equal(folder('ycombinator'), 'Leituras');
+});
+
+test('the profile file drops what is not a bookmark', () => {
+  const { items } = p.readImport(CHROME_PROFILE, { source: 'browser' });
+  assert.equal(items.length, 5, 'the bookmarklet and the empty mobile root are not bookmarks');
+  assert.ok(!items.some((b) => /^javascript:/i.test(b.url)));
+});
+
+test('WebKit timestamps become Unix ones', () => {
+  const { items } = p.readImport(CHROME_PROFILE, { source: 'browser' });
+  const b = items.find((x) => x.url.includes('na-barra'));
+  assert.equal(new Date(b.created_at).toISOString().slice(0, 10), '2026-07-09');
+  const noDate = items.find((x) => x.url.includes('aws.amazon'));
+  assert.equal(noDate.created_at, null, 'a missing date stays missing, not 1601');
+});
+
+test('the profile file brings no category either', () => {
+  const { items, stats } = p.readImport(CHROME_PROFILE, { source: 'browser' });
+  assert.ok(items.every((b) => b.category === ''));
+  // Trabalho, Trabalho/Cloud and Leituras; the two on the bar and in other are loose.
+  assert.deepEqual(
+    { count: stats.count, folders: stats.folders, unfiled: stats.unfiled },
+    { count: 5, folders: 3, unfiled: 2 },
+  );
+});
+
+test('a prefix is how an import is kept together, since the roots no longer do it', () => {
+  const { items } = p.readImport(CHROME_PROFILE, { source: 'browser', folderPrefix: 'Imported-2026-08-28' });
+  assert.equal(items.find((b) => b.url.includes('k8s.io')).folder, 'Imported-2026-08-28/Trabalho');
+  assert.equal(items.find((b) => b.url.includes('solto.com')).folder, 'Imported-2026-08-28', 'the loose ones land on the prefix itself');
+});
+
+test('the toolbar folder is dropped from an exported HTML too, by its marker', () => {
+  const exported = `<!DOCTYPE NETSCAPE-Bookmark-file-1>
+<DL><p>
+    <DT><H3 PERSONAL_TOOLBAR_FOLDER="true">Barra de favoritos</H3>
+    <DL><p>
+        <DT><A HREF="https://na-barra.com">Direto na barra</A>
+        <DT><H3>Trabalho</H3>
+        <DL><p>
+            <DT><A HREF="https://k8s.io">Kubernetes</A>
+        </DL><p>
+    </DL><p>
+</DL><p>`;
+  const { items } = p.readImport(exported, { source: 'browser' });
+  assert.equal(items.find((b) => b.url.includes('na-barra')).folder, '');
+  assert.equal(items.find((b) => b.url.includes('k8s.io')).folder, 'Trabalho', 'the same shape the profile file gives');
+});
+
+test('a folder that is not the toolbar keeps its level', () => {
+  const exported = `<!DOCTYPE NETSCAPE-Bookmark-file-1>
+<DL><p>
+    <DT><H3>Guardados</H3>
+    <DL><p>
+        <DT><A HREF="https://um.com">Um</A>
+    </DL><p>
+</DL><p>`;
+  const { items } = p.readImport(exported, { source: 'browser' });
+  assert.equal(items[0].folder, 'Guardados');
+});
+
+test('the vault flow refuses the profile file and points at the other one', () => {
+  assert.throws(
+    () => p.readImport(CHROME_PROFILE, { source: 'native' }),
+    (err) => err instanceof p.WrongSourceError && /From a browser/.test(err.message),
+  );
+});
+
+test('a profile file without roots is a broken file, not a misfiled one', () => {
+  assert.throws(() => p.parseChromeJson('{"version":1}'), /roots/);
+});
+
+/* ---------------- import sources ---------------- */
+
+test('the browser source empties the category, whatever the entry carried', () => {
+  const { items, source, format } = p.readImport(CHROME, { source: 'browser' });
+  assert.equal(source, 'browser');
+  assert.equal(format, 'html');
+  assert.ok(items.every((b) => b.category === ''), 'the format has no categories');
+});
+
+test('a prefix sits above the browser tree, and is normalised like a folder', () => {
+  const { items, prefix } = p.readImport(CHROME, { source: 'browser', folderPrefix: '  //chrome/ backup// ' });
+  assert.equal(prefix, 'chrome/backup');
+  const root = items.find((b) => b.url.includes('root.com'));
+  assert.equal(root.folder, 'chrome/backup', 'an entry with no folder lands on the prefix itself');
+  const k8s = items.find((b) => b.url.includes('k8s.io'));
+  assert.equal(k8s.folder, 'chrome/backup/dev/infra');
+});
+
+test('without a prefix the browser tree comes in as it is', () => {
+  const { items, prefix } = p.readImport(CHROME, { source: 'browser' });
+  assert.equal(prefix, '');
+  assert.equal(items.find((b) => b.url.includes('k8s.io')).folder, 'dev/infra');
+  assert.equal(items.find((b) => b.url.includes('root.com')).folder, '');
+});
+
+test('each source refuses the other one\'s file, and says where it goes', () => {
+  assert.throws(
+    () => p.readImport(CHROME, { source: 'native' }),
+    (err) => err instanceof p.WrongSourceError && /From a browser/.test(err.message),
+  );
+  assert.throws(
+    () => p.readImport('bookmarks: []', { source: 'browser' }),
+    (err) => err instanceof p.WrongSourceError && /From this app/.test(err.message),
+  );
+});
+
+test('an unknown source is refused outright', () => {
+  assert.throws(() => p.readImport(CHROME, { source: 'firefox' }), /invalid source/);
+});
+
+test('the stats count what the file carries, not what the vault has', () => {
+  const { stats } = p.readImport(CHROME, { source: 'browser' });
+  assert.equal(stats.count, 4, 'the bookmarklet is not a bookmark');
+  assert.equal(stats.folders, 2, 'dev and dev/infra');
+  assert.equal(stats.unfiled, 2, 'the two at the root');
+  assert.equal(stats.tagged, 1);
+  assert.equal(stats.described, 1);
+});
+
+test('the native source still reads a vault export unchanged', () => {
+  const { source, format, items, prefix } = p.readImport(p.toYaml(VAULT), { source: 'native' });
+  assert.equal(source, 'native');
+  assert.equal(format, 'yaml');
+  assert.equal(prefix, '', 'a prefix belongs to the browser flow only');
+  assert.equal(items.length, VAULT.length);
+  assert.ok(items.some((b) => b.category), 'categories survive here');
+});
+
 test('reads the browser folder tree', () => {
   const { format, items } = p.parseImport(CHROME);
   assert.equal(format, 'html');

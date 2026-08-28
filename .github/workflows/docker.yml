@@ -27,17 +27,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24   # node:sqlite, which the api is built on
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
 
-      # The suite has no dependencies: node builtins on one side, the standard
-      # library on the other. PyYAML is the exception, and it is there to prove
-      # that a file this project writes opens in somebody else's parser.
-      - name: Install PyYAML for the interop test
-        run: pip install pyyaml
-
-      # api, web search engine, its Python twin and the desktop bar, in one go
+      # Nothing to install: the suite is node built-ins from end to end.
       - name: Run the suite
         run: bash tests/run.sh
 
@@ -60,8 +51,8 @@ jobs:
           set -eu
           # One tag per image, from the last commit that touched what goes into
           # it: date and the first five characters of that commit. A release
-          # that only changes the frontend leaves the api and the proxy on the
-          # tag they already had, which is what versioning them apart means.
+          # that only changes the frontend leaves the api on the tag it already
+          # had, which is what versioning them apart means.
           #
           # The api carries the search engine from web/, so it moves with it.
           # Falls back to the head commit: a path with no history of its own
@@ -78,16 +69,15 @@ jobs:
           {
             echo "api=$(tag_for api web/search.js)"
             echo "web=$(tag_for web)"
-            echo "proxy=$(tag_for proxy)"
             echo "sha=$(git rev-parse --short HEAD)"
             echo "time=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           } >> "$GITHUB_OUTPUT"
 
       - uses: docker/setup-buildx-action@v3
 
-      # Three images: the api, the PWA behind nginx, and the TLS hop a phone
-      # needs. The api and the web share a build context (the repository root)
-      # because the search engine is one file used by both sides.
+      # Two images: the api, and the PWA behind nginx. They share a build
+      # context (the repository root) because the search engine is one file
+      # used by both sides.
       #
       # Built into the local daemon first, so trivy scans the exact bits that
       # will be pushed later, not a rebuild of them
@@ -120,19 +110,6 @@ jobs:
           cache-from: type=gha,scope=web
           cache-to: type=gha,mode=max,scope=web
 
-      - name: Build the proxy image
-        uses: docker/build-push-action@v6
-        with:
-          context: ./proxy
-          load: true
-          pull: true
-          tags: bookmarks-proxy:candidate
-          build-args: |
-            BOOKMARKS_COMMIT=${{ steps.stamp.outputs.sha }}
-            BOOKMARKS_DEPLOYED_AT=${{ steps.stamp.outputs.time }}
-          cache-from: type=gha,scope=proxy
-          cache-to: type=gha,mode=max,scope=proxy
-
       - name: Scan the api image
         uses: aquasecurity/trivy-action@master
         with:
@@ -155,34 +132,6 @@ jobs:
           ignore-unfixed: true
           exit-code: '1'
 
-      # The proxy is caddy's own binary in caddy's own image. What we control
-      # is the OS layer and what the build puts in the image, and that half
-      # blocks: it is how the CA private key that `caddy validate` used to leave
-      # behind was caught.
-      - name: Scan the proxy image
-        uses: aquasecurity/trivy-action@master
-        with:
-          image-ref: bookmarks-proxy:candidate
-          format: table
-          severity: CRITICAL,HIGH
-          ignore-unfixed: true
-          scanners: vuln,secret
-          vuln-type: os
-          exit-code: '1'
-
-      # The other half is the Go standard library caddy was compiled against.
-      # Only an upstream rebuild fixes those, and holding our releases for it
-      # protects nobody, so they are reported and read, not enforced.
-      - name: Report what upstream still has to fix in the proxy
-        uses: aquasecurity/trivy-action@master
-        with:
-          image-ref: bookmarks-proxy:candidate
-          format: table
-          severity: CRITICAL,HIGH
-          ignore-unfixed: true
-          vuln-type: library
-          exit-code: '0'
-
       # Logging in is not publishing: it runs on every green scan so a broken or
       # expired credential shows up here, on an ordinary push, instead of the
       # day someone actually needs to release.
@@ -202,12 +151,11 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       # The only step that actually publishes, and the only one still gated
-      - name: Publish the three images to both registries
+      - name: Publish both images to both registries
         if: ${{ inputs.push == true }}
         env:
           TAG_API: ${{ steps.stamp.outputs.api }}
           TAG_WEB: ${{ steps.stamp.outputs.web }}
-          TAG_PROXY: ${{ steps.stamp.outputs.proxy }}
         run: |
           set -eu
           publish() {
@@ -221,21 +169,18 @@ jobs:
           }
           publish api "$TAG_API"
           publish web "$TAG_WEB"
-          publish proxy "$TAG_PROXY"
 
       - name: Say what happened
         env:
           TAG_API: ${{ steps.stamp.outputs.api }}
           TAG_WEB: ${{ steps.stamp.outputs.web }}
-          TAG_PROXY: ${{ steps.stamp.outputs.proxy }}
         run: |
           if [ "${{ inputs.push }}" = "true" ]; then
             echo "Scanned and published to $NAMESPACE and $GHCR:"
           else
-            echo "Dry run: the three images built, scanned clean and both"
+            echo "Dry run: both images built, scanned clean and both"
             echo "registries accepted the credentials. Nothing was pushed."
             echo "The tags it would have used:"
           fi
-          echo "  bookmarks-api    $TAG_API"
-          echo "  bookmarks-web    $TAG_WEB"
-          echo "  bookmarks-proxy  $TAG_PROXY"
+          echo "  bookmarks-api  $TAG_API"
+          echo "  bookmarks-web  $TAG_WEB"
