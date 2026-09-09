@@ -251,6 +251,10 @@ is(await ev("document.querySelector('.tree-row[data-path=\"nova/vazia\"] .facet-
   'counted honestly at zero');
 
 // Dragging a result onto it: the other half of "move things around in the UI".
+// The search narrows to one row first, so the test always drags the bookmark it
+// then makes claims about.
+await setInput('#q', 'Bookmark 3');
+await sleep(600);
 const dragged = await ev("document.querySelector('#results li .item-title').textContent");
 const moved = await dragTo('#results li', '.tree-row[data-path="nova/vazia"]');
 is(moved, true, 'the row and the folder are both on screen to drag between');
@@ -270,10 +274,36 @@ is(await ev("!!document.querySelector('.tree-row[data-path=\"nova/renomeada\"]')
 is(await ev(`(state.items.find((b) => (b.title || '') === ${JSON.stringify(dragged)}) || {}).folder`), 'nova/renomeada',
   'and the bookmark inside came with it');
 
+// Dropping into a folder must not unfold it. A folder is closed because
+// somebody closed it, and having every drop reopen it undoes that by hand.
+await ev("state.closedFolders.add('nova'); saveClosedFolders(); renderBrowse(); 1");
+await sleep(500);
+is(await ev("!!document.querySelector('.tree-row[data-path=\"nova/vazia\"]')"), false,
+  'with `nova` closed, what is inside it is off screen');
+
+await setInput('#q', 'Bookmark 2');
+await sleep(600);
+const second = await ev("document.querySelector('#results li .item-title').textContent");
+await dragTo('#results li', '.tree-row[data-path="nova"]');
+is(await ev(`(state.items.find((b) => (b.title || '') === ${JSON.stringify(second)}) || {}).folder`), 'nova',
+  'the bookmark lands in the closed folder');
+is(await ev("state.closedFolders.has('nova')"), true, 'and the folder stays as closed as it was');
+is(await ev("!!document.querySelector('.tree-row[data-path=\"nova/vazia\"]')"), false,
+  'nothing unfolded behind the drop');
+
+await ev("state.closedFolders.delete('nova'); saveClosedFolders(); renderBrowse(); 1");
+await setInput('#q', '');
+await sleep(600);
+
 // A folder is dragged the same way, and by the same code: the gesture is
 // followed on the window, so it does not matter that the row being dragged
 // stops answering elementFromPoint halfway through.
+await ev("state.closedFolders.add('nova'); saveClosedFolders(); renderBrowse(); 1");
+await sleep(400);
 await dragTo('.tree-row[data-path="pasta/1"]', '.tree-row[data-path="nova"]');
+is(await ev("state.closedFolders.has('nova')"), true, 'moving a folder does not unfold the destination either');
+await ev("state.closedFolders.delete('nova'); saveClosedFolders(); renderBrowse(); 1");
+await sleep(500);
 is(await ev("!!document.querySelector('.tree-row[data-path=\"nova/1\"]')"), true,
   'dragging a folder onto another one nests it');
 is(await ev("state.items.some((b) => b.folder === 'nova/1')"), true, 'with what was inside it');
@@ -290,6 +320,43 @@ await sleep(2000);
 is(await ev("!!document.querySelector('.tree-row[data-path=\"nova/renomeada\"]')"), false, 'the folder is gone');
 is(await ev(`state.items.some((b) => (b.title || '') === ${JSON.stringify(dragged)})`), false,
   'and so is the bookmark that was inside it');
+
+/* ---------------- the panel's width ---------------- */
+// A folder path is as long as it is, so how wide the panel should be is a
+// preference. Only a browser can say whether dragging the handle moves it.
+group('resizing the browse panel');
+
+const panelWidth = () => ev("Math.round(document.querySelector('#browse').getBoundingClientRect().width)");
+
+is(await ev("!!document.querySelector('#browse-grip')"), true, 'there is a handle between the panel and the results');
+is(await ev("document.querySelector('#browse-grip').offsetParent !== null"), true, 'and it is on screen');
+
+const startedAt = await panelWidth();
+const grip = await spot('#browse-grip');
+await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: grip.x, y: grip.y, button: 'left', clickCount: 1, buttons: 1 });
+for (const dx of [8, 40, 80, 110]) {
+  await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: grip.x + dx, y: grip.y, buttons: 1 });
+  await sleep(120);
+}
+await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: grip.x + 110, y: grip.y, button: 'left', clickCount: 1, buttons: 0 });
+await sleep(600);
+
+const widened = await panelWidth();
+is(widened > startedAt + 80, true, `dragging it right widens the panel (${startedAt} to ${widened})`);
+is(await ev("Number(localStorage.getItem('bookmarks_browse_w')) > 0"), true, 'and the width is remembered');
+is(await ev("Math.round(Number(localStorage.getItem('bookmarks_browse_w')))"), widened, 'as the width actually on screen');
+
+// A panel that can be dragged to nothing is a panel you cannot get back.
+await ev('setBrowseWidth(10); 1');
+await sleep(300);
+is(await panelWidth(), 180, 'it will not shrink past a usable width');
+await ev('setBrowseWidth(9999); 1');
+await sleep(300);
+is(await panelWidth(), 560, 'nor grow until the results have no room');
+
+await ev("document.querySelector('#browse-grip').dispatchEvent(new MouseEvent('dblclick', { bubbles: true })); 1");
+await sleep(400);
+is(await panelWidth(), 232, 'double click puts it back where it started');
 
 /* ---------------- import ---------------- */
 group('import: two flows');

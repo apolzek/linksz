@@ -840,10 +840,10 @@ async function moveFolder(from, to) {
   setSync('moving…', 'saving');
   try {
     const r = await api('/api/folders/move', { method: 'POST', body: JSON.stringify({ from, to }) });
-    // The destination and its ancestors open, otherwise the folder appears to
-    // have vanished instead of having moved.
-    for (let p = r.to; p; p = parentOf(p)) state.closedFolders.delete(p);
-    saveClosedFolders();
+    // The destination is left as it was found. Opening it was meant to show
+    // that the folder had arrived, but dropping into a folder you deliberately
+    // keep closed and having it unfold every time is worse than not seeing the
+    // arrival: the panel says where it went, and the folder is still there.
     await loadAll();
     retargetFolderTokens(from, r.to);
     setSync(`moved to /${r.to}`);
@@ -868,10 +868,6 @@ async function fileBookmark(b, to) {
     const i = state.items.findIndex((x) => x.id === r.item.id);
     if (i >= 0) state.items[i] = r.item; else state.items.unshift(r.item);
     state.lastSync = r.item.updated_at;
-    // The destination opens, otherwise the bookmark looks like it was lost
-    // rather than filed.
-    for (let path = to; path; path = parentOf(path)) state.closedFolders.delete(path);
-    saveClosedFolders();
     refreshDatalists();
     render();
     setSync(to ? `filed under /${to}` : 'moved to the root');
@@ -1286,8 +1282,8 @@ $('#folder-form').onsubmit = async (e) => {
         method: 'POST',
         body: JSON.stringify({ path: from, name: value }),
       });
-      for (let path = r.to; path; path = parentOf(path)) state.closedFolders.delete(path);
-      saveClosedFolders();
+      // Nothing is unfolded here: a rename does not move the folder, so it is
+      // already wherever it was on screen.
       await loadAll();
       // The search bar may be pointing at the old name, the same way it does
       // after a move.
@@ -1295,6 +1291,8 @@ $('#folder-form').onsubmit = async (e) => {
       setSync(`renamed to /${r.to}`);
     } else {
       await api('/api/folders', { method: 'POST', body: JSON.stringify({ path: value }) });
+      // The one place unfolding is still right: a folder you just asked for has
+      // to be visible, and it may have been created several levels down.
       for (let path = value; path; path = parentOf(path)) state.closedFolders.delete(path);
       saveClosedFolders();
       await loadAll();
@@ -1388,6 +1386,70 @@ function renderBrowse() {
   $('#browse-clear').classList.toggle('hidden',
     !$('#q').value.trim() && !Object.values(state.panelFilter).some(Boolean));
 }
+
+/* ---------------- the panel's width ---------------- */
+// A folder path is as long as it is, and 232px was a guess. The handle between
+// the panel and the results moves the boundary, and the answer is kept per
+// browser: it is a preference about this screen, not about the vault.
+const BROWSE_W = { min: 180, max: 560, default: 232 };
+
+function setBrowseWidth(px, remember = true) {
+  const w = Math.round(Math.min(BROWSE_W.max, Math.max(BROWSE_W.min, px)));
+  document.documentElement.style.setProperty('--browse-w', w + 'px');
+  if (remember) localStorage.setItem('bookmarks_browse_w', String(w));
+  return w;
+}
+
+function loadBrowseWidth() {
+  const saved = Number(localStorage.getItem('bookmarks_browse_w'));
+  if (saved > 0) setBrowseWidth(saved, false);
+}
+
+(function wireBrowseGrip() {
+  const grip = $('#browse-grip');
+  let from = 0;
+  let startW = 0;
+
+  const move = (e) => {
+    setBrowseWidth(startW + (e.clientX - from));
+    // The tree reflows, and a folder that fitted a moment ago may not now.
+    e.preventDefault();
+  };
+  const stop = () => {
+    window.removeEventListener('pointermove', move, true);
+    window.removeEventListener('pointerup', stop, true);
+    window.removeEventListener('pointercancel', stop, true);
+    grip.classList.remove('on');
+    document.body.classList.remove('resizing');
+  };
+
+  grip.onpointerdown = (e) => {
+    if (e.button !== 0) return;
+    from = e.clientX;
+    startW = $('#browse').getBoundingClientRect().width;
+    grip.classList.add('on');
+    document.body.classList.add('resizing');
+    // On the window, for the same reason the folder drag is: the pointer
+    // leaves this 7px strip immediately and must keep being heard.
+    window.addEventListener('pointermove', move, true);
+    window.addEventListener('pointerup', stop, true);
+    window.addEventListener('pointercancel', stop, true);
+    e.preventDefault();
+  };
+
+  // Back to the width it shipped with, without hunting for it by hand.
+  grip.ondblclick = () => setBrowseWidth(BROWSE_W.default);
+
+  // The same control from the keyboard, since it is focusable.
+  grip.onkeydown = (e) => {
+    const step = e.shiftKey ? 40 : 12;
+    if (e.key === 'ArrowLeft') setBrowseWidth($('#browse').getBoundingClientRect().width - step);
+    else if (e.key === 'ArrowRight') setBrowseWidth($('#browse').getBoundingClientRect().width + step);
+    else if (e.key === 'Home') setBrowseWidth(BROWSE_W.default);
+    else return;
+    e.preventDefault();
+  };
+})();
 
 function setBrowseOpen(isOpen) {
   $('#browse').classList.toggle('off', !isOpen);
@@ -2166,6 +2228,7 @@ function showLogin() {
 
 (async function boot() {
   registerServiceWorker();
+  loadBrowseWidth();
   fitPlaceholder();
   window.addEventListener('resize', fitPlaceholder);
   renderAuthMode();

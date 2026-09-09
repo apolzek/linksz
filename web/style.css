@@ -295,11 +295,28 @@ select.ghost option { background: var(--panel); color: var(--text); }
 
 /* ---------- folders/categories/tags panel ---------- */
 .browse {
-  flex: none; width: 232px; position: sticky; top: 12px;
+  flex: none; width: var(--browse-w, 232px); position: sticky; top: 12px;
   max-height: calc(100vh - 24px); overflow-y: auto;
-  padding: 30px 4px 20px 16px;
+  padding: 30px 4px 20px 12px;
 }
 .browse.off { display: none; }
+/* The handle between the panel and the results. Thin, and quiet until the
+   pointer is on it: it is a control you reach for once and then forget. */
+.browse-grip {
+  flex: none; width: 7px; align-self: stretch; min-height: 120px;
+  cursor: col-resize; position: relative;
+}
+.browse-grip::before {
+  content: ''; position: absolute; inset: 0 3px;
+  background: var(--line); opacity: 0; transition: opacity .12s;
+}
+.browse-grip:hover::before, .browse-grip:focus-visible::before, .browse-grip.on::before {
+  opacity: 1; background: var(--accent);
+}
+.browse-grip:focus-visible { outline: none; }
+.browse.off + .browse-grip { display: none; }
+/* No dragging a width while the pointer is busy dragging a folder. */
+body.resizing { user-select: none; cursor: col-resize; }
 .browse-head {
   display: flex; align-items: baseline; gap: 8px;
   font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted);
@@ -330,14 +347,25 @@ select.ghost option { background: var(--panel); color: var(--text); }
    the expand pair that only changes what is on screen. */
 .facet-new { justify-content: flex-start; padding-top: 0; }
 
-/* Rename and delete on the folder row, hidden until the pointer is on it, the
-   same way the result rows carry theirs. */
-.tree-actions { opacity: 0; transition: opacity .1s; }
-.tree-row:hover .tree-actions, .tree-actions:focus-within { opacity: 1; }
+/* Rename and delete float over the right end of the row instead of taking a
+   bite out of every folder name. Hidden they still held their 40px, and with
+   307 folders four levels deep those 40px were the difference between reading
+   `reverse-engineering` and reading `reverse-engi`. The strip fades in, so a
+   name too long to fit slides under the buttons instead of being chopped at a
+   hard edge. */
+.tree-actions {
+  position: absolute; right: 0; top: 0; bottom: 0;
+  display: none; align-items: center; margin: 0; padding-left: 18px;
+  background: linear-gradient(to right, transparent, var(--panel) 18px);
+}
+.tree-row:hover > .tree-actions, .tree-row:focus-within > .tree-actions { display: flex; }
 .tree-actions .icon-btn { opacity: 1; padding: 2px 4px; font-size: 11px; }
 /* Mid-drag the buttons would flicker under the ghost and steal the drop. */
-#browse-body.dragging .tree-actions { display: none; }
-@media (hover: none) { .tree-actions { opacity: 1; } }
+#browse-body.dragging .tree-actions { display: none !important; }
+/* No hover to reveal them with, so they stay where they were: in the row. */
+@media (hover: none) {
+  .tree-actions { position: static; display: flex; padding-left: 0; background: none; }
+}
 
 /* A button that cannot be pressed should not look like it can. The import
    button spends real time disabled now: the wrong file in a flow leaves it
@@ -357,10 +385,23 @@ button:disabled { cursor: not-allowed; opacity: .45; }
 .facet-count { flex: none; font-size: 11.5px; color: var(--muted); font-variant-numeric: tabular-nums; font-family: var(--font-mono); }
 .facet-row.on .facet-count { color: inherit; }
 
-/* Folder tree: indentation via --level, arrow only on nodes with children. */
-.tree-row { display: flex; align-items: center; gap: 2px; padding-left: calc(var(--level, 0) * 13px); }
+/* Folder tree: indentation via --level, arrow only on nodes with children.
+   One rail per level above the row, drawn as a background so the row stays
+   three elements and not a nest of wrappers. Four levels deep can be counted
+   instead of measured by eye, and 10px per level buys back three characters of
+   the name against the 13px it used to cost. */
+.tree-row {
+  position: relative;
+  display: flex; align-items: center; gap: 2px;
+  padding-left: calc(var(--level, 0) * 10px);
+  background-image: repeating-linear-gradient(to right, var(--line) 0 1px, transparent 1px 10px);
+  background-size: calc(var(--level, 0) * 10px) 100%;
+  background-repeat: no-repeat;
+}
+/* background-color, never the shorthand: that one would wipe the rails. */
+.tree-row:hover { background-color: var(--panel); }
 .tree-toggle {
-  flex: none; width: 16px; padding: 0; background: transparent; border: 0;
+  flex: none; width: 13px; padding: 0; background: transparent; border: 0;
   color: var(--muted); font-size: 10px; line-height: 1; border-radius: 0;
 }
 .tree-toggle:hover { color: var(--text); }
@@ -368,6 +409,9 @@ button:disabled { cursor: not-allowed; opacity: .45; }
 /* The folder tree wears the wordmark's font: a path is an identifier, and it
    reads better with the columns lining up. */
 .tree-item { min-width: 0; }
+/* Tighter than the flat lists below: every pixel here is a character of a
+   folder name that would otherwise be cut. */
+.tree .facet-row { padding: 5px 6px; gap: 6px; }
 .tree .facet-name { font-family: var(--font-mono); font-size: 12.5px; letter-spacing: -.02em; }
 .tree .facet-count { font-family: var(--font-mono); }
 
@@ -390,7 +434,7 @@ button:disabled { cursor: not-allowed; opacity: .45; }
 #browse-body.dragging, body.dragging { user-select: none; }
 /* Same fade and the same "do not answer elementFromPoint" as a folder row. */
 .item.dragging { opacity: .4; pointer-events: none; }
-.tree-row.drop-into { outline: 1px solid var(--accent); background: var(--accent-soft); }
+.tree-row.drop-into { outline: 1px solid var(--accent); background-color: var(--accent-soft); }
 /* Dropping on the root. There is no widget for it: the folders section is the
    root folder, so its empty space and its heading are the target, the way
    dropping on a file manager's empty space means "into this folder". The
@@ -747,6 +791,8 @@ textarea { resize: vertical; }
    results, without pushing the search off screen. */
 @media (max-width: 900px) {
   .layout { flex-direction: column; gap: 0; }
+  /* One column: there is no width to take from anything. */
+  .browse-grip { display: none; }
   .browse {
     width: 100%; position: static; max-height: none;
     padding: 14px 18px 0; order: 2;
