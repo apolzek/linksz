@@ -389,6 +389,93 @@ await ev("document.querySelector('#browse-grip').dispatchEvent(new MouseEvent('d
 await sleep(400);
 is(await panelWidth(), 232, 'double click puts it back where it started');
 
+/* ---------------- selecting rows ---------------- */
+// Marking many rows and doing one thing to all of them. None of it exists
+// outside a browser: it is keyboard, modifier clicks and a drag.
+group('selecting rows');
+
+// Four bookmarks of its own, so this group does not depend on what the ones
+// above left behind, and a tag to isolate them with.
+await ev(`(async () => {
+  for (const n of [1, 2, 3, 4]) {
+    await api('/api/bookmarks', { method: 'POST', body: JSON.stringify({
+      url: 'https://sel-' + n + '.example', title: 'Sel ' + n,
+      folder: 'selorigem', tags: 'seltest' }) });
+  }
+  await api('/api/folders', { method: 'POST', body: JSON.stringify({ path: 'selalvo' }) });
+  await loadAll();
+  return 1;
+})()`);
+await setInput('#q', '#seltest');
+await sleep(800);
+is(await ev("document.querySelectorAll('#results li').length"), 4, 'four rows to work with');
+
+const marked = () => ev("document.querySelectorAll('#results li.marked').length");
+const selbarShown = () => ev("!document.querySelector('#selbar').classList.contains('hidden')");
+const clickRow = (i, mods) => ev(
+  `(() => { document.querySelectorAll('#results li')[${i}]
+    .dispatchEvent(new MouseEvent('click', { bubbles: true, ${mods} })); return 1; })()`);
+
+is(await selbarShown(), false, 'with nothing marked the bar stays out of the way');
+
+// Ctrl+A, with the caret out of the search box.
+await ev("document.querySelector('#q').blur(); 1");
+await sleep(300);
+await key('a', 'KeyA', 65, 2);
+is(await marked(), 4, 'Ctrl+A marks every result');
+is(await selbarShown(), true, 'and the bar shows up');
+is(await ev("document.querySelector('#sel-count').textContent"), '4 selected', 'saying how many');
+
+await clickRow(0, 'ctrlKey: true');
+await sleep(300);
+is(await marked(), 3, 'Ctrl+click unmarks the one under it');
+await clickRow(0, 'ctrlKey: true');
+await sleep(300);
+is(await marked(), 4, 'and marks it again');
+
+await key('Escape', 'Escape', 27);
+is(await marked(), 0, 'Esc drops the selection');
+is(await selbarShown(), false, 'and takes the bar with it');
+is(await ev("document.querySelector('#q').value"), '#seltest', 'without throwing away the search too');
+
+// A run, from the first to the third.
+await clickRow(0, 'ctrlKey: true');
+await sleep(300);
+await clickRow(2, 'shiftKey: true');
+await sleep(300);
+is(await marked(), 3, 'Shift+click marks the whole run up to it');
+
+await key('Escape', 'Escape', 27);
+await ev("document.querySelector('#q').blur(); 1");
+await sleep(300);
+await key('a', 'KeyA', 65, 2);
+is(await marked(), 4, 'marked again, all four');
+
+// Dragging one marked row carries the whole selection.
+await dragTo('#results li', '.tree-row[data-path="selalvo"]');
+is(await ev("state.items.filter((b) => b.folder === 'selalvo' && b.tags.includes('seltest')).length"), 4,
+  'dragging one marked row files every marked row');
+is(await ev("state.items.filter((b) => b.folder === 'selorigem').length"), 0, 'and none is left behind');
+
+// Delete, on the group.
+await ev("document.querySelector('#q').blur(); 1");
+await sleep(300);
+await key('a', 'KeyA', 65, 2);
+is(await marked(), 4, 'marked once more');
+await key('Delete', 'Delete', 46);
+await sleep(600);
+is(await ev("!document.querySelector('#confirm-modal').classList.contains('hidden')"), true,
+  'Delete on a selection asks first');
+is((await ev("document.querySelector('#confirm-what').textContent")).includes('4 bookmarks'), true,
+  'saying how many go');
+await ev("document.querySelector('#confirm-ok').click()");
+await sleep(1500);
+is(await ev("state.items.filter((b) => b.tags.includes('seltest')).length"), 0, 'and all four are gone');
+is(await selbarShown(), false, 'the bar goes with them');
+
+await setInput('#q', '');
+await sleep(500);
+
 /* ---------------- import ---------------- */
 group('import: two flows');
 await ev("document.querySelector('#btn-io').click()");

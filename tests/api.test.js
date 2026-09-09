@@ -908,6 +908,87 @@ test('from is required', async () => {
   assert.equal(r.status, 400);
 });
 
+/* ---------------- doing one thing to many bookmarks ---------------- */
+
+// Selecting rows in the list and filing or deleting them at once. One request,
+// because a selection can be the whole vault.
+
+test('a batch move files every id it is given', async () => {
+  const a = await makeIn('lote/origem', 'lote a');
+  const b = await makeIn('lote/origem', 'lote b');
+  const c = await makeIn('lote/fica', 'lote c');
+
+  const r = await call('POST', '/api/bookmarks/move', { token, body: { ids: [a, b], folder: '/lote/destino/' } });
+  assert.equal(r.status, 200);
+  assert.equal(r.body.moved, 2);
+  assert.equal(r.body.folder, 'lote/destino', 'the path is normalised the way a folder is');
+
+  const folderOf = async (id) => (await call('GET', `/api/bookmarks/${id}`, { token })).body.item.folder;
+  assert.equal(await folderOf(a), 'lote/destino');
+  assert.equal(await folderOf(b), 'lote/destino');
+  assert.equal(await folderOf(c), 'lote/fica', 'and nothing else is touched');
+});
+
+test('an empty folder in a batch move means the root', async () => {
+  const id = await makeIn('lote/tirar', 'sai da pasta');
+  const r = await call('POST', '/api/bookmarks/move', { token, body: { ids: [id], folder: '' } });
+  assert.equal(r.body.moved, 1);
+  assert.equal((await call('GET', `/api/bookmarks/${id}`, { token })).body.item.folder, '');
+});
+
+test('a batch move counts only what actually moved', async () => {
+  const id = await makeIn('lote/mesmo', 'ja esta la');
+  const r = await call('POST', '/api/bookmarks/move', { token, body: { ids: [id], folder: 'lote/mesmo' } });
+  assert.equal(r.body.moved, 0, 'moving something to where it already is changes nothing');
+});
+
+test('an id that is not yours is skipped, not refused', async () => {
+  const mine = await makeIn('lote/meu', 'meu');
+  const other = (await call('POST', '/api/auth/register', {
+    body: { email: 'lote@example.com', username: 'loteuser', password: 'secret123' },
+  })).body.token;
+  const theirs = (await call('POST', '/api/bookmarks', {
+    token: other, body: { url: 'https://alheio.example', title: 'alheio', folder: 'deles' },
+  })).body.item.id;
+
+  const r = await call('POST', '/api/bookmarks/move', { token, body: { ids: [mine, theirs], folder: 'lote/novo' } });
+  assert.equal(r.status, 200);
+  assert.equal(r.body.moved, 1, 'the whole batch is not thrown away over one stale id');
+  assert.equal((await call('GET', `/api/bookmarks/${theirs}`, { token: other })).body.item.folder, 'deles',
+               'and the other account is untouched');
+});
+
+test('a batch needs ids', async () => {
+  assert.equal((await call('POST', '/api/bookmarks/move', { token, body: { ids: [], folder: 'x' } })).status, 400);
+  assert.equal((await call('POST', '/api/bookmarks/delete', { token, body: {} })).status, 400);
+});
+
+test('a batch delete buries every id and says how many', async () => {
+  const a = await makeIn('lote/apagar', 'apaga a');
+  const b = await makeIn('lote/apagar', 'apaga b');
+  const c = await makeIn('lote/apagar', 'apaga c');
+
+  const r = await call('POST', '/api/bookmarks/delete', { token, body: { ids: [a, b] } });
+  assert.equal(r.body.deleted, 2);
+  assert.equal((await call('GET', `/api/bookmarks/${a}`, { token })).status, 404);
+  assert.equal((await call('GET', `/api/bookmarks/${b}`, { token })).status, 404);
+  assert.equal((await call('GET', `/api/bookmarks/${c}`, { token })).status, 200);
+
+  // Deleting the same ones again is not an error and not a second deletion.
+  const again = await call('POST', '/api/bookmarks/delete', { token, body: { ids: [a, b] } });
+  assert.equal(again.body.deleted, 0);
+});
+
+test('a batch delete is a tombstone, so the sync carries it', async () => {
+  const id = await makeIn('lote/tumulo', 'vira tombstone');
+  const before = Date.now();
+  await call('POST', '/api/bookmarks/delete', { token, body: { ids: [id] } });
+  const sync = await call('POST', '/api/sync', { token, body: { since: before, changes: [] } });
+  const row = sync.body.changes.find((c) => c.id === id);
+  assert.ok(row, 'the deletion reaches the other client');
+  assert.equal(row.deleted, 1);
+});
+
 /* ---------------- folders of their own ---------------- */
 
 // A folder that holds nothing cannot be a string on a bookmark, which is the

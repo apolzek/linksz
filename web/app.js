@@ -31,7 +31,13 @@ const state = {
   results: [],
   sel: 0,
   editing: null,
+  // Ids of the marked rows, and where a Shift+click measures its run from. Ids
+  // and not indexes: the list is rebuilt on every keystroke and an index would
+  // point at a different bookmark a moment later.
+  marked: new Set(),
+  anchor: null,
   editingFolder: null,   // the folder the folder modal is renaming, null when creating
+  folderMode: 'create',  // 'create', 'rename' or 'move' (the selection)
   lastSync: 0,
   panelFilter: {},   // filters for the panel lists (they do not filter bookmarks)
   closedFolders: new Set(JSON.parse(localStorage.getItem('bookmarks_closed_folders') || '[]')),
@@ -501,6 +507,14 @@ function render() {
   state.results = BookmarksSearch.search(state.items, q, state.items.length || 1);
   if (state.sel >= state.results.length) state.sel = Math.max(0, state.results.length - 1);
 
+  // A mark only survives while the row is still on the list. Keeping one on a
+  // bookmark the search no longer shows is how a group delete takes something
+  // nobody could see was selected.
+  if (state.marked.size) {
+    const onScreen = new Set(state.results.map((b) => b.id));
+    for (const id of state.marked) if (!onScreen.has(id)) state.marked.delete(id);
+  }
+
   $('#q-clear').classList.toggle('hidden', !q);
   // `help` typed in the search box is a command, not a search: the panel opens
   // and the results below still answer the query, so nothing is taken away.
@@ -510,7 +524,8 @@ function render() {
   ul.innerHTML = '';
   for (const [i, b] of state.results.entries()) {
     const li = document.createElement('li');
-    li.className = 'item' + (i === state.sel ? ' sel' : '');
+    li.className = 'item' + (i === state.sel ? ' sel' : '') + (state.marked.has(b.id) ? ' marked' : '');
+    li.dataset.id = b.id;
     // The row is a drag source: dropping it on a folder in the panel files it
     // there. This is also what records the pointer position the click below
     // reads.
@@ -522,8 +537,15 @@ function render() {
       const moved = Math.hypot(e.clientX - Number(li.dataset.px || e.clientX),
                                e.clientY - Number(li.dataset.py || e.clientY));
       if (moved > 4 || String(getSelection())) return;
+      // Ctrl and Shift build the selection, the way they do in a file manager.
+      // Ctrl+click used to open in a new tab; the wheel button and Ctrl+Enter
+      // still do that, and both are in the help.
+      if (e.shiftKey) { e.preventDefault(); markRun(i); return; }
+      if (e.ctrlKey || e.metaKey) { e.preventDefault(); markOne(b.id, i); return; }
       state.sel = i;
-      openSelected(e.ctrlKey || e.metaKey);
+      // A plain click does not clear the marks. Going to check one of the links
+      // you just marked should not throw away the other thirty-nine.
+      openSelected(false);
     };
     // The wheel button opens in a new tab everywhere else on the web, so it does
     // here too, the same as Ctrl+Enter. Two things it needs: the event is
@@ -605,6 +627,7 @@ function render() {
     empty.classList.add('hidden');
   }
 
+  renderSelbar();
   renderChips();
   renderSuggest();
   renderBrowse();
@@ -815,7 +838,18 @@ function canDropFolder(from, to) {
 
 // Filing a bookmark where it already is would be a write that changes nothing.
 function canDropBookmark(b, to) {
-  return !!b && String(b.folder || '') !== to;
+  if (!b) return false;
+  // Dragging a marked row drags every marked row: the drop is worth making if
+  // any one of them would actually move.
+  const group = draggedGroup(b);
+  return group.some((x) => String(x.folder || '') !== to);
+}
+
+// What a drag starting on this row is carrying. A row that is not marked is
+// itself, even with a selection open elsewhere: dragging an unmarked row is how
+// you move one thing without dropping what you had marked.
+function draggedGroup(b) {
+  return b && state.marked.has(b.id) && state.marked.size > 1 ? markedItems() : [b];
 }
 
 // What the gesture in flight is allowed to land on.
@@ -1020,8 +1054,9 @@ function beginDrag() {
 
   drag.ghost = document.createElement('div');
   drag.ghost.className = 'drag-ghost';
-  drag.ghost.textContent = drag.kind === 'bookmark'
-    ? (drag.item.title || drag.item.url)
+  const carrying = drag.kind === 'bookmark' ? draggedGroup(drag.item) : null;
+  drag.ghost.textContent = carrying
+    ? (carrying.length > 1 ? `${carrying.length} bookmarks` : (drag.item.title || drag.item.url))
     : '/' + drag.path;
   document.body.append(drag.ghost);
 }
@@ -1038,8 +1073,10 @@ function endDrag(drop) {
                         active: false, target: null, ghost: null, at: null, scroll: 0 });
   if (active) swallowNextClick();
   if (drop && active && target) {
-    if (kind === 'bookmark') fileBookmark(item, target.to);
-    else moveFolder(path, target.to);
+    if (kind === 'bookmark') {
+      const group = draggedGroup(item);
+      if (group.length > 1) moveMarked(target.to); else fileBookmark(item, target.to);
+    } else moveFolder(path, target.to);
   }
   return active;
 }
@@ -1245,9 +1282,23 @@ function currentFolder() {
 // One card for the two edits a folder has. Creating asks for a whole path,
 // renaming asks for a name, because a rename that could reparent the branch
 // would be a move wearing a disguise and the drag already does moves.
-function openFolderModal(path = null) {
+// Filing the marked bookmarks. The same card, because the question is the same
+// one: which folder. An empty field is the root, which is the only way to take
+// something out of a folder without putting it in another.
+function openMoveModal() {
+  const n = state.marked.size;
+  openFolderModal(null, 'move');
+  $('#folder-title').textContent = `Move ${n} bookmark${n > 1 ? 's' : ''}`;
+  $('#folder-path-label').firstChild.textContent = 'Folder';
+  $('#folder-save').textContent = 'move';
+  $('#folder-hint').innerHTML = 'Leave it empty to take them out of any folder.';
+  $('#f-path').value = '';
+}
+
+function openFolderModal(path = null, mode = path === null ? 'create' : 'rename') {
   state.editingFolder = path;
-  const renaming = path !== null;
+  state.folderMode = mode;
+  const renaming = mode === 'rename';
   $('#folder-title').textContent = renaming ? 'Rename folder' : 'New folder';
   $('#folder-path-label').firstChild.textContent = renaming ? 'Name' : 'Path';
   $('#folder-save').textContent = renaming ? 'rename' : 'create';
@@ -1277,6 +1328,7 @@ function openFolderModal(path = null) {
 function closeFolderModal() {
   $('#folder-modal').classList.add('hidden');
   state.editingFolder = null;
+  state.folderMode = 'create';
   $('#q').focus();
 }
 
@@ -1290,12 +1342,20 @@ function escapeText(v) {
 $('#folder-form').onsubmit = async (e) => {
   e.preventDefault();
   const value = $('#f-path').value.trim().replace(/^\/+|\/+$/g, '');
+
+  // Moving is the one case where empty is an answer: it means the root.
+  if (state.folderMode === 'move') {
+    closeFolderModal();
+    moveMarked(value);
+    return;
+  }
+
   if (!value) {
     $('#folder-error').textContent = 'enter a name';
     return;
   }
 
-  const renaming = state.editingFolder !== null;
+  const renaming = state.folderMode === 'rename';
   if (renaming && value.includes('/')) {
     $('#folder-error').textContent = 'a name cannot contain "/": drag the folder to move it';
     return;
@@ -1555,6 +1615,104 @@ function registerOpen(b) {
     .catch(() => {});
 }
 
+/* ---------------- selecting rows ---------------- */
+// A selection over the list, with the gestures a file manager uses: Ctrl+A for
+// everything on screen, Ctrl+click for one, Shift+click for a run, Esc to drop
+// it. What it is for is doing one thing to many bookmarks: filing them under a
+// folder, or throwing them away.
+
+function markOne(id, i) {
+  if (state.marked.has(id)) state.marked.delete(id); else state.marked.add(id);
+  state.anchor = i;
+  state.sel = i;
+  render();
+}
+
+// From the last row touched to this one, inclusive. With nothing touched yet
+// the run starts at the row the keyboard is on, which is where the eye is.
+function markRun(i) {
+  const from = state.anchor === null ? state.sel : state.anchor;
+  const [a, b] = from <= i ? [from, i] : [i, from];
+  for (let k = a; k <= b; k++) {
+    const item = state.results[k];
+    if (item) state.marked.add(item.id);
+  }
+  state.sel = i;
+  render();
+}
+
+function markAll() {
+  for (const b of state.results) state.marked.add(b.id);
+  state.anchor = null;
+  render();
+}
+
+function clearMarks() {
+  if (!state.marked.size) return false;
+  state.marked.clear();
+  state.anchor = null;
+  render();
+  return true;
+}
+
+// The marked bookmarks, in the order the list shows them.
+function markedItems() {
+  return state.results.filter((b) => state.marked.has(b.id));
+}
+
+function renderSelbar() {
+  const n = state.marked.size;
+  $('#selbar').classList.toggle('hidden', n === 0);
+  if (!n) return;
+  $('#sel-count').textContent = `${n} selected`;
+}
+
+$('#sel-clear').onclick = () => { clearMarks(); $('#q').focus(); };
+$('#sel-move').onclick = () => { if (state.marked.size) openMoveModal(); };
+$('#sel-delete').onclick = () => removeMarked();
+
+// One request, not one per bookmark: marking 900 rows and sending 900 PUTs is
+// 900 chances to end up half moved.
+async function moveMarked(to) {
+  const ids = [...state.marked];
+  if (!ids.length) return;
+  setSync('moving…', 'saving');
+  try {
+    const r = await api('/api/bookmarks/move', {
+      method: 'POST',
+      body: JSON.stringify({ ids, folder: to }),
+    });
+    await loadAll();
+    setSync(r.moved
+      ? `${r.moved} moved to ${to ? '/' + to : 'the root'}`
+      : 'already there');
+    setTimeout(() => setSync('synced'), 3000);
+  } catch (err) {
+    setSync(err.message || 'move failed', 'err');
+  }
+}
+
+async function removeMarked() {
+  const ids = [...state.marked];
+  if (!ids.length) return;
+  const what = ids.length === 1
+    ? (markedItems()[0]?.title || markedItems()[0]?.url || '1 bookmark')
+    : `${ids.length} bookmarks`;
+  if (!await askDelete(what)) return;
+
+  setSync('saving…', 'saving');
+  try {
+    const r = await api('/api/bookmarks/delete', { method: 'POST', body: JSON.stringify({ ids }) });
+    state.marked.clear();
+    state.anchor = null;
+    await loadAll();
+    setSync(`${r.deleted} deleted`);
+    setTimeout(() => setSync('synced'), 3000);
+  } catch (err) {
+    setSync(err.message || 'delete failed', 'err');
+  }
+}
+
 // Empty until the link has been opened at least once: a `0×` on every row is
 // noise, and the whole point is spotting the ones you keep going back to.
 function opensLabel(b) {
@@ -1734,6 +1892,14 @@ document.addEventListener('keydown', (e) => {
     return;
   }
 
+  // Ctrl+A outside the search box marks every result, the way it does in a file
+  // manager. Inside the box it stays what it is everywhere: select the text.
+  if (!inSearch && (e.ctrlKey || e.metaKey) && (e.key === 'a' || e.key === 'A')) {
+    e.preventDefault();
+    markAll();
+    return;
+  }
+
   // Edit and delete need to work while typing, which is where the caret spends
   // its whole life here: the search box takes focus on boot and after most
   // actions. A letter cannot do that job, so each one has a key that is not a
@@ -1750,7 +1916,10 @@ document.addEventListener('keydown', (e) => {
   // asked, mid-word, whether to throw away a bookmark nobody was looking at.
   if (e.key === 'Delete' && (e.ctrlKey || e.metaKey || !inSearch)) {
     e.preventDefault();
-    removeBookmark(state.results[state.sel]);
+    // With rows marked, Delete is about them and not about whatever the
+    // keyboard happens to be sitting on.
+    if (state.marked.size) removeMarked();
+    else removeBookmark(state.results[state.sel]);
     return;
   }
 
@@ -1768,6 +1937,9 @@ document.addEventListener('keydown', (e) => {
     // The suggestions go first: Esc closing them is not the same as Esc
     // throwing away what was typed.
     if (!$('#suggest').classList.contains('hidden')) { state.suggestOff = true; renderSuggest(); return; }
+    // Before the query: dropping a selection is the smaller undo of the two,
+    // and clearing the search would drop the selection anyway.
+    if (clearMarks()) return;
     if ($('#q').value) setQuery(''); else $('#q').blur();
   } else if (!inSearch && (e.key === 'n' || e.key === '/')) {
     e.preventDefault();

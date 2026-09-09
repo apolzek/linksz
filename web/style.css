@@ -602,6 +602,23 @@ kbd { background: var(--panel-2); border: 1px solid var(--line); border-bottom-w
 }
 .item:hover { background: var(--panel); }
 .item.sel { background: var(--panel); border-color: var(--accent); }
+/* Marked rows. A bar down the left rather than a fill: the row already uses its
+   background for "this is the one the keyboard is on", and the two states are
+   independent, so they must be readable at the same time. */
+.item.marked { background: var(--accent-soft); box-shadow: inset 3px 0 0 var(--accent); }
+.item.marked.sel { border-color: var(--accent); }
+
+/* The selection bar, above the list and only there when it has something to
+   say. */
+.selbar {
+  display: flex; align-items: center; gap: 8px;
+  margin: 10px 0 4px; padding: 7px 12px;
+  border: 1px solid var(--accent-line); background: var(--accent-soft);
+}
+.selbar .spacer { flex: 1; }
+.sel-count { font-size: 12.5px; color: var(--accent); font-variant-numeric: tabular-nums; }
+.selbar .ghost { height: 26px; font-size: 12px; }
+.sel-danger { color: var(--danger); border-color: var(--danger); }
 .favicon { width: 18px; height: 18px; flex: none; border-radius: 0; margin-top: 1px; }
 .item-main { min-width: 0; flex: 1; }
 .item-title { font-weight: 550; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

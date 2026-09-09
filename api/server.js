@@ -107,6 +107,21 @@ function escapeLike(v) {
   return String(v).replace(/[\\%_]/g, (c) => '\\' + c);
 }
 
+// Ids arriving for a batch. Bounded because the whole vault is a legitimate
+// selection but a megabyte of made-up ids is not, deduplicated because the same
+// id twice is one bookmark either way.
+const BULK_LIMIT = 10000;
+
+function idList(v) {
+  if (!Array.isArray(v)) return [];
+  const out = new Set();
+  for (const raw of v.slice(0, BULK_LIMIT)) {
+    const id = str(raw, 64);
+    if (id) out.add(id);
+  }
+  return [...out];
+}
+
 // A path and every folder above it: `a/b/c` -> ['a', 'a/b', 'a/b/c']. Creating
 // a folder deep in the tree has to write the way down to it, or the new folder
 // hangs off parents that do not exist.
@@ -540,6 +555,49 @@ function createApp(dbPath) {
       }
 
       return json(res, 200, { ...preview, applied: true, total: q.allBookmarks.all(user.id).length });
+    },
+
+    // Files a set of bookmarks at once, which is what selecting rows in the list
+    // needs: marking 900 of them and moving one PUT at a time would be 900
+    // requests, and 900 chances to end up half moved.
+    //
+    // An id that is not yours, or already deleted, is skipped rather than
+    // refused: a selection made against a list that has moved on is a stale
+    // list, not a bad request, and failing the whole batch over one would throw
+    // away the other 899.
+    'POST /api/bookmarks/move': async (req, res, user) => {
+      const b = await readBody(req);
+      const folder = normFolderPath(b.folder);
+      const ids = idList(b.ids);
+      if (!ids.length) return json(res, 400, { error: 'ids is required' });
+
+      const ts = now();
+      let moved = 0;
+      for (const id of ids) {
+        const row = q.getOne.get(user.id, id);
+        if (!row || row.deleted || row.folder === folder) continue;
+        writeBookmark(user.id, { ...row, folder, updated_at: ts }, ts);
+        moved += 1;
+      }
+      return json(res, 200, { moved, folder });
+    },
+
+    // The same batch, for deleting. Tombstones, like every other deletion here,
+    // so an export taken before this still brings them back.
+    'POST /api/bookmarks/delete': async (req, res, user) => {
+      const b = await readBody(req);
+      const ids = idList(b.ids);
+      if (!ids.length) return json(res, 400, { error: 'ids is required' });
+
+      const ts = now();
+      let deleted = 0;
+      for (const id of ids) {
+        const row = q.getOne.get(user.id, id);
+        if (!row || row.deleted) continue;
+        q.softDelete.run(ts, user.id, id);
+        deleted += 1;
+      }
+      return json(res, 200, { deleted });
     },
 
     // Ranking input: the client says "I just opened this one". Kept apart from
