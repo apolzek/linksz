@@ -197,6 +197,100 @@ is(await ev("document.querySelector('.insights-card').getBoundingClientRect().wi
 await key('Escape', 'Escape', 27);
 is(await ev("document.querySelector('#insights-modal').classList.contains('hidden')"), true, 'Esc closes it');
 
+/* ---------------- folders ---------------- */
+// The panel is the only place a folder can be created, renamed, deleted or
+// moved into, and none of it exists outside a browser: the node suite can see
+// the endpoints but not the gesture that reaches them.
+group('folders in the panel');
+
+// The middle of an element, which is what a pointer aims at.
+const spot = async (sel) => JSON.parse(await ev(
+  `(() => { const el = document.querySelector(${'`'}${'$'}{${JSON.stringify(sel)}}${'`'});
+    if (!el) return 'null';
+    const r = el.getBoundingClientRect();
+    return JSON.stringify({ x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) }); })()`,
+));
+
+// A drag is a press, a few moves and a release. More than one move on purpose:
+// the first crosses the threshold that tells a drag from a click, and the ones
+// after it are what put the target under the pointer.
+async function dragTo(fromSel, toSel) {
+  const a = await spot(fromSel);
+  const b = await spot(toSel);
+  if (!a || !b) return false;
+  await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: a.x, y: a.y, button: 'left', clickCount: 1, buttons: 1 });
+  const path = [{ x: a.x + 12, y: a.y + 8 }, { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }, b, b];
+  for (const point of path) {
+    await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: Math.round(point.x), y: Math.round(point.y), buttons: 1 });
+    await sleep(150);
+  }
+  await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: b.x, y: b.y, button: 'left', clickCount: 1, buttons: 0 });
+  await sleep(1500);
+  return true;
+}
+
+await setInput('#q', '');
+await sleep(500);
+is(await ev("document.querySelector('#browse').offsetParent !== null"), true, 'the panel is on screen');
+is(await ev("[...document.querySelectorAll('.facet-folders .linkish')].some((b) => b.textContent === 'new folder')"),
+  true, 'with a way to create a folder');
+
+await ev("[...document.querySelectorAll('.facet-folders .linkish')].find((b) => b.textContent === 'new folder').click()");
+await sleep(500);
+is(await ev("!document.querySelector('#folder-modal').classList.contains('hidden')"), true, 'which opens a card');
+is(await ev("document.querySelector('#folder-title').textContent"), 'New folder', 'to create, not to rename');
+
+await setInput('#f-path', 'nova/vazia');
+await ev("document.querySelector('#folder-form').requestSubmit()");
+await sleep(2000);
+is(await ev("document.querySelector('#folder-modal').classList.contains('hidden')"), true, 'and closes on save');
+is(await ev("!!document.querySelector('.tree-row[data-path=\"nova/vazia\"]')"), true,
+  'the folder is on the tree holding nothing, which no bookmark could put there');
+is(await ev("!!document.querySelector('.tree-row[data-path=\"nova\"]')"), true, 'and so is the parent it needed');
+is(await ev("document.querySelector('.tree-row[data-path=\"nova/vazia\"] .facet-count').textContent"), '0',
+  'counted honestly at zero');
+
+// Dragging a result onto it: the other half of "move things around in the UI".
+const dragged = await ev("document.querySelector('#results li .item-title').textContent");
+const moved = await dragTo('#results li', '.tree-row[data-path="nova/vazia"]');
+is(moved, true, 'the row and the folder are both on screen to drag between');
+is(await ev(`(state.items.find((b) => (b.title || '') === ${JSON.stringify(dragged)}) || {}).folder`), 'nova/vazia',
+  'dropping a result on a folder files it there');
+is(await ev("document.querySelector('#folder-modal').classList.contains('hidden')"), true, 'and opens no editor on the way');
+
+// Renaming, from the buttons that live on the row.
+await ev("document.querySelector('.tree-row[data-path=\"nova/vazia\"] .tree-actions .icon-btn').click()");
+await sleep(600);
+is(await ev("document.querySelector('#folder-title').textContent"), 'Rename folder', 'the pencil renames');
+is(await ev("document.querySelector('#f-path').value"), 'vazia', 'starting from the name alone, not the whole path');
+await setInput('#f-path', 'renomeada');
+await ev("document.querySelector('#folder-form').requestSubmit()");
+await sleep(2000);
+is(await ev("!!document.querySelector('.tree-row[data-path=\"nova/renomeada\"]')"), true, 'the folder took the new name');
+is(await ev(`(state.items.find((b) => (b.title || '') === ${JSON.stringify(dragged)}) || {}).folder`), 'nova/renomeada',
+  'and the bookmark inside came with it');
+
+// A folder is dragged the same way, and by the same code: the gesture is
+// followed on the window, so it does not matter that the row being dragged
+// stops answering elementFromPoint halfway through.
+await dragTo('.tree-row[data-path="pasta/1"]', '.tree-row[data-path="nova"]');
+is(await ev("!!document.querySelector('.tree-row[data-path=\"nova/1\"]')"), true,
+  'dragging a folder onto another one nests it');
+is(await ev("state.items.some((b) => b.folder === 'nova/1')"), true, 'with what was inside it');
+is(await ev("!!document.querySelector('.tree-row[data-path=\"pasta/1\"]')"), false, 'and nothing left behind');
+
+// Deleting, which takes what is inside and therefore has to ask first.
+await ev("[...document.querySelectorAll('.tree-row[data-path=\"nova/renomeada\"] .tree-actions .icon-btn')][1].click()");
+await sleep(700);
+is(await ev("!document.querySelector('#confirm-modal').classList.contains('hidden')"), true, 'deleting a folder asks');
+is((await ev("document.querySelector('#confirm-what').textContent")).includes('1 bookmark'), true,
+  'saying how much goes with it');
+await ev("document.querySelector('#confirm-ok').click()");
+await sleep(2000);
+is(await ev("!!document.querySelector('.tree-row[data-path=\"nova/renomeada\"]')"), false, 'the folder is gone');
+is(await ev(`state.items.some((b) => (b.title || '') === ${JSON.stringify(dragged)})`), false,
+  'and so is the bookmark that was inside it');
+
 /* ---------------- import ---------------- */
 group('import: two flows');
 await ev("document.querySelector('#btn-io').click()");

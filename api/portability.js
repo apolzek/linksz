@@ -95,6 +95,38 @@ function byEntry(a, b) {
       || byName(a.id, b.id);
 }
 
+// Which folders have to be written down as a key with no entries under it.
+//
+// A folder holding bookmarks writes itself, and so does every folder above it:
+// reading `dev/go/web` back recreates `dev` and `dev/go` on the way. So only
+// the tips of what is left need a key of their own, and `dev: []` next to a
+// `dev/go` full of links would be noise that says nothing new.
+//
+// The key is a plain entry in the `folders:` map that has been there since
+// version 2 of the format, holding an empty list. That is what lets an older
+// importer, which knows nothing about this, walk past it in silence instead of
+// failing on a key it does not recognise.
+function emptyFolderKeys(known, used) {
+  const covered = new Set();
+  const cover = (path) => {
+    const parts = String(path).split('/').filter(Boolean);
+    for (let i = 1; i <= parts.length; i++) covered.add(parts.slice(0, i).join('/'));
+  };
+  for (const path of used) cover(path);
+
+  const out = [];
+  // Deepest first, so a folder that covers its own parents gets there before
+  // the parents are considered on their own.
+  const byDepth = [...new Set(known)].filter(Boolean)
+    .sort((a, b) => b.split('/').length - a.split('/').length || byName(a, b));
+  for (const path of byDepth) {
+    if (covered.has(path)) continue;
+    out.push(path);
+    cover(path);
+  }
+  return out;
+}
+
 /* The file is grouped by folder:
 
      folders:
@@ -106,7 +138,7 @@ function byEntry(a, b) {
    `folder:` on every entry for the two things this file is for: reading the
    taxonomy, and editing it by hand (renaming a folder is one key, moving one
    is one line). */
-function toYaml(bookmarks, { user = '' } = {}) {
+function toYaml(bookmarks, { user = '', folders: known = [] } = {}) {
   const grouped = new Map();
   const unfiled = [];
   for (const b of bookmarks) {
@@ -115,6 +147,8 @@ function toYaml(bookmarks, { user = '' } = {}) {
     if (!grouped.has(folder)) grouped.set(folder, []);
     grouped.get(folder).push(b);
   }
+
+  for (const path of emptyFolderKeys(known, grouped.keys())) grouped.set(path, []);
 
   const folders = {};
   for (const path of [...grouped.keys()].sort(byName)) {
@@ -141,6 +175,7 @@ function toYaml(bookmarks, { user = '' } = {}) {
     '  * rename a key      -> renames that folder for everything under it',
     '  * move an entry     -> cut it under another key, or give it a folder: line',
     '  * new folder        -> a key that does not exist yet is created on import',
+    '  * empty folder      -> a key with [] keeps a folder that holds nothing',
     '  * delete the id     -> the entry comes in as a new bookmark',
     '',
     'Importing an edited file: choose "Use the file". The other modes keep what',
@@ -275,10 +310,18 @@ function normalizeIncoming(raw, folderFromKey = '') {
 // `bookmarks:` list that earlier versions wrote. A file edited by hand tends to
 // be a mix of the two, so neither is treated as the only right answer.
 function parseYamlExport(text) {
+  return readYamlDoc(text).items;
+}
+
+// The same read, keeping the folder keys as well as the entries. A key with an
+// empty list is a folder that owns nothing, and it is the only thing in the
+// file that says so: dropping it here would lose the folder on every import.
+function readYamlDoc(text) {
   const doc = yaml.parse(text);
-  if (doc === null) return [];
+  if (doc === null) return { items: [], folders: [] };
 
   const out = [];
+  const seen = [];
   const takeList = (list, folder) => {
     if (!Array.isArray(list)) return;
     for (const item of list) {
@@ -289,7 +332,9 @@ function parseYamlExport(text) {
   const takeMap = (map) => {
     if (!map || typeof map !== 'object' || Array.isArray(map)) return;
     for (const [path, list] of Object.entries(map)) {
-      takeList(list, path === '/' ? '' : path);
+      const folder = path === '/' ? '' : normFolder(path);
+      if (folder) seen.push(folder);
+      takeList(list, folder);
     }
   };
 
@@ -309,10 +354,12 @@ function parseYamlExport(text) {
     else takeMap(doc.bookmarks);
   }
 
-  if (!out.length && !hasAnyList(doc)) {
+  // A file that carries nothing but empty folders is still a file that says
+  // something, so the folders count as content here.
+  if (!out.length && !seen.length && !hasAnyList(doc)) {
     throw new Error('YAML without a "folders" map or a "bookmarks" list, check the file');
   }
-  return out;
+  return { items: out, folders: [...new Set(seen)] };
 }
 
 // An empty vault is a valid file; a file with none of the expected keys is not.
@@ -478,9 +525,14 @@ function parseImport(text, format = 'auto') {
   const parser = parsers[chosen];
   if (!parser) throw new Error(`unknown format: ${chosen}`);
 
-  const items = parser(text);
+  // Only the YAML has a way to name a folder that holds nothing. For the other
+  // formats the list comes back empty, which is not the same as "no folders":
+  // their entries still carry folders, they just cannot mention an empty one.
+  const { items, folders } = chosen === 'yaml'
+    ? readYamlDoc(text)
+    : { items: parser(text), folders: [] };
   // With neither url nor title there is nothing to do with the entry.
-  return { format: chosen, items: items.filter((b) => b.url || b.title) };
+  return { format: chosen, items: items.filter((b) => b.url || b.title), folders };
 }
 
 /* ======================= import: plan ======================= */
@@ -522,8 +574,8 @@ function browserEntry(item, prefix) {
 // What the file turned out to carry, counted before anything is decided.
 // "348 bookmarks in 12 folders, no categories" is the honest answer to "what am
 // I about to import", and it is the answer people need before, not after.
-function fileStats(items) {
-  const folders = new Set();
+function fileStats(items, declared = []) {
+  const folders = new Set(declared);
   let unfiled = 0;
   let tagged = 0;
   let described = 0;
@@ -557,16 +609,18 @@ function readImport(text, { source = 'native', folderPrefix = '' } = {}) {
     throw new WrongSourceError('this file belongs to a browser: bring it in through "From a browser"');
   }
 
-  const { format, items } = parseImport(text, detected);
+  const { format, items, folders } = parseImport(text, detected);
   const prefix = source === 'browser' ? normFolder(folderPrefix) : '';
   const out = source === 'browser' ? items.map((b) => browserEntry(b, prefix)) : items;
-
-  return { source, format, prefix, items: out, stats: fileStats(out) };
+  // The prefix is not applied to `folders`, and does not need to be: only the
+  // YAML names a folder that holds nothing, and a YAML never arrives through
+  // the browser flow, which is the only flow that has a prefix.
+  return { source, format, prefix, items: out, folders, stats: fileStats(out, folders) };
 }
 
 /* ======================= import: plan ======================= */
 
-function planImport(existing, incoming, mode = 'add', { partialFields = [] } = {}) {
+function planImport(existing, incoming, mode = 'add', { partialFields = [], buried = [] } = {}) {
   if (!MODES.includes(mode)) throw new Error(`invalid mode: ${mode}`);
 
   const byId = new Map();
@@ -577,12 +631,21 @@ function planImport(existing, incoming, mode = 'add', { partialFields = [] } = {
     // The first one wins the index: a local duplicate does not steal the other's match.
     if (key && !byUrl.has(key)) byUrl.set(key, b);
   }
+  // Ids the vault has as tombstones. They are not in `existing`, so without
+  // this they would fall through to the URL, and the same URL in two folders is
+  // two records on purpose: restoring a deleted bookmark would land on top of
+  // the surviving one and take it over instead of coming back as itself.
+  const buriedIds = new Set(buried);
 
   const plan = { create: [], update: [], same: [], skip: [], remove: [] };
   const matched = new Set();
 
   for (const item of incoming) {
-    const current = (item.id && byId.get(item.id)) || byUrl.get(urlKey(item.url)) || null;
+    // An id the vault recognises is the answer, buried or not. The URL is only
+    // the fallback for an entry carrying no id, or an id from another install.
+    const current = (item.id && byId.get(item.id))
+      || (buriedIds.has(item.id) ? null : byUrl.get(urlKey(item.url)))
+      || null;
 
     if (!current) {
       plan.create.push({ incoming: item });
@@ -648,6 +711,7 @@ module.exports = {
   toJson,
   parseImport,
   parseYamlExport,
+  readYamlDoc,
   parseNetscapeHtml,
   parseChromeJson,
   detectFormat,

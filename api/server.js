@@ -107,6 +107,14 @@ function escapeLike(v) {
   return String(v).replace(/[\\%_]/g, (c) => '\\' + c);
 }
 
+// A path and every folder above it: `a/b/c` -> ['a', 'a/b', 'a/b/c']. Creating
+// a folder deep in the tree has to write the way down to it, or the new folder
+// hangs off parents that do not exist.
+function ancestry(path) {
+  const parts = normFolderPath(path).split('/').filter(Boolean);
+  return parts.map((_, i) => parts.slice(0, i + 1).join('/'));
+}
+
 // Usage counters arriving from a client. Never negative, never fractional:
 // they are merged with MAX and a bogus value would stick forever.
 const DAY = 86400000;
@@ -197,6 +205,9 @@ function createApp(dbPath) {
     // losing one costs a deletion that never arrives.
     since: db.prepare('SELECT * FROM bookmarks WHERE user_id = ? AND updated_at >= ? ORDER BY updated_at ASC'),
     getOne: db.prepare('SELECT * FROM bookmarks WHERE user_id = ? AND id = ?'),
+    // The ids the vault buried. An import needs them to tell "this entry is a
+    // bookmark I deleted" from "this entry is new", which the live list cannot.
+    buriedIds: db.prepare('SELECT id FROM bookmarks WHERE user_id = ? AND deleted = 1'),
     upsert: db.prepare(`
       INSERT INTO bookmarks (id, user_id, title, url, folder, category, tags, description, created_at, updated_at, deleted, opens, last_open_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -236,6 +247,32 @@ function createApp(dbPath) {
     inFolder: db.prepare(`
       SELECT * FROM bookmarks
       WHERE user_id = ? AND deleted = 0 AND (folder = ? OR folder LIKE ? ESCAPE '\\')`),
+    // Every folder a bookmark puts on the tree, whether or not it was created
+    // on purpose. This is the other half of the union the tree is made of.
+    bookmarkFolders: db.prepare(`
+      SELECT DISTINCT folder FROM bookmarks
+      WHERE user_id = ? AND deleted = 0 AND folder <> ''`),
+    allFolders: db.prepare(`
+      SELECT path, created_at, updated_at FROM folders
+      WHERE user_id = ? AND deleted = 0 ORDER BY path`),
+    // Tombstones included: a folder deleted elsewhere has to reach this client
+    // as news, not as silence. Same >= cursor as the bookmarks, for the same
+    // reason written above them.
+    foldersSince: db.prepare(`
+      SELECT path, created_at, updated_at, deleted FROM folders
+      WHERE user_id = ? AND updated_at >= ? ORDER BY updated_at ASC`),
+    getFolder: db.prepare('SELECT * FROM folders WHERE user_id = ? AND path = ?'),
+    upsertFolder: db.prepare(`
+      INSERT INTO folders (user_id, path, created_at, updated_at, deleted)
+      VALUES (?, ?, ?, ?, 0)
+      ON CONFLICT(user_id, path) DO UPDATE SET
+        updated_at = excluded.updated_at, deleted = 0`),
+    // A branch: the folder and everything under it, the same prefix match the
+    // bookmarks get, with the separator attached for the same reason.
+    folderBranch: db.prepare(`
+      SELECT * FROM folders
+      WHERE user_id = ? AND deleted = 0 AND (path = ? OR path LIKE ? ESCAPE '\\')`),
+    burnFolder: db.prepare('UPDATE folders SET deleted = 1, updated_at = ? WHERE user_id = ? AND path = ?'),
   };
 
   function auth(req) {
@@ -271,6 +308,57 @@ function createApp(dbPath) {
       counter(b.opens), counter(b.last_open_at),
     );
     return q.getOne.get(userId, id);
+  }
+
+  // Records a folder and the way down to it. Idempotent: a path that is
+  // already there only has its timestamp bumped, so the sync carries it, and a
+  // tombstoned one comes back.
+  function recordFolder(userId, path, ts = now()) {
+    const steps = ancestry(path);
+    for (const step of steps) {
+      const existing = q.getFolder.get(userId, step);
+      q.upsertFolder.run(userId, step, existing ? existing.created_at : ts, ts);
+    }
+    return steps.length;
+  }
+
+  // Every path the tree already shows: the folders written down, plus the ones
+  // the bookmarks put there on their own. This is what "already exists" means
+  // when a new folder is asked for, because to the person looking at the panel
+  // the two kinds are the same folder.
+  function folderPaths(userId) {
+    const out = new Set();
+    for (const row of q.allFolders.all(userId)) out.add(row.path);
+    for (const row of q.bookmarkFolders.all(userId)) {
+      for (const step of ancestry(row.folder)) out.add(step);
+    }
+    return out;
+  }
+
+  // Moves a branch: every bookmark under `from` and every folder row under it
+  // land under `target`. In both places the path is a plain string, so this is
+  // one prefix rewrite and the whole branch travels together.
+  //
+  // Folder rows are not created here for a branch that had none. A folder that
+  // exists only because bookmarks are inside it stays that way after moving:
+  // recording it would quietly promote it to a folder that survives emptying,
+  // which is a decision for whoever creates a folder, not for whoever drags one.
+  function moveBranch(userId, from, target, ts = now()) {
+    const like = escapeLike(from) + '/%';
+
+    const rows = q.inFolder.all(userId, from, like);
+    for (const row of rows) {
+      const rest = row.folder.slice(from.length);      // '' or '/child/…'
+      writeBookmark(userId, { ...row, folder: target + rest, updated_at: ts }, ts);
+    }
+
+    const branch = q.folderBranch.all(userId, from, like);
+    for (const row of branch) {
+      const rest = row.path.slice(from.length);
+      q.upsertFolder.run(userId, target + rest, row.created_at, ts);
+      q.burnFolder.run(ts, userId, row.path);
+    }
+    return { moved: rows.length, folders: branch.length };
   }
 
   const routes = {
@@ -332,8 +420,13 @@ function createApp(dbPath) {
       const stamp = new Date().toISOString().slice(0, 10);
 
       const renderers = {
-        yaml: () => [portability.toYaml(items, { user: user.username }),
-          'application/yaml; charset=utf-8', `bookmarks-${stamp}.yaml`],
+        // Only the YAML carries the empty folders. The HTML is a browser's
+        // format and browsers drop an empty <DL> on import, and the JSON is a
+        // flat list of bookmarks with nowhere to put a folder that has none.
+        yaml: () => [portability.toYaml(items, {
+          user: user.username,
+          folders: q.allFolders.all(user.id).map((f) => f.path),
+        }), 'application/yaml; charset=utf-8', `bookmarks-${stamp}.yaml`],
         html: () => [portability.toNetscapeHtml(items),
           'text/html; charset=utf-8', `bookmarks-${stamp}.html`],
         json: () => [portability.toJson(items),
@@ -392,6 +485,7 @@ function createApp(dbPath) {
         // A browser file cannot speak about categories, and only sometimes
         // about tags and descriptions. It may add, never take away.
         partialFields: source === 'browser' ? portability.BROWSER_PARTIAL_FIELDS : [],
+        buried: q.buriedIds.all(user.id).map((r) => r.id),
       });
       const preview = {
         source: parsed.source,
@@ -425,6 +519,25 @@ function createApp(dbPath) {
       }
       for (const { incoming } of plan.update) writeBookmark(user.id, { ...incoming, updated_at: ts }, ts);
       for (const { current } of plan.remove) q.softDelete.run(ts, user.id, current.id);
+
+      // Folders travel outside the plan. There is nothing to decide about one:
+      // a folder in the file either is already on the tree or is written down,
+      // and neither answer can lose a bookmark.
+      const keep = new Set();
+      for (const path of parsed.folders) {
+        for (const step of ancestry(path)) keep.add(step);
+      }
+      for (const path of keep) recordFolder(user.id, path, ts);
+      // `replace` means the file is the truth, for folders as much as for
+      // bookmarks: one that the file does not mention goes with the rest.
+      // Only for the YAML, though. The other formats have no way to write an
+      // empty folder down, so their silence is not an answer and pruning on it
+      // would delete folders the file never had an opinion about.
+      if (mode === 'replace' && parsed.format === 'yaml') {
+        for (const row of q.allFolders.all(user.id)) {
+          if (!keep.has(row.path)) q.burnFolder.run(ts, user.id, row.path);
+        }
+      }
 
       return json(res, 200, { ...preview, applied: true, total: q.allBookmarks.all(user.id).length });
     },
@@ -461,13 +574,75 @@ function createApp(dbPath) {
       }
 
       // LIKE with the separator attached, so `dev` does not also match `devops`.
-      const rows = q.inFolder.all(user.id, from, escapeLike(from) + '/%');
-      const ts = now();
-      for (const row of rows) {
-        const rest = row.folder.slice(from.length);      // '' or '/child/…'
-        writeBookmark(user.id, { ...row, folder: target + rest, updated_at: ts }, ts);
+      const { moved, folders } = moveBranch(user.id, from, target);
+      return json(res, 200, { moved, folders, from, to: target });
+    },
+
+    // The folders written down, which is not the whole tree: the app unions
+    // these with the ones it derives from the `folder` of each bookmark.
+    'GET /api/folders': async (req, res, user) => {
+      return json(res, 200, { folders: q.allFolders.all(user.id) });
+    },
+
+    // Creates a folder that owns nothing yet, which the `folder` string on a
+    // bookmark cannot express: that is the whole reason the table exists.
+    'POST /api/folders': async (req, res, user) => {
+      const b = await readBody(req);
+      const path = normFolderPath(b.path);
+      if (!path) return json(res, 400, { error: 'path is required' });
+      // Against the union, not against the table: a folder full of bookmarks
+      // is on screen, and answering "created" for it would be a lie.
+      if (folderPaths(user.id).has(path)) {
+        return json(res, 409, { error: `folder /${path} already exists` });
       }
-      return json(res, 200, { moved: rows.length, from, to: target });
+
+      recordFolder(user.id, path);
+      const row = q.getFolder.get(user.id, path);
+      return json(res, 201, { folder: { path: row.path, created_at: row.created_at, updated_at: row.updated_at } });
+    },
+
+    // Renaming is moving that keeps the parent, so it is the same prefix
+    // rewrite. A name with a `/` in it would be a move wearing a disguise, and
+    // it is refused rather than silently reparenting the branch.
+    'POST /api/folders/rename': async (req, res, user) => {
+      const b = await readBody(req);
+      const from = normFolderPath(b.path);
+      const name = normFolder(b.name);
+      if (!from) return json(res, 400, { error: 'path is required' });
+      if (!name) return json(res, 400, { error: 'name is required' });
+      if (name.includes('/')) {
+        return json(res, 400, { error: 'a name cannot contain "/": drag the folder to change where it lives' });
+      }
+
+      const parent = from.includes('/') ? from.slice(0, from.lastIndexOf('/')) : '';
+      const target = parent ? `${parent}/${name}` : name;
+      if (target === from) return json(res, 200, { moved: 0, folders: 0, from, to: target });
+      if (folderPaths(user.id).has(target)) {
+        return json(res, 409, { error: `folder /${target} already exists` });
+      }
+
+      const { moved, folders } = moveBranch(user.id, from, target);
+      return json(res, 200, { moved, folders, from, to: target });
+    },
+
+    // Deletes the folder and everything under it, bookmarks included. Both
+    // sides are tombstones, never DELETE, so an export taken before this still
+    // brings the bookmarks back: the import bumps a tombstone's timestamp past
+    // the deletion on purpose, right above.
+    'POST /api/folders/delete': async (req, res, user) => {
+      const b = await readBody(req);
+      const path = normFolderPath(b.path);
+      if (!path) return json(res, 400, { error: 'path is required' });
+      if (!folderPaths(user.id).has(path)) return json(res, 404, { error: 'not found' });
+
+      const like = escapeLike(path) + '/%';
+      const ts = now();
+      const rows = q.inFolder.all(user.id, path, like);
+      for (const row of rows) q.softDelete.run(ts, user.id, row.id);
+      const branch = q.folderBranch.all(user.id, path, like);
+      for (const row of branch) q.burnFolder.run(ts, user.id, row.path);
+
+      return json(res, 200, { path, bookmarks: rows.length, folders: branch.length });
     },
 
     // Browsing habits: what gets opened, and when. Everything is derived from
@@ -510,7 +685,11 @@ function createApp(dbPath) {
       // A push never revives: see writeBookmark.
       for (const item of pushed) writeBookmark(user.id, item, ts, { revive: false });
       const changes = q.since.all(user.id, since);
-      return json(res, 200, { changes, now: ts, pushed: pushed.length });
+      // `folders` is additive, and a client that predates it ignores the key.
+      // It only comes down: no client creates a folder while offline, so there
+      // is nothing to push and no conflict to resolve.
+      const folders = q.foldersSince.all(user.id, since);
+      return json(res, 200, { changes, folders, now: ts, pushed: pushed.length });
     },
   };
 

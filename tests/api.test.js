@@ -908,6 +908,139 @@ test('from is required', async () => {
   assert.equal(r.status, 400);
 });
 
+/* ---------------- folders of their own ---------------- */
+
+// A folder that holds nothing cannot be a string on a bookmark, which is the
+// whole reason the `folders` table exists. Everything below is about that one
+// difference: creating one, keeping it, and taking it with the branch.
+
+const paths = async (t = token) =>
+  (await call('GET', '/api/folders', { token: t })).body.folders.map((f) => f.path);
+
+test('creating a folder writes the way down to it', async () => {
+  const r = await call('POST', '/api/folders', { token, body: { path: '/empty/deep/leaf/' } });
+  assert.equal(r.status, 201);
+  assert.equal(r.body.folder.path, 'empty/deep/leaf');
+
+  const all = await paths();
+  for (const step of ['empty', 'empty/deep', 'empty/deep/leaf']) {
+    assert.ok(all.includes(step), `${step} is on the tree`);
+  }
+});
+
+test('a folder with no bookmarks in it still comes back', async () => {
+  await call('POST', '/api/folders', { token, body: { path: 'solitaria' } });
+  assert.ok((await paths()).includes('solitaria'));
+  // And nothing about it reaches the bookmarks.
+  const items = (await call('GET', '/api/bookmarks', { token })).body.items;
+  assert.equal(items.filter((b) => b.folder === 'solitaria').length, 0);
+});
+
+test('creating a folder that is already on the tree is refused', async () => {
+  await call('POST', '/api/folders', { token, body: { path: 'duplicada' } });
+  const again = await call('POST', '/api/folders', { token, body: { path: 'duplicada' } });
+  assert.equal(again.status, 409);
+
+  // Including one the tree only has because bookmarks are inside it: to
+  // whoever is looking at the panel the two kinds are the same folder.
+  await makeIn('derivada/dentro', 'algo');
+  const derived = await call('POST', '/api/folders', { token, body: { path: 'derivada' } });
+  assert.equal(derived.status, 409);
+});
+
+test('a path is required', async () => {
+  const r = await call('POST', '/api/folders', { token, body: { path: ' // ' } });
+  assert.equal(r.status, 400);
+});
+
+test('renaming rewrites the branch and keeps the parent', async () => {
+  const id = await makeIn('velho/dentro', 'um link');
+  await call('POST', '/api/folders', { token, body: { path: 'velho/dentro/vazia' } });
+
+  const r = await call('POST', '/api/folders/rename', { token, body: { path: 'velho/dentro', name: 'novo' } });
+  assert.equal(r.status, 200);
+  assert.equal(r.body.to, 'velho/novo');
+
+  const item = (await call('GET', `/api/bookmarks/${id}`, { token })).body.item;
+  assert.equal(item.folder, 'velho/novo', 'the bookmark went with it');
+
+  const all = await paths();
+  assert.ok(all.includes('velho/novo/vazia'), 'and so did the empty folder below it');
+  assert.ok(!all.includes('velho/dentro/vazia'), 'the old path is gone');
+});
+
+test('a rename cannot smuggle a move in the name', async () => {
+  await call('POST', '/api/folders', { token, body: { path: 'imovel' } });
+  const r = await call('POST', '/api/folders/rename', { token, body: { path: 'imovel', name: 'outro/lugar' } });
+  assert.equal(r.status, 400);
+  assert.match(r.body.error, /cannot contain/);
+});
+
+test('renaming onto a folder that exists is refused', async () => {
+  await call('POST', '/api/folders', { token, body: { path: 'ocupada' } });
+  await call('POST', '/api/folders', { token, body: { path: 'livre' } });
+  const r = await call('POST', '/api/folders/rename', { token, body: { path: 'livre', name: 'ocupada' } });
+  assert.equal(r.status, 409);
+});
+
+test('moving a folder carries the empty ones inside it', async () => {
+  await call('POST', '/api/folders', { token, body: { path: 'mudanca/nada' } });
+  const r = await call('POST', '/api/folders/move', { token, body: { from: 'mudanca', to: 'destino' } });
+  assert.equal(r.status, 200);
+  assert.equal(r.body.to, 'destino/mudanca');
+
+  const all = await paths();
+  assert.ok(all.includes('destino/mudanca/nada'));
+  assert.ok(!all.includes('mudanca/nada'), 'nothing is left behind at the old path');
+});
+
+test('deleting a folder takes the bookmarks under it', async () => {
+  const inside = await makeIn('condenada/sub', 'vai junto');
+  const outside = await makeIn('condenada-vizinha', 'fica');
+  await call('POST', '/api/folders', { token, body: { path: 'condenada/vazia' } });
+
+  const r = await call('POST', '/api/folders/delete', { token, body: { path: 'condenada' } });
+  assert.equal(r.status, 200);
+  assert.equal(r.body.bookmarks, 1);
+
+  assert.equal((await call('GET', `/api/bookmarks/${inside}`, { token })).status, 404);
+  assert.equal((await call('GET', `/api/bookmarks/${outside}`, { token })).status, 200,
+               'a folder whose name merely starts the same is untouched');
+
+  const all = await paths();
+  assert.ok(!all.some((x) => x === 'condenada' || x.startsWith('condenada/')));
+});
+
+test('deleting a folder that is not there says so', async () => {
+  const r = await call('POST', '/api/folders/delete', { token, body: { path: 'nunca-existiu' } });
+  assert.equal(r.status, 404);
+});
+
+test('folders are private to the user, like the bookmarks', async () => {
+  const other = (await call('POST', '/api/auth/register', {
+    body: { email: 'folders@example.com', username: 'folderuser', password: 'secret123' },
+  })).body.token;
+
+  await call('POST', '/api/folders', { token: other, body: { path: 'so-minha' } });
+  assert.ok(!(await paths()).includes('so-minha'));
+  assert.ok((await paths(other)).includes('so-minha'));
+});
+
+test('the sync carries folders, tombstones included', async () => {
+  const t = (await call('POST', '/api/auth/register', {
+    body: { email: 'foldersync@example.com', username: 'foldersync', password: 'secret123' },
+  })).body.token;
+
+  await call('POST', '/api/folders', { token: t, body: { path: 'sincronizada' } });
+  const first = await call('POST', '/api/sync', { token: t, body: { since: 0, changes: [] } });
+  assert.ok(first.body.folders.some((f) => f.path === 'sincronizada' && !f.deleted));
+
+  await call('POST', '/api/folders/delete', { token: t, body: { path: 'sincronizada' } });
+  const second = await call('POST', '/api/sync', { token: t, body: { since: first.body.now, changes: [] } });
+  assert.ok(second.body.folders.some((f) => f.path === 'sincronizada' && f.deleted === 1),
+            'the other client has to learn the folder is gone');
+});
+
 /* ---------------- insights ---------------- */
 
 test('insights reports the window, the top links and the log', async () => {

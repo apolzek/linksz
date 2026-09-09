@@ -172,8 +172,10 @@
       <p class="hint dim">With the caret out of the search box, <kbd>e</kbd> and <kbd>Del</kbd> do the same two.</p>
       <p class="hint dim">On a row: wheel click opens it in a new tab, right click edits it.</p>
       <p class="hint syntax"><code>#tag</code> <code>@category</code> <code>/folder</code> <code>title:something</code> <code>"exact phrase"</code> <code>-exclude</code></p>
-      <p class="hint">Terms combine with AND. Everything is substring, case and accent insensitive.
-         Drag a folder onto another one in the panel to nest it.</p>
+      <p class="hint">Terms combine with AND. Everything is substring, case and accent insensitive.</p>
+      <p class="hint dim">In the panel: drag a folder onto another one to nest it, drag a result onto
+         one to file it there, and drop either on empty space to send it to the root.
+         <code>new folder</code> makes one that is still empty.</p>
     </section>
   </div>
 
@@ -208,6 +210,23 @@
       <button type="submit" class="primary">save</button>
     </div>
     <p id="bm-error" class="error"></p>
+  </form>
+</div>
+
+<!-- ---------- FOLDER ---------- -->
+<!-- One field, because a folder is one thing: its path. The same card creates
+     and renames, since renaming is the one edit a folder has. -->
+<div id="folder-modal" class="modal hidden">
+  <form id="folder-form" class="modal-card folder-card">
+    <h2 id="folder-title">New folder</h2>
+    <label id="folder-path-label">Path<input id="f-path" placeholder="dev/linux" autocomplete="off" list="dl-folders"></label>
+    <p class="hint dim" id="folder-hint">Slashes nest it: <code>dev/linux</code> is <code>linux</code> inside <code>dev</code>.</p>
+    <div class="modal-actions">
+      <div class="spacer"></div>
+      <button type="button" id="folder-cancel" class="ghost">cancel</button>
+      <button type="submit" class="primary" id="folder-save">create</button>
+    </div>
+    <p id="folder-error" class="error"></p>
   </form>
 </div>
 

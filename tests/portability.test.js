@@ -615,6 +615,97 @@ test('the summary matches the lists', () => {
   assert.equal(plan.summary.read, 3);
 });
 
+/* ---------------- folders that hold nothing ---------------- */
+
+// The file is the vault's backup, so a folder created and left empty has to
+// survive it. It is written as a key with an empty list inside the `folders:`
+// map that has been there since version 2, which is the part that matters for
+// compatibility: an importer that knows nothing about this walks past the key
+// instead of failing on it.
+
+test('an empty folder is written as a key with no entries', () => {
+  const doc = yaml.parse(p.toYaml(VAULT, { folders: ['dev', 'dev/infra', 'vazia/funda'] }));
+  assert.equal(doc.version, 2, 'the version does not move: the shape did not change');
+  assert.deepEqual(doc.folders['vazia/funda'], []);
+  assert.deepEqual(
+    Object.keys(doc.folders).sort(),
+    ['dev', 'dev/infra', 'vazia/funda'],
+    'a folder the bookmarks already write is not repeated as an empty key',
+  );
+});
+
+test('only the tips are written, since the way down is recreated on import', () => {
+  const doc = yaml.parse(p.toYaml([], { folders: ['a', 'a/b', 'a/b/c'] }));
+  assert.deepEqual(Object.keys(doc.folders), ['a/b/c']);
+  // And reading it back names the whole branch, so nothing was lost by not
+  // writing the parents down.
+  const { folders } = p.readImport(p.toYaml([], { folders: ['a', 'a/b', 'a/b/c'] }));
+  assert.deepEqual(folders, ['a/b/c']);
+});
+
+test('an empty folder survives the round trip', () => {
+  const file = p.toYaml(VAULT, { folders: ['vazia'] });
+  const { items, folders } = p.readImport(file);
+  assert.equal(items.length, 2, 'the bookmarks came through untouched');
+  assert.ok(folders.includes('vazia'));
+  assert.ok(folders.includes('dev/infra'), 'the folders holding bookmarks are named too');
+});
+
+test('a file that is nothing but empty folders is still a valid file', () => {
+  const file = p.toYaml([], { folders: ['so-pastas'] });
+  const read = p.readImport(file);
+  assert.deepEqual(read.items, []);
+  assert.deepEqual(read.folders, ['so-pastas']);
+});
+
+test('the file counts an empty folder among its folders', () => {
+  const { stats } = p.readImport(p.toYaml(VAULT, { folders: ['vazia'] }));
+  assert.equal(stats.count, 2);
+  assert.equal(stats.folders, 3, 'dev, dev/infra and the empty one');
+});
+
+test('the formats that cannot express an empty folder say nothing, not zero', () => {
+  const html = p.readImport(p.toNetscapeHtml(VAULT), { source: 'browser' });
+  assert.deepEqual(html.folders, [], 'the HTML has no way to write one down');
+  const json = p.parseImport(p.toJson(VAULT));
+  assert.deepEqual(json.folders, []);
+});
+
+/* ---------------- compatibility with older files ---------------- */
+
+test('a file from before empty folders reads the same as it always did', () => {
+  const before = ['version: 2', 'folders:', '  dev:', '  - id: v2', '    title: The Go Blog',
+                  '    url: https://go.dev/blog'].join('\n');
+  const { items, folders } = p.readImport(before);
+  assert.equal(items.length, 1);
+  assert.equal(items[0].folder, 'dev');
+  assert.deepEqual(folders, ['dev'], 'the key is a folder whether or not it holds anything');
+});
+
+test('a restored bookmark does not land on another one that shares its URL', () => {
+  // The same URL in two folders is two records on purpose. With one of them
+  // deleted, its id is buried and not in the live list, so without being told
+  // about the tombstone the import would match the entry by URL and take over
+  // the survivor instead of bringing the deleted one back.
+  const live = [{ id: 'sobrevivente', title: 'Go copy', url: 'https://go.dev', folder: 'outra',
+                  category: '', tags: '', description: '', created_at: 1, updated_at: 1 }];
+  const incoming = [{ id: 'enterrado', title: 'Go', url: 'https://go.dev', folder: 'dev' }];
+
+  const blind = p.planImport(live, incoming, 'update');
+  assert.equal(blind.update.length, 1, 'without the tombstone it lands on the survivor');
+
+  const told = p.planImport(live, incoming, 'update', { buried: ['enterrado'] });
+  assert.equal(told.create.length, 1, 'told about it, the deleted one comes back as itself');
+  assert.equal(told.update.length, 0, 'and the survivor is left alone');
+});
+
+test('an entry with no id still matches by URL, the way it always has', () => {
+  const incoming = [{ title: 'Kubernetes Docs, edited', url: 'https://kubernetes.io/docs' }];
+  const plan = p.planImport(VAULT, incoming, 'update', { buried: ['v1'] });
+  assert.equal(plan.update.length, 1);
+  assert.equal(plan.update[0].current.id, 'v1');
+});
+
 test('a file using the old field name (notes) still imports', () => {
   const yaml = ['bookmarks:', '  - title: Old', '    url: https://old.com', '    notes: came from the old format'].join('\n');
   const { items } = p.parseImport(yaml, 'yaml');

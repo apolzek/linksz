@@ -25,9 +25,13 @@ const API = '';
 const state = {
   token: localStorage.getItem('bookmarks_token') || '',
   items: [],          // every live bookmark
+  // The folders written down on the server. The tree the panel draws is these
+  // plus the ones the bookmarks imply, so a folder holding nothing still shows.
+  folders: [],
   results: [],
   sel: 0,
   editing: null,
+  editingFolder: null,   // the folder the folder modal is renaming, null when creating
   lastSync: 0,
   panelFilter: {},   // filters for the panel lists (they do not filter bookmarks)
   closedFolders: new Set(JSON.parse(localStorage.getItem('bookmarks_closed_folders') || '[]')),
@@ -337,8 +341,14 @@ $('#btn-logout').onclick = async () => {
 
 /* ---------------- data ---------------- */
 async function loadAll() {
-  const r = await api('/api/bookmarks?limit=5000');
+  const [r, f] = await Promise.all([
+    api('/api/bookmarks?limit=5000'),
+    // An older server has no such route. The tree still draws from the
+    // bookmarks, so this is a degraded panel, never a broken one.
+    api('/api/folders').catch(() => ({ folders: [] })),
+  ]);
   state.items = r.items;
+  state.folders = f.folders.map((x) => x.path);
   state.lastSync = Date.now();
   refreshDatalists();
   render();
@@ -352,11 +362,20 @@ async function pullChanges() {
       body: JSON.stringify({ since: state.lastSync, changes: [] }),
     });
     state.lastSync = r.now;
-    if (!r.changes.length) return;
+    // `folders` is only sent by a server that knows about them, and an empty
+    // list is a real answer (nothing changed), so the key's absence is what
+    // says "this server has nothing to say", not its length.
+    const folders = Array.isArray(r.folders) ? r.folders : [];
+    if (!r.changes.length && !folders.length) return;
     for (const c of r.changes) {
       const i = state.items.findIndex((b) => b.id === c.id);
       if (c.deleted) { if (i >= 0) state.items.splice(i, 1); continue; }
       if (i >= 0) state.items[i] = c; else state.items.unshift(c);
+    }
+    for (const f of folders) {
+      const known = state.folders.includes(f.path);
+      if (f.deleted) { if (known) state.folders.splice(state.folders.indexOf(f.path), 1); }
+      else if (!known) state.folders.push(f.path);
     }
     refreshDatalists();
     render();
@@ -375,7 +394,7 @@ function refreshDatalists() {
       el.appendChild(o);
     }
   };
-  fill($('#dl-folders'), state.items.map((b) => b.folder));
+  fill($('#dl-folders'), [...state.items.map((b) => b.folder), ...state.folders]);
   fill($('#dl-categories'), state.items.map((b) => b.category));
 }
 
@@ -478,10 +497,13 @@ function render() {
   for (const [i, b] of state.results.entries()) {
     const li = document.createElement('li');
     li.className = 'item' + (i === state.sel ? ' sel' : '');
+    // The row is a drag source: dropping it on a folder in the panel files it
+    // there. This is also what records the pointer position the click below
+    // reads.
+    wireBookmarkDrag(li, b);
     // Selecting the title to copy it ends in a click on the row, which used to
     // open the link and wipe the selection. A pointer that travelled, or any
     // text left selected, means the gesture was a selection.
-    li.onpointerdown = (e) => { li.dataset.px = e.clientX; li.dataset.py = e.clientY; };
     li.onclick = (e) => {
       const moved = Math.hypot(e.clientX - Number(li.dataset.px || e.clientX),
                                e.clientY - Number(li.dataset.py || e.clientY));
@@ -680,8 +702,27 @@ function browseSection(heading, prefix, entries, emptyText, filter) {
 // `dev/k8s` is a single string in the database; the tree exists only on screen.
 // A node's total includes its descendants: clicking `dev` filters `dev/*`
 // because the search does a substring match on the folder field.
-function folderTree(items) {
+//
+// Two sources feed it. The bookmarks put a folder on the tree by being inside
+// it, and `folders` are the ones created on their own, which is the only way a
+// folder with nothing in it can be here at all.
+function folderTree(items, folders = []) {
   const root = new Map();
+  // Walks a path into the tree and hands back the node at the end of it,
+  // creating what is missing on the way.
+  const reach = (folder) => {
+    let level = root;
+    let path = '';
+    let node = null;
+    for (const part of folder.split('/').filter(Boolean)) {
+      path = path ? `${path}/${part}` : part;
+      if (!level.has(part)) level.set(part, { name: part, path, total: 0, children: new Map() });
+      node = level.get(part);
+      level = node.children;
+    }
+    return node;
+  };
+
   for (const b of items) {
     if (!b.folder) continue;
     let level = root;
@@ -694,6 +735,8 @@ function folderTree(items) {
       level = node.children;
     }
   }
+  // After the bookmarks, so an empty folder shows up with the 0 it really has.
+  for (const folder of folders) reach(folder);
   return root;
 }
 
@@ -718,13 +761,20 @@ function saveClosedFolders() {
   localStorage.setItem('bookmarks_closed_folders', JSON.stringify([...state.closedFolders]));
 }
 
-// Dragging a folder onto another one, on pointer events rather than HTML5 drag
-// and drop. The native API refuses to start a drag on a <button>, behaves
-// differently across browsers and cannot be driven by a test; this is a
-// mousedown, a threshold and an elementFromPoint, and it is the same code path
-// for every pointer.
+// Dragging onto a folder, on pointer events rather than HTML5 drag and drop.
+// The native API refuses to start a drag on a <button>, behaves differently
+// across browsers and cannot be driven by a test; this is a mousedown, a
+// threshold and an elementFromPoint, and it is the same code path for every
+// pointer.
+//
+// Two things are dragged and one thing is aimed at. A folder row nests the
+// folder, a result row files the bookmark, and either dropped on the section's
+// empty space goes to the root. Only what is being dragged differs, so `kind`
+// is the one branch and the gesture below is shared.
 const drag = {
+  kind: null,        // 'folder' or 'bookmark'
   path: null,        // folder being dragged
+  item: null,        // bookmark being dragged
   row: null,         // its row
   from: null,        // where the gesture started, to measure the threshold
   active: false,     // past the threshold: it is a drag, not a click
@@ -747,6 +797,18 @@ function canDropFolder(from, to) {
   if (!from || from === to) return false;
   if (to === from || to.startsWith(from + '/')) return false;
   return parentOf(from) !== to;
+}
+
+// Filing a bookmark where it already is would be a write that changes nothing.
+function canDropBookmark(b, to) {
+  return !!b && String(b.folder || '') !== to;
+}
+
+// What the gesture in flight is allowed to land on.
+function canDrop(to) {
+  return drag.kind === 'bookmark'
+    ? canDropBookmark(drag.item, to)
+    : canDropFolder(drag.path, to);
 }
 
 // A filter pinned to the folder that just moved has to move with it. Otherwise
@@ -791,22 +853,51 @@ async function moveFolder(from, to) {
   }
 }
 
+// Filing a bookmark is an edit to one field, so it goes through the same PUT
+// the modal uses: nothing about having dragged it makes it a different write.
+// Only `folder` is sent, and the server merges it over the record, so a drag
+// cannot overwrite a title someone changed on another device meanwhile.
+async function fileBookmark(b, to) {
+  if (!canDropBookmark(b, to)) return;
+  setSync('moving…', 'saving');
+  try {
+    const r = await api(`/api/bookmarks/${b.id}`, {
+      method: 'PUT',
+      body: JSON.stringify({ folder: to }),
+    });
+    const i = state.items.findIndex((x) => x.id === r.item.id);
+    if (i >= 0) state.items[i] = r.item; else state.items.unshift(r.item);
+    state.lastSync = r.item.updated_at;
+    // The destination opens, otherwise the bookmark looks like it was lost
+    // rather than filed.
+    for (let path = to; path; path = parentOf(path)) state.closedFolders.delete(path);
+    saveClosedFolders();
+    refreshDatalists();
+    render();
+    setSync(to ? `filed under /${to}` : 'moved to the root');
+    setTimeout(() => setSync('synced'), 3000);
+  } catch (err) {
+    setSync(err.message || 'move failed', 'err');
+  }
+}
+
 // What is under the pointer: a folder row, the root strip, or nothing.
 function dropTargetAt(x, y) {
   const el = document.elementFromPoint(x, y);
   if (!el) return null;
 
-  // A folder row is the obvious target: dropping on it puts the folder inside.
+  // A folder row is the obvious target: dropping on it puts what is being
+  // dragged inside.
   const row = el.closest('.tree-row');
   if (row?.dataset.path) {
-    return canDropFolder(drag.path, row.dataset.path) ? { el: row, to: row.dataset.path } : null;
+    return canDrop(row.dataset.path) ? { el: row, to: row.dataset.path } : null;
   }
 
   // Everything else in the folders section means the root, the same way a file
   // manager reads a drop on empty space as "into the folder you are looking
   // at". The heading is that folder's name, so it answers too.
   const section = el.closest('.facet-folders');
-  if (section) return canDropFolder(drag.path, '') ? { el: section, to: '' } : null;
+  if (section) return canDrop('') ? { el: section, to: '' } : null;
   return null;
 }
 
@@ -846,30 +937,100 @@ function autoScroll(y) {
   requestAnimationFrame(tick);
 }
 
-function beginDrag(pointerId) {
-  drag.active = true;
-  // Captured only now: taking the pointer on mousedown would send the click
-  // that follows a plain tap to the row instead of the folder button.
-  drag.row.setPointerCapture(pointerId);
+// The gesture starts on a row and is followed on the window.
+//
+// It used to be followed by capturing the pointer on the row itself, which does
+// not survive contact with the browser: as soon as the drag begins the row gets
+// `pointer-events: none`, so that it stops answering elementFromPoint and the
+// row under the pointer is not always the one being dragged. Chrome stops
+// routing to a capturing element in that state, so every move and the release
+// went to whatever was underneath, the row never heard them, and the drop
+// landed nowhere. The window hears them all, whatever the row is doing.
+function watchPointer(on) {
+  const how = on ? 'addEventListener' : 'removeEventListener';
+  window[how]('pointermove', onDragMove, true);
+  window[how]('pointerup', onDragUp, true);
+  window[how]('pointercancel', onDragCancel, true);
+}
 
+// Left button, never touch (a finger drag would fight the panel's scroll), and
+// never from a control on the row that has a job of its own.
+function startDrag(what, row, e, exclude) {
+  if (e.button !== 0 || e.pointerType === 'touch') return;
+  if (exclude && e.target.closest(exclude)) return;
+  Object.assign(drag, { kind: null, path: null, item: null, ...what, row,
+                        from: { x: e.clientX, y: e.clientY }, active: false });
+  watchPointer(true);
+}
+
+function onDragMove(e) {
+  if (!drag.row) return;
+  if (!drag.active) {
+    if (Math.hypot(e.clientX - drag.from.x, e.clientY - drag.from.y) < DRAG_THRESHOLD) return;
+    // Text selected before the gesture turned into a drag would stay
+    // highlighted under the ghost, and the click guard afterwards reads a
+    // selection as "this was not a click".
+    getSelection()?.removeAllRanges();
+    beginDrag();
+  }
+  drag.ghost.style.transform = `translate(${e.clientX + 12}px, ${e.clientY + 10}px)`;
+  drag.at = { x: e.clientX, y: e.clientY };
+  highlightTarget(dropTargetAt(e.clientX, e.clientY));
+  autoScroll(e.clientY);
+}
+
+function onDragUp(e) {
+  if (!drag.row) return;
+  if (endDrag(true)) { e.preventDefault(); e.stopPropagation(); }
+}
+
+function onDragCancel() {
+  if (drag.row) endDrag(false);
+}
+
+// A release is followed by a click on whatever the pointer ended on, which
+// would toggle the filter of the folder just dropped into, or open the link
+// just filed. A drag is not a click, so the one that follows is swallowed. The
+// timer is for the drop that lands nowhere and produces no click at all: the
+// listener must not sit there waiting to eat an honest one.
+function swallowNextClick() {
+  const done = () => { window.removeEventListener('click', eat, true); clearTimeout(timer); };
+  const eat = (e) => { e.preventDefault(); e.stopPropagation(); done(); };
+  window.addEventListener('click', eat, true);
+  const timer = setTimeout(done, 300);
+}
+
+function beginDrag() {
+  drag.active = true;
   drag.row.classList.add('dragging');
   $('#browse-body').classList.add('dragging');
+  // A result row is dragged from outside the panel, so the guard against
+  // selecting text mid-gesture has to cover the page, not only the panel.
+  document.body.classList.add('dragging');
 
   drag.ghost = document.createElement('div');
   drag.ghost.className = 'drag-ghost';
-  drag.ghost.textContent = '/' + drag.path;
+  drag.ghost.textContent = drag.kind === 'bookmark'
+    ? (drag.item.title || drag.item.url)
+    : '/' + drag.path;
   document.body.append(drag.ghost);
 }
 
 function endDrag(drop) {
-  const { path, target, active } = drag;
+  const { kind, path, item, target, active } = drag;
+  watchPointer(false);
   drag.ghost?.remove();
   drag.row?.classList.remove('dragging');
   drag.target?.el.classList.remove('drop-into');
   $('#browse-body').classList.remove('dragging');
-  Object.assign(drag, { path: null, row: null, from: null, active: false, target: null,
-                        ghost: null, at: null, scroll: 0 });
-  if (drop && active && target) moveFolder(path, target.to);
+  document.body.classList.remove('dragging');
+  Object.assign(drag, { kind: null, path: null, item: null, row: null, from: null,
+                        active: false, target: null, ghost: null, at: null, scroll: 0 });
+  if (active) swallowNextClick();
+  if (drop && active && target) {
+    if (kind === 'bookmark') fileBookmark(item, target.to);
+    else moveFolder(path, target.to);
+  }
   return active;
 }
 
@@ -877,37 +1038,21 @@ function endDrag(drop) {
 // only the source needs wiring.
 function wireFolderDrag(row, path) {
   row.dataset.path = path;
+  // Not from the expand arrow, and not from the rename and delete buttons:
+  // those have a job of their own.
+  row.onpointerdown = (e) => startDrag({ kind: 'folder', path }, row, e, '.tree-toggle, .icon-btn');
+}
 
+// The same gesture from the other side of the screen: a result row is a drag
+// source too, and the panel is what it aims at. The pointer position is also
+// what the click handler reads to tell a click from a text selection, so it is
+// recorded here rather than in two places.
+function wireBookmarkDrag(row, b) {
   row.onpointerdown = (e) => {
-    // Left button only, and never from the expand arrow: that one has a job.
-    if (e.button !== 0 || e.target.closest('.tree-toggle')) return;
-    // Touch keeps scrolling the panel; a finger drag would fight the scroll.
-    if (e.pointerType === 'touch') return;
-    Object.assign(drag, { path, row, from: { x: e.clientX, y: e.clientY }, active: false });
+    row.dataset.px = e.clientX;
+    row.dataset.py = e.clientY;
+    startDrag({ kind: 'bookmark', item: b }, row, e, 'button, a');
   };
-
-  row.onpointermove = (e) => {
-    if (drag.row !== row) return;
-    if (!drag.active) {
-      if (Math.hypot(e.clientX - drag.from.x, e.clientY - drag.from.y) < DRAG_THRESHOLD) return;
-      beginDrag(e.pointerId);
-    }
-    drag.ghost.style.transform = `translate(${e.clientX + 12}px, ${e.clientY + 10}px)`;
-    drag.at = { x: e.clientX, y: e.clientY };
-    // The row under the pointer is the dragged one otherwise, since the capture
-    // keeps the events here: .dragging turns off its pointer events.
-    highlightTarget(dropTargetAt(e.clientX, e.clientY));
-    autoScroll(e.clientY);
-  };
-
-  row.onpointerup = (e) => {
-    if (drag.row !== row) return;
-    if (row.hasPointerCapture(e.pointerId)) row.releasePointerCapture(e.pointerId);
-    // A drag that ends is not also a click on the folder.
-    if (endDrag(true)) { e.preventDefault(); e.stopPropagation(); }
-  };
-
-  row.onpointercancel = () => { if (drag.row === row) endDrag(false); };
 }
 
 function treeRows(level, depth, into, filter) {
@@ -966,6 +1111,18 @@ function treeRows(level, depth, into, filter) {
     };
     b.title = '/' + node.path;
     row.append(b);
+
+    // Renaming and deleting sit on the row the way they sit on a result: out of
+    // the way until the pointer is there. Dragging is what moves a folder, so
+    // these two are the whole of what is left to do to one.
+    const actions = document.createElement('div');
+    actions.className = 'item-actions tree-actions';
+    actions.append(
+      iconButton('✎', `Rename /${node.path}`, () => openFolderModal(node.path)),
+      iconButton('🗑', `Delete /${node.path}`, () => removeFolder(node.path)),
+    );
+    row.append(actions);
+
     wireFolderDrag(row, node.path);
 
     branch.append(row);
@@ -1015,6 +1172,8 @@ function treeSection(root, total, filter) {
     sec.append(actions);
   }
 
+  sec.append(newFolderButton());
+
   if (!total) {
     const p = document.createElement('p');
     p.className = 'facet-empty';
@@ -1036,6 +1195,148 @@ function treeSection(root, total, filter) {
   }
   sec.append(tree);
   return sec;
+}
+
+// The one action the panel offers that is not a filter. It sits under the
+// expand pair, because that is where the folder section's controls already are.
+function newFolderButton() {
+  const wrap = document.createElement('div');
+  wrap.className = 'facet-actions facet-new';
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.className = 'linkish';
+  b.textContent = 'new folder';
+  b.title = 'Create a folder, empty';
+  b.onclick = () => openFolderModal();
+  wrap.append(b);
+  return wrap;
+}
+
+// The folder currently filtered on, which is the folder someone looking at the
+// panel means by "here". A new folder starts inside it.
+function currentFolder() {
+  const token = $('#q').value.trim().split(/\s+/).find((p) => p.startsWith('/') && p.length > 1);
+  return token ? token.slice(1) : '';
+}
+
+// One card for the two edits a folder has. Creating asks for a whole path,
+// renaming asks for a name, because a rename that could reparent the branch
+// would be a move wearing a disguise and the drag already does moves.
+function openFolderModal(path = null) {
+  state.editingFolder = path;
+  const renaming = path !== null;
+  $('#folder-title').textContent = renaming ? 'Rename folder' : 'New folder';
+  $('#folder-path-label').firstChild.textContent = renaming ? 'Name' : 'Path';
+  $('#folder-save').textContent = renaming ? 'rename' : 'create';
+  $('#folder-hint').innerHTML = renaming
+    ? 'Renames <code>/' + escapeText(path) + '</code> for everything inside it.'
+    : 'Slashes nest it: <code>dev/linux</code> is <code>linux</code> inside <code>dev</code>.';
+
+  const input = $('#f-path');
+  // A rename starts on the name alone; a new folder starts inside whatever is
+  // being browsed, which is what "new folder" means while looking at one.
+  if (renaming) {
+    input.value = path.includes('/') ? path.slice(path.lastIndexOf('/') + 1) : path;
+  } else {
+    const here = currentFolder();
+    input.value = here ? here + '/' : '';
+  }
+  input.setAttribute('list', renaming ? '' : 'dl-folders');
+
+  $('#folder-error').textContent = '';
+  $('#folder-modal').classList.remove('hidden');
+  input.focus();
+  // The caret lands at the end, so typing continues the path instead of
+  // splitting the parent it was prefilled with.
+  input.setSelectionRange(input.value.length, input.value.length);
+}
+
+function closeFolderModal() {
+  $('#folder-modal').classList.add('hidden');
+  state.editingFolder = null;
+  $('#q').focus();
+}
+
+// Text into the one place here that takes HTML, since the hint carries a <code>.
+function escapeText(v) {
+  const el = document.createElement('span');
+  el.textContent = v;
+  return el.innerHTML;
+}
+
+$('#folder-form').onsubmit = async (e) => {
+  e.preventDefault();
+  const value = $('#f-path').value.trim().replace(/^\/+|\/+$/g, '');
+  if (!value) {
+    $('#folder-error').textContent = 'enter a name';
+    return;
+  }
+
+  const renaming = state.editingFolder !== null;
+  if (renaming && value.includes('/')) {
+    $('#folder-error').textContent = 'a name cannot contain "/": drag the folder to move it';
+    return;
+  }
+
+  setSync('saving…', 'saving');
+  try {
+    if (renaming) {
+      const from = state.editingFolder;
+      const r = await api('/api/folders/rename', {
+        method: 'POST',
+        body: JSON.stringify({ path: from, name: value }),
+      });
+      for (let path = r.to; path; path = parentOf(path)) state.closedFolders.delete(path);
+      saveClosedFolders();
+      await loadAll();
+      // The search bar may be pointing at the old name, the same way it does
+      // after a move.
+      retargetFolderTokens(from, r.to);
+      setSync(`renamed to /${r.to}`);
+    } else {
+      await api('/api/folders', { method: 'POST', body: JSON.stringify({ path: value }) });
+      for (let path = value; path; path = parentOf(path)) state.closedFolders.delete(path);
+      saveClosedFolders();
+      await loadAll();
+      setSync(`created /${value}`);
+    }
+    closeFolderModal();
+    setTimeout(() => setSync('synced'), 3000);
+  } catch (err) {
+    $('#folder-error').textContent = err.message;
+    setSync('save failed', 'err');
+  }
+};
+
+$('#folder-cancel').onclick = closeFolderModal;
+$('#folder-modal').onclick = (e) => { if (e.target.id === 'folder-modal') closeFolderModal(); };
+
+// Deleting takes everything inside with it, so the question says how much that
+// is. The counts come from what is already in memory: the panel knows the whole
+// vault, and asking the server first would only add a wait to a question.
+async function removeFolder(path) {
+  const inside = state.items.filter((b) => b.folder === path || b.folder.startsWith(path + '/'));
+  const under = state.folders.filter((p) => p === path || p.startsWith(path + '/'));
+  const subfolders = new Set(under.filter((p) => p !== path));
+  for (const b of inside) {
+    const rest = b.folder.slice(path.length);
+    if (rest) subfolders.add(path + rest);
+  }
+
+  const parts = [];
+  if (inside.length) parts.push(`${inside.length} bookmark${inside.length > 1 ? 's' : ''}`);
+  if (subfolders.size) parts.push(`${subfolders.size} subfolder${subfolders.size > 1 ? 's' : ''}`);
+  const what = parts.length ? `/${path} and everything in it: ${parts.join(' and ')}` : `/${path}`;
+  if (!await askDelete(what)) return;
+
+  setSync('saving…', 'saving');
+  try {
+    await api('/api/folders/delete', { method: 'POST', body: JSON.stringify({ path }) });
+    await loadAll();
+    setSync('synced');
+  } catch (err) {
+    setSync(err.message || 'delete failed', 'err');
+  }
 }
 
 // A filter over the list itself: it does not touch the bookmark search, it only
@@ -1064,7 +1365,7 @@ function renderBrowse() {
 
   body.innerHTML = '';
 
-  const root = folderTree(state.items);
+  const root = folderTree(state.items, state.folders);
   const tags = state.items.flatMap((b) => b.tags.split(',').filter(Boolean));
   const filterEntries = (list, key) => {
     const term = BookmarksSearch.norm(state.panelFilter[key] || '');
@@ -1326,6 +1627,10 @@ document.addEventListener('keydown', (e) => {
   }
   if (!$('#modal').classList.contains('hidden')) {
     if (e.key === 'Escape') closeModal();
+    return;
+  }
+  if (!$('#folder-modal').classList.contains('hidden')) {
+    if (e.key === 'Escape') closeFolderModal();
     return;
   }
   if ($('#app').classList.contains('hidden')) return;

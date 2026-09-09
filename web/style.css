@@ -326,6 +326,18 @@ select.ghost option { background: var(--panel); color: var(--text); }
    were cramped and wrapped at the panel's width. */
 .facet-actions { display: flex; justify-content: center; gap: 12px; padding: 0 6px 8px; }
 .facet-actions .linkish:disabled { color: var(--muted); opacity: .55; }
+/* The only control here that writes something, so it is not crowded in with
+   the expand pair that only changes what is on screen. */
+.facet-new { justify-content: flex-start; padding-top: 0; }
+
+/* Rename and delete on the folder row, hidden until the pointer is on it, the
+   same way the result rows carry theirs. */
+.tree-actions { opacity: 0; transition: opacity .1s; }
+.tree-row:hover .tree-actions, .tree-actions:focus-within { opacity: 1; }
+.tree-actions .icon-btn { opacity: 1; padding: 2px 4px; font-size: 11px; }
+/* Mid-drag the buttons would flicker under the ghost and steal the drop. */
+#browse-body.dragging .tree-actions { display: none; }
+@media (hover: none) { .tree-actions { opacity: 1; } }
 
 /* A button that cannot be pressed should not look like it can. The import
    button spends real time disabled now: the wrong file in a flow leaves it
@@ -373,8 +385,11 @@ button:disabled { cursor: not-allowed; opacity: .45; }
 /* The tree rows are divs now: the focus ring a button had comes back by hand. */
 .facet-row[role="button"]:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
 .tree-row.dragging { opacity: .4; }
-/* No text selection while dragging across the panel. */
-#browse-body.dragging { user-select: none; }
+/* No text selection while dragging. A result row is dragged from outside the
+   panel, so the guard covers the page and not only the panel. */
+#browse-body.dragging, body.dragging { user-select: none; }
+/* Same fade and the same "do not answer elementFromPoint" as a folder row. */
+.item.dragging { opacity: .4; pointer-events: none; }
 .tree-row.drop-into { outline: 1px solid var(--accent); background: var(--accent-soft); }
 /* Dropping on the root. There is no widget for it: the folders section is the
    root folder, so its empty space and its heading are the target, the way
@@ -580,6 +595,9 @@ mark { background: var(--accent-soft); color: inherit; border-radius: 0; padding
 .row { display: flex; gap: 12px; }
 .row label { flex: 1; }
 .modal-actions { display: flex; gap: 8px; align-items: center; margin-top: 4px; }
+/* One field, so it is narrower than the bookmark form. */
+.folder-card { max-width: 400px; }
+.folder-card .hint { margin: 0; }
 /* The confirm is one question, so it is narrower than the forms. */
 .confirm-card { max-width: 380px; }
 .confirm-lead { margin: 0; font-size: 12.5px; color: var(--muted); }
