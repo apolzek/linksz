@@ -27,15 +27,17 @@ services:
       dockerfile: api/Dockerfile
     image: bookmarks-api:local
     restart: unless-stopped
-    # The image's own user owns /data, which is the wrong answer for a bind
-    # mount: what matters there is the ownership on the host. Running as the
-    # user who owns the vault directory is what keeps the file readable and
-    # writable from both sides. `id -u` and `id -g` on this machine.
-    user: "${BOOKMARKS_UID:-1000}:${BOOKMARKS_GID:-1000}"
     environment:
       BOOKMARKS_HOST: 0.0.0.0
       BOOKMARKS_PORT: "8787"
       BOOKMARKS_DB: /data/bookmarks.db
+      # Which uid the server runs as, so the vault stays readable and writable
+      # from the host too. Empty on purpose: with nothing set, the entrypoint
+      # takes the uid that owns the mounted directory, which is already the
+      # right answer on any machine. Fill it in (`id -u`, `id -g`) only to
+      # override that.
+      BOOKMARKS_UID: ${BOOKMARKS_UID:-}
+      BOOKMARKS_GID: ${BOOKMARKS_GID:-}
       # Which origins may drive the API from a browser. Empty is correct here:
       # nginx serves the PWA and proxies /api on one origin, so the app never
       # makes a cross-origin request. Fill it in (comma separated, or `*`) only

@@ -22,6 +22,7 @@ WORKDIR /app
 COPY api ./api
 # The one file the API needs from the frontend: the shared search engine.
 COPY web/search.js ./web/search.js
+COPY api/entrypoint.sh /usr/local/bin/entrypoint.sh
 
 # Unprivileged user + /data as the database mount point.
 #
@@ -31,15 +32,21 @@ COPY web/search.js ./web/search.js
 # The base image lags behind Alpine's own security updates by days; upgrading
 # here is what keeps the scan in CI from failing on a CVE that is already fixed
 # upstream. Runs before anything else so the layer caches on its own.
+# su-exec is what the entrypoint drops privileges with: the container starts as
+# root only long enough to make the bind-mounted vault writable by the uid that
+# owns it on the host, and the server itself never runs as root.
 RUN apk --no-cache upgrade \
+    && apk add --no-cache su-exec \
     && addgroup -S bookmarks && adduser -S -G bookmarks bookmarks \
     && mkdir -p /data \
     && chown -R bookmarks:bookmarks /data /app \
+    && chmod +x /usr/local/bin/entrypoint.sh \
     && rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack \
               /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack \
               /opt/yarn* /usr/local/bin/yarn /usr/local/bin/yarnpkg
 
-USER bookmarks
+# No `USER` on purpose: the entrypoint starts as root, resolves which uid owns
+# the vault and drops to it. See api/entrypoint.sh.
 
 ENV BOOKMARKS_HOST=0.0.0.0 \
     BOOKMARKS_PORT=8787 \
@@ -53,4 +60,5 @@ VOLUME ["/data"]
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
   CMD node -e "fetch('http://127.0.0.1:'+process.env.BOOKMARKS_PORT+'/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 CMD ["node", "api/server.js"]

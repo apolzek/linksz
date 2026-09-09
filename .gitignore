@@ -6,8 +6,12 @@ __pycache__/
 # .env.example is the committed shape of it.
 .env
 
-# The default vault directory, when .env does not point somewhere else.
-data/
+# The default vault directory, when .env does not point somewhere else. Its
+# contents are ignored, the directory itself is not: it has to exist in a fresh
+# clone, otherwise the docker daemon creates the bind mount as root and the api
+# cannot write its vault.
+data/*
+!data/.gitkeep
 
 # Vaults and their sidecar files, wherever they land.
 *.db

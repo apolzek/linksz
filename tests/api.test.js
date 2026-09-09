@@ -785,6 +785,26 @@ test('the test account username and password come from the environment', () => {
   assert.ok(!verifyPassword('teste123', afterFirstBoot[0].pass_hash));
 });
 
+test('the login shortcut is announced for the default credentials, however they arrive', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bookmarks-seed-'));
+  try {
+    // What the compose file does: it spells the default password out instead of
+    // leaving it to the server, and the shortcut still has to work.
+    process.env.BOOKMARKS_SEED_PASSWORD = 'teste123';
+    const spelled = createApp(path.join(dir, 'spelled.db'));
+    assert.equal(ensureSeedUser(spelled.db).isDefaultPassword, true);
+    spelled.db.close();
+
+    process.env.BOOKMARKS_SEED_PASSWORD = 'segredo123';
+    const custom = createApp(path.join(dir, 'custom.db'));
+    assert.equal(ensureSeedUser(custom.db).isDefaultPassword, false);
+    custom.db.close();
+  } finally {
+    delete process.env.BOOKMARKS_SEED_PASSWORD;
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('a password changed in the environment is reset on the next boot', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bookmarks-seed-'));
   const dbPath = path.join(dir, 'bookmarks.db');

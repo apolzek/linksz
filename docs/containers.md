@@ -9,8 +9,10 @@ From a clone that builds them:
 
     git clone git@github.com:nochaosio/bookmarks.nochaos.io.git
     cd bookmarks.nochaos.io
-    cp .env.example .env        # optional, see The vault below
     docker compose up -d --build
+
+Nothing to configure first: `.env` is optional (see The vault below) and the
+vault directory ships with the clone, so the command above is the whole install.
 
 Then open http://localhost:8080 and sign in with `teste` / `teste123`, or
 register your own account.
@@ -20,10 +22,12 @@ From the published images, with no clone at all:
     services:
       api:
         image: nochaos/bookmarks-api:latest
-        user: "1000:1000"
         environment:
           BOOKMARKS_HOST: 0.0.0.0
           BOOKMARKS_DB: /data/bookmarks.db
+        # Create ./data yourself before the first boot. A directory the
+        # docker daemon has to invent lands owned by root, and then the vault
+        # is root's too instead of yours.
         volumes: ["./data:/data"]
       web:
         image: nochaos/bookmarks-web:latest
@@ -38,17 +42,23 @@ is `./data` next to the compose file; `.env.example` is the shape of the file
 that moves it:
 
     BOOKMARKS_VAULT_DIR=/home/you/.local/share/bookmarks
-    BOOKMARKS_UID=1000        # id -u
-    BOOKMARKS_GID=1000        # id -g
 
 A directory and not the file itself, because SQLite writes `bookmarks.db-wal`
 and `bookmarks.db-shm` next to it, and a single-file mount would strand those
 inside the container.
 
-The uid matters. The image has its own unprivileged user, which owns nothing on
-your disk, so the api runs as `BOOKMARKS_UID:BOOKMARKS_GID` instead: the user
-who owns the vault directory. Get them wrong and the api starts and then fails
-to open the database.
+The uid matters, and it is handled for you. The image has its own unprivileged
+user, which owns nothing on your disk, so what the api runs as is decided at
+boot: the container's entrypoint reads who owns the mounted directory and drops
+to that user, which keeps the vault readable and writable from both sides.
+`BOOKMARKS_UID` and `BOOKMARKS_GID` override it, and are only worth setting when
+you want a uid other than the directory's owner.
+
+One case is worth knowing: point `BOOKMARKS_VAULT_DIR` at a directory that does
+not exist and the docker daemon creates it as root. The stack still comes up,
+with the vault owned by the image's own user, and you will need `sudo` to touch
+it from the host. Creating the directory first (`mkdir -p`) is all it takes to
+keep it yours.
 
 Copying a vault in is copying a file:
 
@@ -91,7 +101,7 @@ TLS (Tailscale, Cloudflare) or a reverse proxy you already run, and point it at
 ## Environment
 
     BOOKMARKS_VAULT_DIR       host directory holding bookmarks.db, default ./data
-    BOOKMARKS_UID             uid the api runs as, must own that directory
+    BOOKMARKS_UID             uid the api runs as, default: the owner of that directory
     BOOKMARKS_GID             gid to go with it
     BOOKMARKS_HOST            interface the api binds to, 0.0.0.0 in a container
     BOOKMARKS_PORT            port the api listens on inside its container, default 8787

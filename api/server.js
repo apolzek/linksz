@@ -640,7 +640,12 @@ function ensureSeedUser(db) {
   const username = String(process.env.BOOKMARKS_SEED_USER || 'teste').toLowerCase();
   const email = String(process.env.BOOKMARKS_SEED_EMAIL || `${username}@bookmarks.local`).toLowerCase();
   const password = String(process.env.BOOKMARKS_SEED_PASSWORD || 'teste123');
-  const isDefaultPassword = !process.env.BOOKMARKS_SEED_PASSWORD;
+  // Whether the shortcut on the login screen can work, which is a question
+  // about the credentials themselves and not about where they came from: the
+  // button signs in as teste / teste123 and nothing else. The compose file
+  // spells that password out, so reading this off `BOOKMARKS_SEED_PASSWORD`
+  // being set hid the shortcut on the one stack that ships with it.
+  const isDefaultPassword = username === 'teste' && password === 'teste123';
 
   const existing = db.prepare('SELECT * FROM users WHERE email = ? OR username = ?').get(email, username);
   if (existing) {

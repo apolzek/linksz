@@ -19,6 +19,10 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
 PROJECT="bookmarks-test-$$"
 COMPOSE=(docker compose -p "$PROJECT")
+# A second stack, for the fresh clone case at the end of this file.
+FRESH_PROJECT="bookmarks-fresh-$$"
+FRESH_COMPOSE=(docker compose -p "$FRESH_PROJECT")
+FRESH_PARENT=""
 FAILS=0
 
 # A throwaway vault. Without this the test would mount whatever
@@ -38,7 +42,14 @@ info() { printf '\033[1;34m›\033[0m %s\n' "$*"; }
 cleanup() {
   info "tearing down the test stack"
   "${COMPOSE[@]}" down -v --remove-orphans >/dev/null 2>&1 || true
+  "${FRESH_COMPOSE[@]}" down -v --remove-orphans >/dev/null 2>&1 || true
   rm -rf "$VAULT"
+  # That second vault is owned by whoever the entrypoint picked inside the
+  # container, so it goes the same way it arrived: from a container.
+  if [[ -n "$FRESH_PARENT" ]]; then
+    docker run --rm -v "$FRESH_PARENT:/parent" alpine rm -rf /parent/vault >/dev/null 2>&1 || true
+    rm -rf "$FRESH_PARENT"
+  fi
 }
 trap cleanup EXIT
 
@@ -75,6 +86,9 @@ published=$("${COMPOSE[@]}" ps --format '{{.Service}} {{.Ports}}' | grep '^api' 
   || bad "no bookmarks.db in $VAULT"
 [[ -w "$VAULT/bookmarks.db" ]] && ok "vault writable by the user who owns it" \
   || bad "vault not writable on the host: check BOOKMARKS_UID"
+[[ "$(stat -c %u "$VAULT/bookmarks.db")" == "$(id -u)" ]] \
+  && ok "the server dropped to the uid that owns the vault" \
+  || bad "vault owned by $(stat -c %U "$VAULT/bookmarks.db"), not by $(id -un)"
 
 # CORS is closed unless someone asks for it, and the api above got no allowlist.
 cors=$(docker run --rm --network "$NET" --entrypoint sh curlimages/curl:latest -c \
@@ -160,6 +174,30 @@ node -e "
 " "$VAULT/bookmarks.db" 2>/dev/null \
   && ok "the host file is the vault, readable without docker" \
   || bad "the host file does not carry what the API wrote"
+
+# The fresh clone: BOOKMARKS_VAULT_DIR points at a directory that does not exist
+# yet, so the docker daemon creates the bind mount and it lands owned by root.
+# Nothing in the environment says which uid to use either. The stack has to come
+# up anyway; this is the case that used to die on `unable to open database file`.
+info "starting a second stack on a vault directory that does not exist"
+FRESH_PARENT=$(mktemp -d)
+FRESH_VAULT="$FRESH_PARENT/vault"
+(
+  unset BOOKMARKS_UID BOOKMARKS_GID
+  export BOOKMARKS_VAULT_DIR="$FRESH_VAULT"
+  BOOKMARKS_WEB_PORT=0 "${FRESH_COMPOSE[@]}" up -d --build >/dev/null 2>&1
+)
+for _ in $(seq 60); do
+  fresh_status=$("${FRESH_COMPOSE[@]}" ps --format '{{.Service}} {{.Status}}' 2>/dev/null | grep '^api' || true)
+  [[ "$fresh_status" == *healthy* ]] && break
+  sleep 1
+done
+[[ "$fresh_status" == *healthy* ]] \
+  && ok "api healthy on a vault directory docker had to create" \
+  || bad "api never became healthy on a fresh vault: $fresh_status"
+[[ -f "$FRESH_VAULT/bookmarks.db" ]] \
+  && ok "vault created in the directory docker made" \
+  || bad "no bookmarks.db in a vault directory created by docker"
 
 echo
 if [[ $FAILS -eq 0 ]]; then
