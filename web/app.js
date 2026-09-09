@@ -442,11 +442,25 @@ function iconButton(glyph, title, onClick) {
 
 // Toggles a filter (#tag, @category, /folder) while keeping the others, which
 // is what allows crossing "@work #k8s" with two clicks.
+//
+// A folder is the exception. Terms are ANDed, so two of them ask for a folder
+// whose path contains both, and a bookmark lives in exactly one folder:
+// clicking a second one means "that one instead", never "what is in both".
+// So the folder already there is dropped rather than added to.
+//
+// Two things it does not touch. Clicking the same folder again still turns it
+// off, which is what makes the row a toggle. And an exclusion (`-/temp`) stays:
+// that one was typed on purpose, and several exclusions do combine.
 function toggleToken(token) {
   const current = $('#q').value.trim();
-  const parts = current.split(/\s+/).filter(Boolean);
+  let parts = current.split(/\s+/).filter(Boolean);
   const i = parts.findIndex((p) => p.toLowerCase() === token.toLowerCase());
-  if (i >= 0) parts.splice(i, 1); else parts.push(token);
+  if (i >= 0) {
+    parts.splice(i, 1);
+  } else {
+    if (token[0] === '/') parts = parts.filter((p) => p[0] !== '/');
+    parts.push(token);
+  }
   setQuery(parts.join(' '));
 }
 

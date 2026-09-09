@@ -232,6 +232,30 @@ async function dragTo(fromSel, toSel) {
 await setInput('#q', '');
 await sleep(500);
 is(await ev("document.querySelector('#browse').offsetParent !== null"), true, 'the panel is on screen');
+
+// Clicking folders one after another. Terms are ANDed, so two folder filters
+// ask for a path containing both and a bookmark is in exactly one folder: the
+// second click has to mean "that one instead".
+const query = () => ev("document.querySelector('#q').value.trim()");
+const clickFolder = async (path) => {
+  await ev(`document.querySelector('.tree-row[data-path="${path}"] .facet-row').click(); 1`);
+  await sleep(500);
+};
+
+await clickFolder('pasta/2');
+is(await query(), '/pasta/2', 'clicking a folder filters by it');
+await clickFolder('pasta/3');
+is(await query(), '/pasta/3', 'clicking another one replaces it instead of adding a second folder');
+await clickFolder('pasta/3');
+is(await query(), '', 'clicking the same one again turns the filter off');
+
+await setInput('#q', '#t1 -/arquivo');
+await sleep(400);
+await clickFolder('pasta/2');
+is(await query(), '#t1 -/arquivo /pasta/2',
+  'a tag and an exclusion are left alone: only the folder filter is the exclusive one');
+await setInput('#q', '');
+await sleep(500);
 is(await ev("[...document.querySelectorAll('.facet-folders .linkish')].some((b) => b.textContent === 'new folder')"),
   true, 'with a way to create a folder');
 
