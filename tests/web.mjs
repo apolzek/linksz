@@ -250,6 +250,13 @@ is(await ev("!!document.querySelector('.tree-row[data-path=\"nova\"]')"), true, 
 is(await ev("document.querySelector('.tree-row[data-path=\"nova/vazia\"] .facet-count').textContent"), '0',
   'counted honestly at zero');
 
+// `nova` holds nothing and `pasta` holds three. Ordered by how full they are,
+// the new one would be last, which is where it is least useful.
+const roots = JSON.parse(await ev(`JSON.stringify([...document.querySelectorAll('.tree-row')]
+  .filter((r) => !r.dataset.path.includes('/')).map((r) => r.dataset.path))`));
+is(roots, ['nova', 'pasta'],
+  'the tree reads A to Z, so a folder sits under its own letter whether or not it holds anything');
+
 // Dragging a result onto it: the other half of "move things around in the UI".
 // The search narrows to one row first, so the test always drags the bookmark it
 // then makes claims about.

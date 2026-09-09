@@ -1051,8 +1051,21 @@ function wireBookmarkDrag(row, b) {
   };
 }
 
+// A to Z at every level, blind to case and accent, and reading a run of digits
+// as a number so `2` comes before `10`.
+//
+// Not by how full the folder is, which is what this used to do. The flat lists
+// below are rankings and are right to lead with the most used, but a tree is a
+// structure: a folder that changes place every time a link is added or removed
+// has to be found again each time. And a folder holding nothing sank to the
+// bottom of its level, which is the worst possible place for the one you just
+// created and are about to fill.
+function byFolderName(a, b) {
+  return a.name.localeCompare(b.name, undefined, { sensitivity: 'base', numeric: true });
+}
+
 function treeRows(level, depth, into, filter) {
-  for (const node of [...level.values()].sort((a, b) => (b.total - a.total) || a.name.localeCompare(b.name))) {
+  for (const node of [...level.values()].sort(byFolderName)) {
     // A node stays visible when it matches the filter, or when a descendant does.
     const selfMatch = !filter || BookmarksSearch.norm(node.name).includes(filter);
     const branch = document.createElement('div');
