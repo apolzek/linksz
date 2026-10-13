@@ -613,6 +613,23 @@ test('does not serve files outside web/', async () => {
   }
 });
 
+test('a link after the address gets the app, and nothing else does', async () => {
+  const index = fs.readFileSync(path.join(__dirname, '..', 'web', 'index.html'), 'utf8');
+  for (const p of [
+    '/https://www.youtube.com/watch?v=_Hkdzzx15PI', '/https:/www.youtube.com/watch',
+    '/http://example.com', '/www.youtube.com/watch?v=x', '/example.com', '/localhost.dev:3000/x',
+  ]) {
+    const res = await fetch(base + p);
+    assert.equal(res.status, 200, `${p} answered ${res.status}`);
+    assert.equal(await res.text(), index, `${p} should be the app`);
+  }
+  // A real file is still the file, and a path that is no link stays a 404.
+  assert.match(await (await fetch(base + '/app.js')).text(), /linkInPath/);
+  for (const p of ['/nothing', '/js/nothing']) {
+    assert.equal((await fetch(base + p)).status, 404, `${p} should be a 404`);
+  }
+});
+
 test('the PWA assets exist and are served', async () => {
   const esperados = [
     '/manifest.webmanifest', '/sw.js', '/icon.svg',
@@ -629,6 +646,12 @@ test('the PWA assets exist and are served', async () => {
   for (const p of esperados) {
     assert.equal((await fetch(base + p)).status, 200, `${p} should exist`);
   }
+});
+
+test('the font is served as a font', async () => {
+  const res = await fetch(base + '/fonts/jetbrains-mono.woff2');
+  assert.equal(res.status, 200);
+  assert.equal(res.headers.get('content-type'), 'font/woff2');
 });
 
 test('the manifest has the content-type the browser requires', async () => {

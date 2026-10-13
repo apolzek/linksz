@@ -14,7 +14,7 @@
 
 import { api, getToken, setToken, isOffline } from './js/http.js';
 import * as store from './js/store.js';
-import { $, $$, anyDialogOpen, wireDialog, askNewFolder, fail } from './js/ui.js';
+import { $, $$, anyDialogOpen, wireDialog, askNewFolder, fail, toast, hostOf, folderLabel, favicon } from './js/ui.js';
 import * as links from './js/links.js';
 import * as organize from './js/organize.js';
 import * as tree from './js/tree.js';
@@ -22,6 +22,7 @@ import * as activity from './js/activity.js';
 import * as data from './js/data.js';
 import * as settings from './js/settings.js';
 import { openEditor, initEditor } from './js/editor.js';
+import { linkFromAddress, sameLink, TEMP_FOLDER } from './js/address.js';
 
 const USER_KEY = 'bookmarks_user';
 
@@ -106,6 +107,21 @@ function showAuth() {
   $('#auth').hidden = false;
   $('#auth-open').hidden = false;
   $('#auth-created').hidden = true;
+  // Arriving with a link to save, the screen is about the link: the key is
+  // the one thing it asks for, and the button says what it will do.
+  const saving = linkInPath();
+  $('#auth-saving').hidden = !saving;
+  $('#auth-title').textContent = saving ? 'Save this link' : 'Open your vault';
+  $('#auth-lead').textContent = saving
+    ? 'Enter your access key and it goes straight to your vault.'
+    : 'Paste the access key you got when the vault was created.';
+  $('#auth-submit').textContent = saving ? 'Save link' : 'Open vault';
+  if (saving) {
+    $('#auth-saving-fav').innerHTML = favicon(saving);
+    $('#auth-saving-host').textContent = hostOf(saving);
+    $('#auth-saving-url').textContent = saving.replace(/^https?:\/\/(www\.)?/, '');
+    $('#auth-saving').title = saving;
+  }
   $('#auth-key').focus();
   checkServer();
 }
@@ -138,17 +154,39 @@ function wireAuth() {
     $('#auth-error').textContent = '';
   });
 
+  // Reading the clipboard needs a secure context, and Firefox asks first.
+  const paste = $('#auth-paste');
+  paste.hidden = !navigator.clipboard?.readText;
+  paste.onclick = async () => {
+    try {
+      input.value = formatKey(await navigator.clipboard.readText());
+      $('#auth-error').textContent = '';
+      input.focus();
+      // A whole key pasted is a key ready to try.
+      if (input.value.length === 39) $('#auth-open').requestSubmit();
+    } catch {
+      input.focus();
+    }
+  };
+
   $('#auth-open').onsubmit = async (e) => {
     e.preventDefault();
     const btn = $('#auth-submit');
+    if (btn.disabled) return;
+    const label = btn.textContent;
     btn.disabled = true;
+    btn.setAttribute('aria-busy', 'true');
+    btn.textContent = linkInPath() ? 'Saving…' : 'Opening…';
     try {
       const r = await api('/api/auth/key', { method: 'POST', body: { key: input.value } });
       await enter(r.token, r.user);
     } catch (err) {
       $('#auth-error').textContent = isOffline(err) ? 'Could not reach the server.' : err.message;
+      input.select();
     } finally {
       btn.disabled = false;
+      btn.removeAttribute('aria-busy');
+      btn.textContent = label;
     }
   };
 
@@ -217,10 +255,42 @@ async function signOut() {
 
 /* ---------------- arriving from elsewhere ---------------- */
 
+// The link in this page's own address, if it came in front of one.
+function linkInPath() {
+  return linkFromAddress(location);
+}
+
+// Saved at once, with no form, to Temporary: typing the prefix is the whole
+// gesture, and the toast's undo is the way back. The list opens on the folder
+// the link is in, so it is on screen. A link already in the vault is not saved
+// twice.
+async function saveFromPath(url) {
+  const have = store.all().find((b) => sameLink(b.url, url));
+  const show = (folder) => { if (links.getScope() !== folder) links.setScope(folder); tree.paint(); };
+  if (have) {
+    show(have.folder || '');
+    toast(`Already saved in ${folderLabel(have.folder || '')}`);
+    return;
+  }
+  try {
+    const b = await store.create({ url, title: hostOf(url), folder: TEMP_FOLDER });
+    show(TEMP_FOLDER);
+    toast(`Saved ${hostOf(url)} to ${TEMP_FOLDER}`, { action: 'Undo', onAction: () => store.removeMany([b.id]).catch(fail) });
+  } catch (err) {
+    fail(err);
+  }
+}
+
 // Sharing a page from a phone lands here (the manifest's share_target):
 // /?url=...&title=... opens the form already filled in. The manifest's
 // shortcut opens /#new.
 function takeShare() {
+  const saving = linkInPath();
+  if (saving) {
+    history.replaceState(null, '', '/');
+    saveFromPath(saving);
+    return;
+  }
   const p = new URLSearchParams(location.search);
   const text = p.get('text') || '';
   const inText = /https?:\/\/\S+/.exec(text);

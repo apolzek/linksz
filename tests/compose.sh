@@ -114,9 +114,17 @@ case \"\$ct\" in
   *) echo \"FAIL manifest content-type (\$ct)\" ;;
 esac
 
-# 3. the build inputs are not part of the site
-st=\$(\$C -o /dev/null -w '%{http_code}' http://web/nginx.conf)
-[ \"\$st\" = 404 ] && echo 'PASS nginx.conf not served' || echo \"FAIL nginx.conf served (\$st)\"
+# 3. the build inputs are not part of the site. /nginx.conf has the shape of a
+# link to save (a host, then nothing), so it gets the app: what matters is that
+# the file itself never comes back. A path that is no link is a plain 404.
+\$C http://web/nginx.conf | grep -q proxy_pass \
+  && echo 'FAIL nginx.conf served' || echo 'PASS nginx.conf not served'
+st=\$(\$C -o /dev/null -w '%{http_code}' http://web/Dockerfile)
+[ \"\$st\" = 404 ] && echo 'PASS Dockerfile not served' || echo \"FAIL Dockerfile served (\$st)\"
+
+# 3b. this address in front of a link gets the app, which saves it
+\$C http://web/https://www.youtube.com/watch?v=_Hkdzzx15PI | grep -q 'src=\"/app.js\"' \
+  && echo 'PASS a link after the address gets the app' || echo 'FAIL a link after the address gets the app'
 
 # 4. /api/ reaches the backend, on the same origin the session token needs
 \$C http://web/api/health | grep -q '\"ok\":true' \

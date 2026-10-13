@@ -37,9 +37,16 @@ const MIME = {
   '.json': 'application/json; charset=utf-8',
   '.png': 'image/png',
   '.webp': 'image/webp',
+  '.woff2': 'font/woff2',
   // Without this content-type the browser ignores the manifest and never offers to install.
   '.webmanifest': 'application/manifest+json; charset=utf-8',
 };
+
+// This address in front of a link saves it: /https://example.com/x, or
+// /example.com/x. Not a file, so it gets the app, which reads the link from the
+// address bar (web/js/address.js). The same rule as the @link location in
+// web/nginx.conf; tests/address.test.mjs holds the two together.
+const LINK_PATH = /^\/(https?:\/|[a-z0-9-]+(\.[a-z0-9-]+)+(:[0-9]+)?(\/|$))/i;
 
 function now() { return Date.now(); }
 
@@ -835,7 +842,9 @@ function createApp(dbPath) {
   }
 
   function serveStatic(res, pathname) {
-    const rel = pathname === '/' ? 'index.html' : pathname.replace(/^\/+/, '');
+    const rel = pathname === '/' || (LINK_PATH.test(pathname) && !fs.existsSync(path.join(WEB_DIR, pathname)))
+      ? 'index.html'
+      : pathname.replace(/^\/+/, '');
     const file = path.join(WEB_DIR, rel);
     // Compare with the separator attached: without it `../webx/y` would pass
     // startsWith(WEB_DIR) just by being a string prefix.
@@ -967,4 +976,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { createApp, issueMissingKeys, ensureDevVault };
+module.exports = { createApp, issueMissingKeys, ensureDevVault, LINK_PATH };

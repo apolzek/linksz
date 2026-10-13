@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Runs the whole suite.
 #
-#   bash tests/run.sh              api, search, yaml and import/export
+#   bash tests/run.sh              api, search, yaml, import/export, the address
+#                                  bar and the theme
 #   bash tests/run.sh --web        adds the browser tests (needs Chrome)
 #   bash tests/run.sh --compose    adds the Docker stack (needs Docker)
 #   bash tests/run.sh --all        both
@@ -19,6 +20,9 @@ heading() { printf '\n\033[1m── %s %s\033[0m\n' "$1" "$(printf '─%.0s' $(s
 
 heading "search (node:test)"
 node --test tests/search.test.js
+
+heading "saving from the address bar, and the theme (node:test)"
+node --test tests/address.test.mjs tests/theme.test.js
 
 heading "yaml + import/export (node:test)"
 node --test tests/yaml.test.js tests/portability.test.js

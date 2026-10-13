@@ -50,7 +50,8 @@ Three rules the code depends on:
 ## Before saying it works
 
 Run `bash tests/run.sh`. It covers the API, the search engine, the YAML round
-trip and import/export. Two extras are opt in, because each needs something the
+trip, import/export, saving from the address bar and the theme's tokens. Two
+extras are opt in, because each needs something the
 machine may not have and each skips itself rather than failing when it is
 missing:
 

@@ -1,8 +1,10 @@
-// Settings: the theme, the vault's name, its key, and signing out.
+// Settings: the theme, the vault's name, saving from anywhere, its key, and
+// signing out.
 
 import { api } from './http.js';
 import * as store from './store.js';
 import { $, $$, plural, toast, fail, confirmDialog } from './ui.js';
+import { bookmarklet } from './address.js';
 
 const THEME_KEY = 'bookmarks_theme';
 
@@ -71,6 +73,12 @@ export function init(opts) {
   };
   $('#rotated-copy').onclick = () => copy($('#rotated-key').textContent);
   $('#btn-signout').onclick = () => signOut();
+
+  // The prefix is this app's own address, whatever host it is served from.
+  const prefix = `${location.origin}/`;
+  $('#prefix-example').textContent = `${prefix}https://www.youtube.com/watch?v=…`;
+  $('#bookmarklet').href = bookmarklet(prefix);
+  $('#bookmarklet').onclick = (e) => { e.preventDefault(); toast('Drag it to the bookmarks bar'); };
 }
 
 export function show() {

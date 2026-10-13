@@ -12,7 +12,7 @@
 'use strict';
 
 // Bump this version whenever a shell file changes.
-const VERSION = 'v60';
+const VERSION = 'v64';
 const SHELL_CACHE = `bookmarks-shell-${VERSION}`;
 
 const SHELL = [
@@ -31,10 +31,12 @@ const SHELL = [
   '/js/activity.js',
   '/js/data.js',
   '/js/settings.js',
+  '/js/address.js',
   '/manifest.webmanifest',
   '/icon.svg',
   '/icon-192.png',
   '/icon-512.png',
+  '/fonts/jetbrains-mono.woff2',
 ];
 
 self.addEventListener('install', (event) => {
@@ -63,9 +65,13 @@ function isApi(url) {
 
 async function networkFirst(request) {
   const cache = await caches.open(SHELL_CACHE);
+  // Only the shell's own pages are kept. Every link saved by putting this
+  // address in front of it is a navigation too, and each would be one more
+  // copy of index.html in the cache.
+  const keep = SHELL.includes(new URL(request.url).pathname);
   try {
     const fresh = await fetch(request);
-    if (fresh.ok) cache.put(request, fresh.clone());
+    if (fresh.ok && keep) cache.put(request, fresh.clone());
     return fresh;
   } catch (err) {
     const cached = await cache.match(request) || await cache.match('/index.html');

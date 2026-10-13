@@ -373,8 +373,15 @@ all = (await server('/api/bookmarks')).items;
 is(all.find((b) => b.title === 'From the vault')?.category, 'infra', 'the vault file brings everything it carries');
 
 /* ---------------- leaving ---------------- */
-group('signing out');
+group('settings: saving from anywhere');
 await go('#/settings');
+is(await text('#prefix-example'), `${BASE}https://www.youtube.com/watch?v=…`, 'the prefix shown is this app\'s own address');
+is(await ev("document.querySelector('#bookmarklet').getAttribute('href')"), `javascript:void(open(${JSON.stringify(BASE)}+location.href))`,
+  'and the bookmarklet opens it in front of the page');
+await click('#bookmarklet');
+is(await lastToast(), 'Drag it to the bookmarks bar', 'clicking it here explains instead of running it');
+
+group('signing out');
 await click('#btn-signout');
 await sleep(800);
 is(await hidden('#auth'), false, 'signing out goes back to the key screen');
@@ -382,6 +389,33 @@ is(await ev('localStorage.getItem("bookmarks_token")'), null, 'the session is go
 is(await ev(`new Promise((r) => { const o = indexedDB.open('bookmarks', 1);
   o.onsuccess = () => { const t = o.result.transaction('vaults').objectStore('vaults').getAllKeys(); t.onsuccess = () => r(t.result.length); }; })`),
   0, 'and so is the copy of the vault on this device');
+
+/* ---------------- saving from the address bar ---------------- */
+// Last, because it navigates: after a navigation this browser delivers no more
+// input, so the key goes in through the DOM, not the keyboard.
+group('the address in front of a link saves it');
+const target = 'https://www.youtube.com/watch?v=_Hkdzzx15PI#t=30';
+const arrive = async (p) => { await ev(`location.href = ${q(BASE + p)}`); await sleep(2500); };
+await arrive(target);
+is(await hidden('#auth'), false, 'with no session it asks for the key first');
+is(await ev("[document.querySelector('#auth-title').textContent, document.querySelector('#auth-saving-host').textContent, document.querySelector('#auth-submit').textContent]"),
+  ['Save this link', 'youtube.com', 'Save link'], 'and the screen is about the link it will save');
+is(await hidden('#auth-saving'), false, 'which it shows');
+await ev(`(() => { const i = document.querySelector('#auth-key'); i.value = ${q(KEY)};
+  document.querySelector('#auth-open').requestSubmit(); return 1; })()`);
+await sleep(2000);
+is(await hidden('#shell'), false, 'the key opens the vault');
+all = (await server('/api/bookmarks')).items;
+is(all.filter((b) => b.url === target).map((b) => [b.title, b.folder]), [['youtube.com', 'Temporary']],
+  'and the link is saved to Temporary, query and hash included');
+is(await ev("document.querySelector('#q').placeholder"), 'Search this folder', 'the list opens on that folder');
+is(await ev('location.pathname + location.search + location.hash'), '/', 'the address bar is the app again, so a reload saves nothing');
+is((await lastToast()).startsWith('Saved youtube.com to Temporary'), true, 'a toast says so');
+
+await arrive('www.youtube.com/watch?v=_Hkdzzx15PI#t=30');
+all = (await server('/api/bookmarks')).items;
+is(all.filter((b) => b.url === target).length, 1, 'the same link without https:// is not saved twice');
+is((await lastToast()).startsWith('Already saved'), true, 'it says it is already there');
 
 group('nothing threw');
 is(jsErrors, [], 'no uncaught error in the page');

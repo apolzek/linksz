@@ -22,6 +22,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="mobile-web-app-capable" content="yes">
 
+<link rel="preload" href="/fonts/jetbrains-mono.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/style.css">
 
 <!-- Before the first paint, otherwise the page flashes the other theme. -->
@@ -74,17 +75,29 @@
     <!-- Step one: the key. There is no username and no password: the key is
          the vault, and whoever has it is in. -->
     <form id="auth-open" class="auth-step" autocomplete="off">
-      <h1>Open your vault</h1>
-      <p class="muted">Paste the access key you got when the vault was created.</p>
+      <h1 id="auth-title">Open your vault</h1>
+      <p class="auth-lead" id="auth-lead">Paste the access key you got when the vault was created.</p>
+      <!-- Arriving with a link in the address: what will be saved, and where. -->
+      <div class="save-preview" id="auth-saving" hidden>
+        <span id="auth-saving-fav"></span>
+        <span class="save-text">
+          <strong id="auth-saving-host"></strong>
+          <span id="auth-saving-url"></span>
+        </span>
+        <span class="save-dest"><svg><use href="#i-folder"/></svg>Temporary</span>
+      </div>
       <label class="field">
         <span class="label">Access key</span>
-        <input id="auth-key" class="key-input" placeholder="XXXX-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX"
-               autocomplete="off" autocapitalize="characters" spellcheck="false" required>
+        <span class="key-wrap">
+          <input id="auth-key" class="key-input" placeholder="XXXX-XXXX-XXXX-…"
+                 autocomplete="off" autocapitalize="characters" spellcheck="false" required>
+          <button type="button" class="btn sm" id="auth-paste" hidden>Paste</button>
+        </span>
       </label>
       <button type="submit" class="btn primary block" id="auth-submit">Open vault</button>
       <p id="auth-error" class="form-error" role="alert"></p>
       <div class="auth-alt">
-        <span class="muted">No vault yet?</span>
+        <span>No vault yet?</span>
         <button type="button" class="btn link" id="auth-new">Create one</button>
       </div>
     </form>
@@ -92,7 +105,7 @@
     <!-- Step two, only for a vault that was just made: the key, once. -->
     <div id="auth-created" class="auth-step" hidden>
       <h1>Save your access key</h1>
-      <p class="muted">This key is the only way into the vault. It is shown once and
+      <p class="auth-lead">This key is the only way into the vault. It is shown once and
         cannot be recovered, so keep it in a password manager.</p>
       <div class="key-box">
         <code id="auth-new-key"></code>
@@ -286,6 +299,15 @@
           <button type="submit" class="btn">Save</button>
         </form>
         <p class="hint" id="vault-stats"></p>
+      </section>
+      <section class="card">
+        <div class="card-head"><h2>Save from anywhere</h2></div>
+        <p class="muted">Put this address in front of any link and open it: the link is saved
+          to <strong>Temporary</strong>, the folder for what is not sorted yet. A device that is
+          not signed in asks for the key first.</p>
+        <p class="prefix"><code id="prefix-example"></code></p>
+        <p class="muted">On a computer, drag this to the bookmarks bar and click it on any page:
+          <a class="btn" id="bookmarklet" href="#" draggable="true">Save to Bookmarks</a></p>
       </section>
       <section class="card">
         <div class="card-head"><h2>Access key</h2></div>

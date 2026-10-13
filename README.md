@@ -54,7 +54,8 @@ Five pages, in the sidebar (and under the thumb on a phone):
     Organize          two folders side by side, for moving links between them
     Activity          opens per day, the most opened links, the recent ones
     Import & export   backups and bringing links in
-    Settings          theme, the vault's name, its key, signing out
+    Settings          theme, the vault's name, saving from anywhere, the key,
+                      signing out
 
 **All links.** Typing searches the whole vault as you type. The folder tree in
 the sidebar narrows the list to one folder and everything below it. Up and down
@@ -72,6 +73,9 @@ one to go in. Links dragged onto a subfolder, a breadcrumb, the other pane or a
 folder in the sidebar are filed there, and a folder dragged onto another moves
 inside it. Each pane can make, rename and delete the folder it shows.
 
+**Saving from anywhere.** Put the app's address in front of any link; see
+[Saving a link from anywhere](#saving-a-link-from-anywhere).
+
 **Speed.** The vault is kept in the browser (IndexedDB) and searched there, so
 a keystroke never waits on the network and a reload paints from that copy at
 once, then asks the server only for what changed. Writes show up on screen
@@ -79,6 +83,88 @@ before the server answers and are put back if it refuses. Another tab sees a
 change at once; another device within five seconds.
 
 Every open counts: the most opened links climb the results.
+
+## Saving a link from anywhere
+
+Put the app's address in front of a link and open it, the way people put
+something in front of a YouTube address to download a video:
+
+    https://www.youtube.com/watch?v=_Hkdzzx15PI
+    http://localhost:8080/https://www.youtube.com/watch?v=_Hkdzzx15PI
+
+The `https://` can be left out, and the query and the hash are kept as part
+of the link:
+
+    http://localhost:8080/www.youtube.com/watch?v=_Hkdzzx15PI
+    http://localhost:8080/github.com/basecamp/omarchy
+    http://localhost:8080/news.ycombinator.com
+
+What happens next:
+
+* **Signed in on this device:** the link is saved at once to **Temporary**, the
+  folder for what is not sorted yet, and the list opens on it. The toast has an
+  Undo. To file the link, move it out of Temporary.
+* **Not signed in:** the screen says *Save this link*, shows the site and where
+  it will go, and asks for the access key only. Type or paste it (**Paste**
+  reads the clipboard, and a whole key goes in by itself) and the link is saved.
+* **Already in the vault:** nothing is added, and the list opens on the folder
+  that has it. A trailing slash does not make a second copy.
+
+The address bar goes back to `/` afterwards, so a reload saves nothing. The
+title is the site's name (`youtube.com`); rename it later if you want. Saving
+needs no confirmation, so a page that sends you to such an address can add a
+link to your vault. That is the whole cost, and the Undo takes it back.
+
+On the server it is your domain that comes first, e.g.
+`https://bookmarks.nochaos.io/https://...`; nothing in the code names a host.
+
+**Bookmarklet.** Settings, *Save from anywhere*, has a **Save to Bookmarks**
+button. Drag it to the browser's bookmarks bar; clicking it on any page opens
+that page's address behind the prefix in a new tab, and the page itself stays
+where it was.
+
+**Phones.** On Android, the installed app is in the share sheet (the manifest's
+`share_target`): share a page to Bookmarks and the form opens filled in. Safari
+on iOS has no share target; the address prefix works there as anywhere else.
+Either way the phone needs the app over https, see
+[It is an app, not a page](#it-is-an-app-not-a-page).
+
+## On the desktop (Omarchy)
+
+The same app, in a window of its own and in the app launcher. Omarchy turns any
+address into a desktop app with a launcher entry:
+
+    omarchy webapp install "Bookmarks" "http://localhost:8080" "$PWD/web/icon-512.png"
+
+It opens in Chromium's app mode: no tabs and no address bar, and the same code
+the browser runs, so a `docker compose up -d --build` is all an update takes.
+To take it out of the launcher:
+
+    omarchy webapp remove Bookmarks
+
+The window is only as up as the stack. The containers restart with Docker
+(`restart: unless-stopped`), but Arch starts Docker on first use, not at boot,
+so after a reboot the app would say the server is not answering. To have it up
+from boot:
+
+    sudo systemctl enable docker
+
+Elsewhere: Chrome and Edge install it from the icon in the address bar, on any
+system, with the same result.
+
+## The look
+
+The theme is [omarchy.org](https://omarchy.org)'s. Dark is Tokyo Night, the
+site's default; light is Catppuccin Latte, one of Omarchy's light themes.
+Settings picks System, Light or Dark. Corners are square, a 1px ring stands in
+for shadows, and everything is set in JetBrains Mono, which ships with the app
+(`web/fonts/`, under the SIL Open Font License) so it looks the same offline
+and on a phone that does not have it.
+
+The colours are tokens at the top of `web/style.css`. The dark palette is
+written twice there, once for the system's choice and once for the person's;
+`tests/theme.test.js` fails if the two drift apart or a colour is used that
+neither defines.
 
 ## Search
 
@@ -136,6 +222,21 @@ a `folder:` line on it, and a key that does not exist yet is created on import.
 When importing a file you edited by hand, choose "Use the file": with equal
 dates the other modes keep what the vault already has and your edits are
 skipped.
+
+## Tests
+
+    bash tests/run.sh              api, search, YAML, import/export, the address
+                                   bar and the theme
+    bash tests/run.sh --web        adds the app in headless Chrome
+    bash tests/run.sh --compose    adds the two containers behind nginx
+    bash tests/run.sh --all        both
+
+Node built-ins and bash, nothing to install. The address bar is covered three
+ways: `tests/address.test.mjs` reads links out of addresses and holds the app,
+the node server and nginx to the same rule about which paths get the app; the
+browser suite saves a link signed out and signed in; the compose suite asks
+nginx for one. `--web` and `--compose` skip themselves on a machine without
+Chrome or Docker.
 
 ## Layout
 
