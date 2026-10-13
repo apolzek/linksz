@@ -26,8 +26,8 @@ FRESH_PARENT=""
 FAILS=0
 
 # A throwaway vault. Without this the test would mount whatever
-# BOOKMARKS_VAULT_DIR points at in .env, which is the real one, and register
-# its test accounts in it.
+# BOOKMARKS_VAULT_DIR points at in .env, which is the real one, and create
+# its test vaults in it.
 VAULT=$(mktemp -d)
 export BOOKMARKS_VAULT_DIR="$VAULT"
 export BOOKMARKS_UID="$(id -u)"
@@ -102,7 +102,7 @@ output=$(docker run --rm --network "$NET" --entrypoint sh curlimages/curl:latest
 C='curl -s'
 
 # 1. everything the browser needs to install the app, served by nginx
-for p in / /index.html /style.css /app.js /search.js /manifest.webmanifest /sw.js /icon-512.png; do
+for p in / /index.html /style.css /app.js /search.js /js/store.js /js/organize.js /manifest.webmanifest /sw.js /icon-512.png; do
   st=\$(\$C -o /dev/null -w '%{http_code}' http://web\$p)
   [ \"\$st\" = 200 ] && echo \"PASS serves \$p\" || echo \"FAIL serves \$p (\$st)\"
 done
@@ -122,14 +122,14 @@ st=\$(\$C -o /dev/null -w '%{http_code}' http://web/nginx.conf)
 \$C http://web/api/health | grep -q '\"ok\":true' \
   && echo 'PASS api through nginx' || echo 'FAIL api through nginx'
 
-# 5. the full API, advanced search included.
-# The account is composetest, not teste: the stack seeds a teste user on every
-# boot and registering it again is a 409, not a test failure. No backticks in
-# here, the whole block is a double-quoted string for sh -c.
-TOKEN=\$(\$C -X POST http://web/api/auth/register -H 'content-type: application/json' \
-  -d '{\"email\":\"compose@t.com\",\"username\":\"composetest\",\"password\":\"secret123\"}' \
-  | sed -n 's/.*\"token\":\"\([^\"]*\)\".*/\1/p')
-[ -n \"\$TOKEN\" ] && echo 'PASS register over the API' || echo 'FAIL register over the API'
+# 5. the full API, advanced search included, in a vault of its own. The key
+# is kept so the persistence check below can open the same vault again. No
+# backticks in here, the whole block is a double-quoted string for sh -c.
+VAULT_JSON=\$(\$C -X POST http://web/api/auth/vault -H 'content-type: application/json' -d '{\"name\":\"composetest\"}')
+TOKEN=\$(echo \"\$VAULT_JSON\" | sed -n 's/.*\"token\":\"\([^\"]*\)\".*/\1/p')
+KEY=\$(echo \"\$VAULT_JSON\" | sed -n 's/.*\"key\":\"\([^\"]*\)\".*/\1/p')
+[ -n \"\$TOKEN\" ] && [ -n \"\$KEY\" ] && echo 'PASS a vault and its key over the API' || echo 'FAIL a vault and its key over the API'
+echo \"KEY \$KEY\"
 
 A=\"authorization: Bearer \$TOKEN\"
 \$C -o /dev/null -X POST http://web/api/bookmarks -H 'content-type: application/json' \
@@ -145,6 +145,7 @@ A=\"authorization: Bearer \$TOKEN\"
 
 while IFS= read -r line; do
   case "$line" in
+    KEY*) KEY="${line#KEY }" ;;
     PASS*) ok "${line#PASS }" ;;
     FAIL*) bad "${line#FAIL }" ;;
   esac
@@ -155,8 +156,8 @@ info "restarting the api to check persistence in the volume"
 sleep 4
 
 persist=$(docker run --rm --network "$NET" --entrypoint sh curlimages/curl:latest -c "
-TOKEN=\$(curl -s -X POST http://web/api/auth/login \
-  -H 'content-type: application/json' -d '{\"login\":\"composetest\",\"password\":\"secret123\"}' \
+TOKEN=\$(curl -s -X POST http://web/api/auth/key \
+  -H 'content-type: application/json' -d '{\"key\":\"$KEY\"}' \
   | sed -n 's/.*\"token\":\"\([^\"]*\)\".*/\1/p')
 curl -s http://web/api/bookmarks -H \"authorization: Bearer \$TOKEN\"
 " 2>/dev/null)

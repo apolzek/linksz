@@ -158,9 +158,20 @@ function parseQuery(q) {
   return terms;
 }
 
+// Normalizing is most of the cost of a search: NFD and a regex over six fields
+// of every bookmark, on every keystroke. The result depends only on the
+// bookmark, so it is kept per object. An edit replaces the object rather than
+// mutating it, which is what retires the stale entry, and a WeakMap lets it go
+// with the bookmark. Where nothing is reused (the server reads fresh rows on
+// each request) it costs one lookup and changes nothing.
+const fieldCache = new WeakMap();
+
 function fieldsOf(b) {
-  const f = {};
+  let f = fieldCache.get(b);
+  if (f) return f;
+  f = {};
   for (const name of FIELDS) f[name] = norm(b[name]);
+  fieldCache.set(b, f);
   return f;
 }
 

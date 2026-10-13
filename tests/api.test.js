@@ -1,7 +1,7 @@
 'use strict';
 
-// Backend tests: auth, isolation between users, CRUD, search over the API,
-// two-way sync and the files that make the PWA installable.
+// Backend tests: access keys, isolation between vaults, CRUD, search over the
+// API, two-way sync and the files that make the PWA installable.
 
 const test = require('node:test');
 const assert = require('node:assert');
@@ -9,8 +9,8 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const { createApp, ensureSeedUser } = require('../api/server');
-const { verifyPassword } = require('../api/auth');
+const { createApp, issueMissingKeys, ensureDevVault } = require('../api/server');
+const { newAccessKey, normalizeKey, hashKey } = require('../api/auth');
 
 const tmpDb = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'bookmarks-test-')), 'bookmarks.db');
 const { server } = createApp(tmpDb);
@@ -38,10 +38,10 @@ async function call(method, p, { token, body } = {}) {
   return { status: res.status, body: await res.json().catch(() => ({})) };
 }
 
-const USER = { email: 'apolzek@example.com', username: 'apolzek', password: 'secret123' };
 let token;
+let accessKey;
 
-/* ---------------- auth ---------------- */
+/* ---------------- access keys ---------------- */
 
 test('health answers without auth', async () => {
   const r = await call('GET', '/api/health');
@@ -49,47 +49,79 @@ test('health answers without auth', async () => {
   assert.equal(r.body.ok, true);
 });
 
-test('register creates a user and returns a token (the email is not validated)', async () => {
-  const r = await call('POST', '/api/auth/register', { body: USER });
+test('creating a vault returns its key, once, and a session', async () => {
+  const r = await call('POST', '/api/auth/vault', { body: { name: 'apolzek' } });
   assert.equal(r.status, 201);
+  assert.match(r.body.key, /^([0-9A-HJKMNP-TV-Z]{4}-){7}[0-9A-HJKMNP-TV-Z]{4}$/, 'eight groups of Crockford base32');
   assert.ok(r.body.token);
-  assert.equal(r.body.user.username, 'apolzek');
-  assert.equal(r.body.user.pass_hash, undefined, 'the password hash must not leak');
+  assert.equal(r.body.user.name, 'apolzek');
+  assert.equal(r.body.user.key_hash, undefined, 'the key hash must not leak');
   token = r.body.token;
+  accessKey = r.body.key;
 });
 
-test('a duplicate registration is refused', async () => {
-  assert.equal((await call('POST', '/api/auth/register', { body: USER })).status, 409);
-  const mesmoEmail = await call('POST', '/api/auth/register', {
-    body: { ...USER, username: 'outro_nome' },
-  });
-  assert.equal(mesmoEmail.status, 409, 'a repeated email is blocked too');
+test('every vault gets its own key', async () => {
+  const a = await call('POST', '/api/auth/vault', { body: {} });
+  const b = await call('POST', '/api/auth/vault', { body: {} });
+  assert.notEqual(a.body.key, b.body.key);
+  assert.notEqual(a.body.user.id, b.body.user.id);
+  assert.equal(a.body.user.name, '', 'a name is optional');
 });
 
-test('register validates its input', async () => {
-  const casos = [
-    [{ email: 'x@y.com', username: 'short', password: '123' }, 'short password'],
-    [{ email: 'noatsign', username: 'valid', password: 'secret123' }, 'email without @'],
-    [{ email: 'x@y.com', username: 'a', password: 'secret123' }, '1-char username'],
-    [{ email: 'x@y.com', username: 'with space', password: 'secret123' }, 'username with a space'],
-    [{ email: 'x@y.com', username: 'Ação', password: 'secret123' }, 'username with an accent'],
+test('the key opens its vault, however it is typed', async () => {
+  const forms = [
+    accessKey,
+    accessKey.toLowerCase(),
+    accessKey.replace(/-/g, ' '),
+    `  ${accessKey.replace(/-/g, '')}  `,
+    // Crockford reads O as 0 and I or L as 1.
+    accessKey.replace(/0/g, 'O').replace(/1/g, 'l'),
   ];
-  for (const [body, reason] of casos) {
-    const r = await call('POST', '/api/auth/register', { body });
-    assert.equal(r.status, 400, `should refuse: ${reason}`);
+  for (const key of forms) {
+    const r = await call('POST', '/api/auth/key', { body: { key } });
+    assert.equal(r.status, 200, `should open with ${JSON.stringify(key)}`);
+    assert.equal(r.body.user.name, 'apolzek');
   }
 });
 
-test('login by username and by email', async () => {
-  assert.equal((await call('POST', '/api/auth/login', { body: { login: 'apolzek', password: 'secret123' } })).status, 200);
-  assert.equal((await call('POST', '/api/auth/login', { body: { login: USER.email, password: 'secret123' } })).status, 200);
-  assert.equal((await call('POST', '/api/auth/login', { body: { login: 'APOLZEK', password: 'secret123' } })).status, 200,
-    'login is case-insensitive');
+test('a wrong or malformed key opens nothing', async () => {
+  const wrong = newAccessKey();
+  for (const key of [wrong, '', 'short', accessKey.slice(0, -1), null, 42]) {
+    const r = await call('POST', '/api/auth/key', { body: { key } });
+    assert.equal(r.status, 401, `should refuse ${JSON.stringify(key)}`);
+  }
 });
 
-test('login with a wrong credential fails', async () => {
-  assert.equal((await call('POST', '/api/auth/login', { body: { login: 'apolzek', password: 'errada' } })).status, 401);
-  assert.equal((await call('POST', '/api/auth/login', { body: { login: 'ninguem', password: 'secret123' } })).status, 401);
+test('only the hash of a key is stored', () => {
+  const k = newAccessKey();
+  assert.equal(hashKey(k).length, 64);
+  assert.equal(hashKey(k), hashKey(k.toLowerCase()));
+  assert.equal(hashKey('nope'), null, 'a key of the wrong length hashes to nothing');
+  assert.equal(normalizeKey('ab-cd o l i'), 'ABCD011');
+});
+
+test('a vault can be renamed', async () => {
+  const r = await call('POST', '/api/me', { token, body: { name: '  my links  ' } });
+  assert.equal(r.status, 200);
+  assert.equal(r.body.user.name, 'my links');
+  assert.equal((await call('GET', '/api/me', { token })).body.user.name, 'my links');
+});
+
+test('rotating the key kills the old key and every other session', async () => {
+  const v = await call('POST', '/api/auth/vault', { body: {} });
+  const other = (await call('POST', '/api/auth/key', { body: { key: v.body.key } })).body.token;
+  const r = await call('POST', '/api/auth/rotate', { token: v.body.token });
+  assert.equal(r.status, 200);
+  assert.notEqual(r.body.key, v.body.key);
+  assert.equal((await call('POST', '/api/auth/key', { body: { key: v.body.key } })).status, 401, 'old key is dead');
+  assert.equal((await call('POST', '/api/auth/key', { body: { key: r.body.key } })).status, 200, 'new key works');
+  assert.equal((await call('GET', '/api/me', { token: other })).status, 401, 'the other device is signed out');
+  assert.equal((await call('GET', '/api/me', { token: v.body.token })).status, 200, 'this device stays in');
+});
+
+test('the password routes are gone', async () => {
+  assert.equal((await call('POST', '/api/auth/login', { body: { login: 'x', password: 'y' } })).status, 401);
+  assert.equal((await call('POST', '/api/auth/register', { body: { email: 'a@b', username: 'ab', password: 'secret' } })).status, 401);
 });
 
 test('protected routes require a valid token', async () => {
@@ -250,9 +282,7 @@ test('delete disappears from the listing but stays in sync as a tombstone', asyn
 });
 
 test('isolation between users', async () => {
-  const other = await call('POST', '/api/auth/register', {
-    body: { email: 'outro@example.com', username: 'outro', password: 'secret123' },
-  });
+  const other = await call('POST', '/api/auth/vault', { body: { name: 'outro' } });
   const list = await call('GET', '/api/bookmarks', { token: other.body.token });
   assert.equal(list.body.total, 0, 'a new user does not see other people bookmarks');
 
@@ -275,6 +305,10 @@ test('two-way sync between two clients', async () => {
     body: { since: 0, changes: [{ id: 'uuid-client-1', url: 'https://zed.dev', title: 'Zed', tags: 'editor', category: 'dev', updated_at: Date.now() }] },
   });
   assert.equal(a.body.pushed, 1);
+  // The cursor is inclusive (>=, see server.js): a row stamped in the very
+  // millisecond of the cursor is sent again on purpose. Step past it, so what
+  // is measured below is the incremental sync and not that edge.
+  await new Promise((r) => setTimeout(r, 5));
 
   const b = await call('POST', '/api/sync', { token, body: { since: 0, changes: [] } });
   assert.ok(b.body.changes.some((c) => c.id === 'uuid-client-1'));
@@ -304,7 +338,7 @@ test('sync ignores a malformed payload without falling over', async () => {
 });
 
 test('logout invalidates only the session used', async () => {
-  const s = await call('POST', '/api/auth/login', { body: { login: 'apolzek', password: 'secret123' } });
+  const s = await call('POST', '/api/auth/key', { body: { key: accessKey } });
   assert.equal((await call('POST', '/api/auth/logout', { token: s.body.token })).status, 200);
   assert.equal((await call('GET', '/api/bookmarks', { token: s.body.token })).status, 401);
   assert.equal((await call('GET', '/api/bookmarks', { token })).status, 200, 'outras sessoes continuam validas');
@@ -524,9 +558,7 @@ test('import gives a useful error on a broken file', async () => {
 });
 
 test('import does not leak between users', async () => {
-  const outro = await call('POST', '/api/auth/register', {
-    body: { email: 'imp@example.com', username: 'importador', password: 'secret123' },
-  });
+  const outro = await call('POST', '/api/auth/vault', { body: { name: 'importador' } });
   const r = await call('POST', '/api/import', {
     token: outro.body.token,
     body: { content: 'bookmarks:\n  - title: So dele\n    url: https://dele.com\n', apply: true },
@@ -538,9 +570,7 @@ test('import does not leak between users', async () => {
 });
 
 test('replace removes what is missing from the file, and warns first', async () => {
-  const solo = await call('POST', '/api/auth/register', {
-    body: { email: 'sub@example.com', username: 'replacer', password: 'secret123' },
-  });
+  const solo = await call('POST', '/api/auth/vault', { body: { name: 'replacer' } });
   const t = solo.body.token;
   for (const url of ['https://a.com', 'https://b.com']) {
     await call('POST', '/api/bookmarks', { token: t, body: { url, title: url } });
@@ -589,6 +619,13 @@ test('the PWA assets exist and are served', async () => {
     '/icon-192.png', '/icon-512.png', '/icon-maskable-512.png', '/apple-touch-icon.png',
     '/style.css', '/app.js', '/search.js',
   ];
+  // Every module the shell imports has to be precached, or the app opens
+  // offline to a blank page missing one of them.
+  const sw = await (await fetch(base + '/sw.js')).text();
+  for (const m of fs.readdirSync(path.join(__dirname, '..', 'web', 'js'))) {
+    esperados.push(`/js/${m}`);
+    assert.ok(sw.includes(`'/js/${m}'`), `sw.js does not precache /js/${m}`);
+  }
   for (const p of esperados) {
     assert.equal((await fetch(base + p)).status, 200, `${p} should exist`);
   }
@@ -723,105 +760,81 @@ test('the static files carry no CORS header either', async () => {
   });
 });
 
-/* ---------------- test account ---------------- */
+/* ---------------- vaults from before the keys ---------------- */
 
-// The same path as the real boot (server.js calls this before listen), only
-// with a throwaway database and the environment restored at the end.
-function bootSeed(env = {}) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bookmarks-seed-'));
-  const dbPath = path.join(dir, 'bookmarks.db');
-  const before = {};
-  for (const [k, v] of Object.entries(env)) { before[k] = process.env[k]; process.env[k] = v; }
-
-  const users = (app) => app.db.prepare('SELECT * FROM users').all();
-  try {
-    const first = createApp(dbPath);
-    ensureSeedUser(first.db);
-    const afterFirstBoot = users(first);
-    first.db.close();
-
-    // A second boot on the same database: that is where idempotency shows up.
-    const second = createApp(dbPath);
-    ensureSeedUser(second.db);
-    const afterSecondBoot = users(second);
-    second.db.close();
-
-    return { afterFirstBoot, afterSecondBoot };
-  } finally {
-    for (const [k, v] of Object.entries(before)) {
-      if (v === undefined) delete process.env[k]; else process.env[k] = v;
-    }
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
+// A database in the shape the password era left behind: users with an email,
+// a username and a password hash, and bookmarks pointing at them.
+function legacyDb(dbPath) {
+  const { DatabaseSync } = require('node:sqlite');
+  const db = new DatabaseSync(dbPath);
+  db.exec(`
+    CREATE TABLE users (id INTEGER PRIMARY KEY AUTOINCREMENT, email TEXT NOT NULL UNIQUE,
+      username TEXT NOT NULL UNIQUE, pass_hash TEXT NOT NULL, created_at INTEGER NOT NULL);
+    CREATE TABLE sessions (token TEXT PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      created_at INTEGER NOT NULL);
+    CREATE TABLE bookmarks (id TEXT NOT NULL, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      title TEXT NOT NULL DEFAULT '', url TEXT NOT NULL DEFAULT '', folder TEXT NOT NULL DEFAULT '',
+      category TEXT NOT NULL DEFAULT '', tags TEXT NOT NULL DEFAULT '', description TEXT NOT NULL DEFAULT '',
+      created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, deleted INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (user_id, id));
+    INSERT INTO users VALUES (1, 'a@x', 'alice', 'scrypt$00$00', 1), (2, 'b@x', 'bob', 'scrypt$00$00', 1);
+    INSERT INTO sessions VALUES ('old-token', 1, 1);
+    INSERT INTO bookmarks (id, user_id, title, url, folder, created_at, updated_at)
+      VALUES ('b1', 1, 'Alice one', 'https://a.example', 'dev', 1, 1),
+             ('b2', 1, 'Alice two', 'https://b.example', '', 1, 1),
+             ('b3', 2, 'Bob one', 'https://c.example', 'x', 1, 1);
+  `);
+  db.close();
 }
 
-test('boot creates the test account with the default password', () => {
-  const { afterFirstBoot } = bootSeed();
-  assert.equal(afterFirstBoot.length, 1);
-  assert.equal(afterFirstBoot[0].username, 'teste');
-  assert.equal(afterFirstBoot[0].email, 'teste@bookmarks.local');
-  assert.ok(verifyPassword('teste123', afterFirstBoot[0].pass_hash));
-});
-
-test('a second boot neither duplicates the account nor breaks the password', () => {
-  const { afterSecondBoot } = bootSeed();
-  assert.equal(afterSecondBoot.length, 1);
-  assert.ok(verifyPassword('teste123', afterSecondBoot[0].pass_hash));
-});
-
-test('BOOKMARKS_SEED=0 creates no account at all', () => {
-  const { afterSecondBoot } = bootSeed({ BOOKMARKS_SEED: '0' });
-  assert.equal(afterSecondBoot.length, 0);
-});
-
-test('the test account username and password come from the environment', () => {
-  const { afterFirstBoot } = bootSeed({
-    BOOKMARKS_SEED_USER: 'qa',
-    BOOKMARKS_SEED_PASSWORD: 'segredo123',
-  });
-  assert.equal(afterFirstBoot[0].username, 'qa');
-  assert.equal(afterFirstBoot[0].email, 'qa@bookmarks.local');
-  assert.ok(verifyPassword('segredo123', afterFirstBoot[0].pass_hash));
-  assert.ok(!verifyPassword('teste123', afterFirstBoot[0].pass_hash));
-});
-
-test('the login shortcut is announced for the default credentials, however they arrive', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bookmarks-seed-'));
+test('an old vault keeps every bookmark and gets a key on boot', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bookmarks-legacy-'));
+  const dbPath = path.join(dir, 'bookmarks.db');
   try {
-    // What the compose file does: it spells the default password out instead of
-    // leaving it to the server, and the shortcut still has to work.
-    process.env.BOOKMARKS_SEED_PASSWORD = 'teste123';
-    const spelled = createApp(path.join(dir, 'spelled.db'));
-    assert.equal(ensureSeedUser(spelled.db).isDefaultPassword, true);
-    spelled.db.close();
+    legacyDb(dbPath);
+    const app = createApp(dbPath);
+    const users = app.db.prepare('SELECT * FROM users ORDER BY id').all();
+    assert.deepEqual(users.map((u) => [u.id, u.name, u.key_hash]), [[1, 'alice', null], [2, 'bob', null]],
+      'ids and names survive; the passwords do not');
+    assert.equal(app.db.prepare('SELECT COUNT(*) AS n FROM sessions').get().n, 0, 'password sessions are gone');
+    assert.equal(app.db.prepare('PRAGMA foreign_key_check').all().length, 0);
 
-    process.env.BOOKMARKS_SEED_PASSWORD = 'segredo123';
-    const custom = createApp(path.join(dir, 'custom.db'));
-    assert.equal(ensureSeedUser(custom.db).isDefaultPassword, false);
-    custom.db.close();
+    const issued = issueMissingKeys(app.db);
+    assert.equal(issued.length, 2);
+    assert.deepEqual(issueMissingKeys(app.db), [], 'a vault with a key is never issued another');
+
+    await new Promise((r) => app.server.listen(0, '127.0.0.1', r));
+    const url = `http://127.0.0.1:${app.server.address().port}`;
+    const open = await (await fetch(url + '/api/auth/key', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ key: issued[0].key }),
+    })).json();
+    assert.equal(open.user.name, 'alice');
+    const list = await (await fetch(url + '/api/bookmarks', { headers: { authorization: `Bearer ${open.token}` } })).json();
+    assert.deepEqual(list.items.map((b) => b.id).sort(), ['b1', 'b2'], 'alice sees her bookmarks and only hers');
+    app.server.close();
+    app.db.close();
+
+    // A second boot on the migrated database changes nothing.
+    const again = createApp(dbPath);
+    assert.equal(again.db.prepare('SELECT COUNT(*) AS n FROM bookmarks').get().n, 3);
+    again.db.close();
   } finally {
-    delete process.env.BOOKMARKS_SEED_PASSWORD;
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
 
-test('a password changed in the environment is reset on the next boot', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bookmarks-seed-'));
-  const dbPath = path.join(dir, 'bookmarks.db');
+test('BOOKMARKS_DEV_KEY makes one known vault, idempotently', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bookmarks-dev-'));
   try {
-    const a = createApp(dbPath);
-    ensureSeedUser(a.db);
-    a.db.close();
-
-    process.env.BOOKMARKS_SEED_PASSWORD = 'new-password';
-    const b = createApp(dbPath);
-    ensureSeedUser(b.db);
-    const [u] = b.db.prepare('SELECT * FROM users').all();
-    b.db.close();
-
-    assert.ok(verifyPassword('new-password', u.pass_hash));
+    const app = createApp(path.join(dir, 'bookmarks.db'));
+    const key = newAccessKey();
+    assert.equal(ensureDevVault(app.db, ''), null, 'off unless set');
+    assert.equal(ensureDevVault(app.db, key).created, true);
+    assert.equal(ensureDevVault(app.db, key.toLowerCase()).created, false);
+    assert.equal(app.db.prepare('SELECT COUNT(*) AS n FROM users').get().n, 1);
+    assert.throws(() => ensureDevVault(app.db, 'too-short'));
+    app.db.close();
   } finally {
-    delete process.env.BOOKMARKS_SEED_PASSWORD;
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
@@ -944,9 +957,7 @@ test('a batch move counts only what actually moved', async () => {
 
 test('an id that is not yours is skipped, not refused', async () => {
   const mine = await makeIn('lote/meu', 'meu');
-  const other = (await call('POST', '/api/auth/register', {
-    body: { email: 'lote@example.com', username: 'loteuser', password: 'secret123' },
-  })).body.token;
+  const other = (await call('POST', '/api/auth/vault', { body: { name: 'loteuser' } })).body.token;
   const theirs = (await call('POST', '/api/bookmarks', {
     token: other, body: { url: 'https://alheio.example', title: 'alheio', folder: 'deles' },
   })).body.item.id;
@@ -1098,9 +1109,7 @@ test('deleting a folder that is not there says so', async () => {
 });
 
 test('folders are private to the user, like the bookmarks', async () => {
-  const other = (await call('POST', '/api/auth/register', {
-    body: { email: 'folders@example.com', username: 'folderuser', password: 'secret123' },
-  })).body.token;
+  const other = (await call('POST', '/api/auth/vault', { body: { name: 'folderuser' } })).body.token;
 
   await call('POST', '/api/folders', { token: other, body: { path: 'so-minha' } });
   assert.ok(!(await paths()).includes('so-minha'));
@@ -1108,9 +1117,7 @@ test('folders are private to the user, like the bookmarks', async () => {
 });
 
 test('the sync carries folders, tombstones included', async () => {
-  const t = (await call('POST', '/api/auth/register', {
-    body: { email: 'foldersync@example.com', username: 'foldersync', password: 'secret123' },
-  })).body.token;
+  const t = (await call('POST', '/api/auth/vault', { body: { name: 'foldersync' } })).body.token;
 
   await call('POST', '/api/folders', { token: t, body: { path: 'sincronizada' } });
   const first = await call('POST', '/api/sync', { token: t, body: { since: 0, changes: [] } });
@@ -1154,9 +1161,7 @@ test('the window is clamped and days is a number', async () => {
 });
 
 test('insights only ever sees your own opens', async () => {
-  const other = await call('POST', '/api/auth/register', {
-    body: { email: 'insights@example.com', username: 'insights', password: 'secret123' },
-  });
+  const other = await call('POST', '/api/auth/vault', { body: { name: 'insights' } });
   const r = await call('GET', '/api/insights?days=7', { token: other.body.token });
   assert.equal(r.body.total, 0);
   assert.deepEqual(r.body.log, []);
@@ -1210,9 +1215,7 @@ test('reimporting an untouched export changes nothing', async () => {
 /* ---------------- import: the file is a backup ---------------- */
 
 test('an exported id comes back as the same bookmark, not a copy', async () => {
-  const mine = await call('POST', '/api/auth/register', {
-    body: { email: 'restore@example.com', username: 'restore', password: 'secret123' },
-  });
+  const mine = await call('POST', '/api/auth/vault', { body: { name: 'restore' } });
   const t = mine.body.token;
   const made = await call('POST', '/api/bookmarks', {
     token: t, body: { url: 'https://restore.example', title: 'Restaurar', folder: 'a/b' },
@@ -1268,9 +1271,7 @@ test('the preview writes nothing and matches what apply does', async () => {
 });
 
 test('folder names that need quoting in yaml survive the round trip', async () => {
-  const t = (await call('POST', '/api/auth/register', {
-    body: { email: 'quoting@example.com', username: 'quoting', password: 'secret123' },
-  })).body.token;
+  const t = (await call('POST', '/api/auth/vault', { body: { name: 'quoting' } })).body.token;
 
   // Every one of these means something else in YAML unless the key is quoted.
   const names = ['dev: infra', '#tag', 'c++', '100%', 'true', 'null', '123', '[a]', '@at', '- dash'];
@@ -1281,9 +1282,7 @@ test('folder names that need quoting in yaml survive the round trip', async () =
     headers: { authorization: `Bearer ${t}` },
   }).then((r) => r.text());
 
-  const other = (await call('POST', '/api/auth/register', {
-    body: { email: 'quoting2@example.com', username: 'quoting2', password: 'secret123' },
-  })).body.token;
+  const other = (await call('POST', '/api/auth/vault', { body: { name: 'quoting2' } })).body.token;
   await call('POST', '/api/import', { token: other, body: { content: file, mode: 'add', apply: true } });
 
   const copied = (await call('GET', '/api/bookmarks?limit=500', { token: other })).body.items;
@@ -1293,9 +1292,7 @@ test('folder names that need quoting in yaml survive the round trip', async () =
 /* ---------------- sync: the cursor is a millisecond ---------------- */
 
 test('a change made in the same millisecond as the last sync still arrives', async () => {
-  const t = (await call('POST', '/api/auth/register', {
-    body: { email: 'cursor@example.com', username: 'cursor', password: 'secret123' },
-  })).body.token;
+  const t = (await call('POST', '/api/auth/vault', { body: { name: 'cursor' } })).body.token;
 
   const made = await call('POST', '/api/bookmarks', {
     token: t, body: { url: 'https://cursor.example', title: 'Cursor' },
@@ -1317,9 +1314,7 @@ test('a change made in the same millisecond as the last sync still arrives', asy
 });
 
 test('a deletion in that same window is not lost either', async () => {
-  const t = (await call('POST', '/api/auth/register', {
-    body: { email: 'cursor2@example.com', username: 'cursor2', password: 'secret123' },
-  })).body.token;
+  const t = (await call('POST', '/api/auth/vault', { body: { name: 'cursor2' } })).body.token;
   const made = await call('POST', '/api/bookmarks', {
     token: t, body: { url: 'https://gone.example', title: 'Gone' },
   });
@@ -1334,9 +1329,7 @@ test('a deletion in that same window is not lost either', async () => {
 });
 
 test('a sync push does not bring a deleted bookmark back', async () => {
-  const t = (await call('POST', '/api/auth/register', {
-    body: { email: 'revive@example.com', username: 'revive', password: 'secret123' },
-  })).body.token;
+  const t = (await call('POST', '/api/auth/vault', { body: { name: 'revive' } })).body.token;
   const made = (await call('POST', '/api/bookmarks', {
     token: t, body: { url: 'https://revive.example', title: 'Revive' },
   })).body.item;

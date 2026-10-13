@@ -1,8 +1,8 @@
 # Bookmarks
 
 Self-hosted bookmark manager with instant substring search, served as a PWA that
-installs and works offline. No dependencies, no accounts anywhere but your own
-machine.
+installs and works offline. No dependencies, no accounts, no passwords: a vault
+opens with its access key.
 
 ## Running it
 
@@ -12,8 +12,19 @@ Docker, two containers:
     cd bookmarks.nochaos.io
     docker compose up -d --build
 
-Open http://localhost:8080 and sign in with the test account `teste` /
-`teste123`, or register your own.
+Open http://localhost:8080 and choose **Create one**. The app makes a vault and
+shows its access key, once: keep it in a password manager, because it is the
+only way in and only its hash is stored. On another device, paste the same key.
+
+A vault from before the keys keeps every bookmark and gets a key on its first
+boot with this version, printed once in `docker compose logs api`. A lost key
+is never read back, but the host can always issue a new one:
+
+    docker compose exec api node api/keys.js              list the vaults
+    docker compose exec api node api/keys.js issue 1      a new key for vault 1
+
+Settings has **Generate a new key** too: the old one stops working at once, and
+every other device signed in with it is signed out.
 
 The vault is a plain SQLite file in a directory on your machine, mounted into
 the api container. By default that is `./data`; to point it at one you already
@@ -37,25 +48,37 @@ front of `web:80`.
 
 ## The web UI
 
-Up and down navigate, Enter opens, Ctrl+Enter opens in a new tab, F2 edits the
-selected link, Ctrl+Del deletes it, `n` creates, `b` toggles the panel, `/`
-focuses the search, Ctrl+C clears it. Type `help` for the rest.
+Five pages, in the sidebar (and under the thumb on a phone):
 
-Edit and delete are not letters because the caret lives in the search box: it
-takes focus on boot and after most actions, so a letter there is text, not a
-command. With the caret somewhere else, `e` and `Del` do the same two.
+    All links         the search box and the list
+    Organize          two folders side by side, for moving links between them
+    Activity          opens per day, the most opened links, the recent ones
+    Import & export   backups and bringing links in
+    Settings          theme, the vault's name, its key, signing out
 
-The left panel lists every folder, category and tag in the vault. Sections fold
-by clicking their heading. Dragging a folder onto another one nests it, and
-dropping it on the Folders heading or on the empty space below the list moves it
-back to the root.
+**All links.** Typing searches the whole vault as you type. The folder tree in
+the sidebar narrows the list to one folder and everything below it. Up and down
+move, Enter opens, `/` or Ctrl+K focuses the search, Esc clears the selection
+and then the search. With the caret out of a text field: `n` new, `e` or F2
+edit, `m` move, `x` select, Del delete; in the search box, Alt plus the same
+letter. Ctrl+click and Shift+click select like a file manager (on a phone,
+press and hold), Ctrl+A selects everything listed, and the bar that appears
+moves or deletes the lot. Deleting and moving can be undone from the toast.
 
-Every open counts. The most opened links climb the results, the counter shows
-next to the URL, and `insights` in the topbar has opens per day, the most opened
-links and the access log for the last 7, 14 or 30 days.
+**Organize.** One folder on each side. Click links to select them (Shift for a
+run, the box at the top for all), then the arrow between the panes, or the
+arrow keys, sends them across. Subfolders are listed first in each pane; click
+one to go in. Links dragged onto a subfolder, a breadcrumb, the other pane or a
+folder in the sidebar are filed there, and a folder dragged onto another moves
+inside it. Each pane can make, rename and delete the folder it shows.
 
-The theme picker carries the four Catppuccin flavours, a matrix one, and
-`system`, which follows the desktop.
+**Speed.** The vault is kept in the browser (IndexedDB) and searched there, so
+a keystroke never waits on the network and a reload paints from that copy at
+once, then asks the server only for what changed. Writes show up on screen
+before the server answers and are put back if it refuses. Another tab sees a
+change at once; another device within five seconds.
+
+Every open counts: the most opened links climb the results.
 
 ## Search
 
@@ -137,7 +160,8 @@ Docker. Without mise, the same commands are `docker compose up -d --build` and
 Environment variables live in `.env` and are documented in
 `docs/containers.md`. The short version: `BOOKMARKS_VAULT_DIR` is where the
 vault file lives, `BOOKMARKS_WEB_PORT` moves the published port,
-`BOOKMARKS_SEED=0` skips the test account.
+`BOOKMARKS_DEV_KEY` makes one known vault for development (never on a host
+others can reach).
 
 The API answers no cross-origin request unless `BOOKMARKS_ALLOWED_ORIGINS`
 names the origin. The app never needs it, being same-origin behind nginx; it is

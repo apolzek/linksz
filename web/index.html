@@ -2,414 +2,423 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<!-- viewport-fit=cover + safe-area in the CSS: without it the bar hides behind
+<!-- viewport-fit=cover + safe-area in the CSS: without it the bars hide behind
      the iPhone notch and gesture bar once installed. -->
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Bookmarks</title>
-<meta name="description" content="Self-hosted bookmark manager with instant substring search.">
+<meta name="description" content="Self-hosted bookmark manager with instant search.">
 
 <link rel="icon" href="/icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <link rel="manifest" href="/manifest.webmanifest">
 
-<!-- A single tag, rewritten by app.js from the palette in use: with a theme
-     picked by hand, a media-based tag would report the wrong colour. -->
-<meta name="theme-color" content="#0f1115">
-<meta name="color-scheme" content="dark light">
+<!-- Rewritten by app.js from the theme in use: with a theme picked by hand, a
+     media-based tag would report the wrong colour. -->
+<meta name="theme-color" content="#f6f6f4">
+<meta name="color-scheme" content="light dark">
 
-<!-- iOS still does not read everything from the manifest on the home screen. -->
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Bookmarks">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="mobile-web-app-capable" content="yes">
 
 <link rel="stylesheet" href="/style.css">
 
-<!-- Before the first paint, otherwise the page shows the default palette for a
-     frame and only then the chosen one. -->
+<!-- Before the first paint, otherwise the page flashes the other theme. -->
 <script>
   try {
-    // vm_theme: the key used before the project was renamed, still honoured
-    // once so nobody's chosen palette is lost to a rename.
-    var savedTheme = localStorage.getItem('bookmarks_theme') || localStorage.getItem('vm_theme');
-    if (savedTheme && savedTheme !== 'auto') document.documentElement.dataset.theme = savedTheme;
-  } catch (e) { /* storage blocked: the default palette is a fine fallback */ }
+    var t = localStorage.getItem('bookmarks_theme');
+    if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t;
+  } catch (e) { /* storage blocked: follow the system */ }
 </script>
 </head>
 <body>
 
-<!-- ---------- LOGIN ---------- -->
-<section id="auth" class="auth hidden">
+<!-- Icons, drawn once and used by reference. Stroke icons on a 24 grid that
+     take the colour of the text around them. -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></symbol>
+    <symbol id="i-links" viewBox="0 0 24 24"><path d="M10 14a4 4 0 0 0 5.66 0l3-3a4 4 0 0 0-5.66-5.66l-1 1"/><path d="M14 10a4 4 0 0 0-5.66 0l-3 3a4 4 0 0 0 5.66 5.66l1-1"/></symbol>
+    <symbol id="i-columns" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M12 4v16"/><path d="m7 12 2-2m-2 2 2 2M17 12l-2-2m2 2-2 2"/></symbol>
+    <symbol id="i-chart" viewBox="0 0 24 24"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></symbol>
+    <symbol id="i-swap" viewBox="0 0 24 24"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></symbol>
+    <symbol id="i-gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M2 12h3M19 12h3M4.9 19.1 7 17M17 7l2.1-2.1"/></symbol>
+    <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></symbol>
+    <symbol id="i-inbox" viewBox="0 0 24 24"><path d="M3 13h5l1.5 3h5L16 13h5"/><path d="M5.5 5h13L21 13v5a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-5z"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-edit" viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="m13.5 6.5 4 4"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></symbol>
+    <symbol id="i-move" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M9 13h6m-2-2 2 2-2 2"/></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></symbol>
+    <symbol id="i-chev" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></symbol>
+    <symbol id="i-chev-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+    <symbol id="i-up" viewBox="0 0 24 24"><path d="M12 19V5M6 11l6-6 6 6"/></symbol>
+    <symbol id="i-right" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></symbol>
+    <symbol id="i-left" viewBox="0 0 24 24"><path d="M19 12H5M11 6l-6 6 6 6"/></symbol>
+    <symbol id="i-ext" viewBox="0 0 24 24"><path d="M14 4h6v6M20 4l-9 9"/><path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></symbol>
+    <symbol id="i-key" viewBox="0 0 24 24"><circle cx="8" cy="15" r="4"/><path d="m11 12 9-9M17 6l3 3M14 9l2 2"/></symbol>
+    <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></symbol>
+    <symbol id="i-copy" viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 5 5 9-10"/></symbol>
+    <symbol id="i-folder-plus" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M12 10v6M9 13h6"/></symbol>
+    <symbol id="i-logo" viewBox="0 0 24 24"><path d="M7 3h10a1 1 0 0 1 1 1v17l-6-4-6 4V4a1 1 0 0 1 1-1z"/></symbol>
+  </defs>
+</svg>
+
+<!-- ================= OPEN A VAULT ================= -->
+<section id="auth" class="auth" hidden>
   <div class="auth-card">
-    <h1 class="logo brand">bookmarks<i>_</i></h1>
+    <div class="auth-brand"><span class="logo"><svg><use href="#i-logo"/></svg></span> Bookmarks</div>
 
-    <!-- Backend status, checked when the screen opens: whoever is signing in
-         should not have to guess whether the server is up. -->
-    <div id="auth-status" class="status checking">
-      <span class="dot"></span><span id="auth-status-text">checking the backend…</span>
-    </div>
-
-    <div class="tabs">
-      <button class="tab active" data-mode="login">Sign in</button>
-      <button class="tab" data-mode="register">Create account</button>
-    </div>
-
-    <form id="auth-form" autocomplete="on">
-      <label class="field" id="w-login">
-        <span>Username or email</span>
-        <input id="f-login" name="username" placeholder="username" autocomplete="username" required>
-      </label>
-      <label class="field hidden" id="w-email">
-        <span>Email</span>
-        <input id="f-email" name="email" type="email" placeholder="you@example.com" autocomplete="email">
-      </label>
-      <label class="field hidden" id="w-username">
-        <span>Username</span>
-        <input id="f-username" name="new-username" placeholder="lowercase, 2-60 characters" autocomplete="username">
-      </label>
+    <!-- Step one: the key. There is no username and no password: the key is
+         the vault, and whoever has it is in. -->
+    <form id="auth-open" class="auth-step" autocomplete="off">
+      <h1>Open your vault</h1>
+      <p class="muted">Paste the access key you got when the vault was created.</p>
       <label class="field">
-        <span>Password</span>
-        <span class="pw">
-          <input id="f-password" name="password" type="password" placeholder="••••••" autocomplete="current-password" required>
-          <button type="button" id="pw-toggle" class="pw-eye" title="Show password" aria-label="Show password">👁</button>
-        </span>
-        <em id="pw-hint" class="field-hint hidden">at least 6 characters</em>
+        <span class="label">Access key</span>
+        <input id="auth-key" class="key-input" placeholder="XXXX-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX"
+               autocomplete="off" autocapitalize="characters" spellcheck="false" required>
       </label>
-
-      <button type="submit" class="primary" id="auth-submit">Sign in</button>
-      <p id="auth-error" class="error" role="alert"></p>
+      <button type="submit" class="btn primary block" id="auth-submit">Open vault</button>
+      <p id="auth-error" class="form-error" role="alert"></p>
+      <div class="auth-alt">
+        <span class="muted">No vault yet?</span>
+        <button type="button" class="btn link" id="auth-new">Create one</button>
+      </div>
     </form>
 
-    <!-- A server that is down is the most common error here, and "Failed to
-         fetch" explains nothing: this block names the address that failed and
-         offers a retry. -->
-    <div id="auth-offline" class="offline hidden">
-      <b>The backend is not responding</b>
-      <p>Nothing answered at <code id="auth-origin"></code>.</p>
-      <p class="dim">Start it with <code>docker compose up -d</code>. If you opened
-        another port, check the address.</p>
-      <button type="button" id="auth-retry" class="ghost">check again</button>
+    <!-- Step two, only for a vault that was just made: the key, once. -->
+    <div id="auth-created" class="auth-step" hidden>
+      <h1>Save your access key</h1>
+      <p class="muted">This key is the only way into the vault. It is shown once and
+        cannot be recovered, so keep it in a password manager.</p>
+      <div class="key-box">
+        <code id="auth-new-key"></code>
+        <button type="button" class="btn icon" id="auth-copy" title="Copy"><svg><use href="#i-copy"/></svg></button>
+      </div>
+      <label class="check"><input type="checkbox" id="auth-saved"> I saved it somewhere safe</label>
+      <button type="button" class="btn primary block" id="auth-continue" disabled>Continue</button>
     </div>
 
-    <!-- Only shown when the backend announces the test account (seed on with
-         the default password). In production /api/health sends nothing and it
-         disappears. -->
-    <button type="button" id="auth-demo" class="demo hidden"></button>
+    <p id="auth-server" class="server-state" hidden></p>
   </div>
 </section>
 
-<!-- ---------- APP ---------- -->
-<main id="app" class="hidden">
-  <!-- Three columns so the wordmark sits in the middle of the bar and stays
-       there however wide the buttons on the right get. -->
-  <header class="topbar">
-    <div class="topbar-side">
-      <span id="sync-state" class="sync hidden">synced</span>
-      <!-- Which build is on screen. Filled from /api/health, which a pipeline
-           feeds through BOOKMARKS_COMMIT and BOOKMARKS_DEPLOYED_AT. -->
-      <span id="build" class="build hidden"></span>
-    </div>
-    <span class="brand">bookmarks<i>_</i></span>
-    <div class="topbar-side topbar-actions">
-      <span class="select-ghost"><select id="theme" class="ghost" title="Colour theme" aria-label="Colour theme">
-        <option value="auto">system</option>
-        <option value="latte">latte</option>
-        <option value="frappe">frappé</option>
-        <option value="macchiato">macchiato</option>
-        <option value="mocha">mocha</option>
-        <option value="matrix">matrix</option>
-      </select></span>
-      <button id="btn-browse" class="ghost" title="Folders, categories and tags (b)" aria-expanded="true">browse</button>
-      <button id="btn-io" class="ghost" title="Import and export">data</button>
-      <button id="btn-new" class="ghost" title="New bookmark (n)">new</button>
-      <button id="btn-insights" class="ghost" title="What you actually open">insights</button>
-      <button id="btn-help" class="ghost" title="Shortcuts and search syntax (or type help)">help</button>
-      <button id="btn-logout" class="ghost" title="Sign out">sign out</button>
-    </div>
-  </header>
+<!-- ================= THE APP ================= -->
+<div id="shell" class="shell" hidden>
 
-  <div class="layout">
-
-  <!-- Folders, categories and tags of the whole vault: the inverse of search,
-       for when you do not remember the term but remember where you put it. -->
-  <aside id="browse" class="browse">
-    <div class="browse-head">
-      <span>browse</span>
-      <button id="browse-clear" class="linkish hidden" title="Clear filters">clear</button>
+  <aside id="sidebar" class="sidebar">
+    <div class="side-top">
+      <a class="brand" href="#/"><span class="logo"><svg><use href="#i-logo"/></svg></span> Bookmarks</a>
+      <span id="sync" class="sync" title="Sync status"></span>
     </div>
-    <div id="browse-body"></div>
+
+    <nav class="nav">
+      <a href="#/" data-route="links"><svg><use href="#i-links"/></svg>All links <span class="nav-count" id="nav-count"></span></a>
+      <a href="#/organize" data-route="organize"><svg><use href="#i-columns"/></svg>Organize</a>
+      <a href="#/activity" data-route="activity"><svg><use href="#i-chart"/></svg>Activity</a>
+      <a href="#/data" data-route="data"><svg><use href="#i-swap"/></svg>Import &amp; export</a>
+      <a href="#/settings" data-route="settings"><svg><use href="#i-gear"/></svg>Settings</a>
+    </nav>
+
+    <div class="side-head">
+      <span>Folders</span>
+      <button type="button" class="btn icon sm" id="side-new-folder" title="New folder"><svg><use href="#i-folder-plus"/></svg></button>
+    </div>
+    <!-- Clicking a folder narrows the list, or opens it in the organizer.
+         Links and folders dragged onto one are filed there. -->
+    <div id="tree" class="tree" role="tree"></div>
   </aside>
+  <div id="scrim" class="scrim" hidden></div>
 
-  <!-- The panel's width is a preference, not a constant: with a folder tree
-       four levels deep, how much of it you want to see changes with what you
-       are doing. Double click puts it back where it started. -->
-  <div id="browse-grip" class="browse-grip" role="separator" aria-orientation="vertical"
-       aria-label="Resize the browse panel" tabindex="0"></div>
-
-  <div class="content">
-  <div class="searchwrap">
-    <div class="searchbar">
-      <!-- Two eyes instead of a magnifier: drawn, not an emoji, so they take the
-           theme's colour and stay sharp at any size. -->
-      <span class="icon" aria-hidden="true">
-        <svg viewBox="0 0 27 16" width="24" height="15" fill="none" stroke="currentColor" stroke-width="1.5">
-          <ellipse cx="7.5" cy="8" rx="5.6" ry="6.6"/>
-          <ellipse cx="19.5" cy="8" rx="5.6" ry="6.6"/>
-          <circle cx="8.6" cy="8.6" r="2.1" fill="currentColor" stroke="none"/>
-          <circle cx="20.6" cy="8.6" r="2.1" fill="currentColor" stroke="none"/>
-        </svg>
-      </span>
-      <input id="q" placeholder="search…  #tag  @category  /folder  -exclude" autocomplete="off" spellcheck="false" autofocus>
-      <button id="q-clear" class="clear hidden" title="Clear">×</button>
-    </div>
-
-    <!-- The searches you actually use, offered back while you type. -->
-    <ul id="suggest" class="suggest hidden"></ul>
-    <div id="chips" class="chips"></div>
-
-    <!-- Out of the way until asked for: the `help` button in the topbar, or
-         typing `help` in the search box. -->
-    <section id="help" class="help hidden">
-      <div class="help-head">
-        <span>help</span>
-        <button id="help-close" class="linkish" title="Close (Esc)">close</button>
+  <!-- ---------- links ---------- -->
+  <main id="view-links" class="view" data-view="links">
+    <header class="view-head links-head">
+      <button type="button" class="btn icon only-mobile" data-open-menu title="Menu"><svg><use href="#i-menu"/></svg></button>
+      <div class="search">
+        <svg class="search-icon"><use href="#i-search"/></svg>
+        <span id="scope" class="scope" hidden></span>
+        <input id="q" type="search" placeholder="Search links" autocomplete="off" spellcheck="false" enterkeyhint="go">
+        <kbd class="search-kbd">/</kbd>
       </div>
-      <p class="hint"><kbd>↑</kbd><kbd>↓</kbd> move · <kbd>Enter</kbd> open · <kbd>Ctrl</kbd>+<kbd>Enter</kbd> new tab · <kbd>F2</kbd> edit · <kbd>Ctrl</kbd>+<kbd>Del</kbd> delete · <kbd>n</kbd> new · <kbd>b</kbd> browse · <kbd>/</kbd> search</p>
-      <p class="hint dim">With the caret out of the search box, <kbd>e</kbd> and <kbd>Del</kbd> do the same two.</p>
-      <p class="hint dim">On a row: wheel click opens it in a new tab, right click edits it.</p>
-      <p class="hint">Selecting: <kbd>Ctrl</kbd>+<kbd>A</kbd> marks every result, <kbd>Ctrl</kbd>+click marks one,
-         <kbd>Shift</kbd>+click marks a run, <kbd>Esc</kbd> clears. With rows marked, <kbd>Del</kbd> deletes
-         them and dragging one onto a folder files them all.</p>
-      <p class="hint syntax"><code>#tag</code> <code>@category</code> <code>/folder</code> <code>title:something</code> <code>"exact phrase"</code> <code>-exclude</code></p>
-      <p class="hint">Terms combine with AND. Everything is substring, case and accent insensitive.</p>
-      <p class="hint dim">In the panel: drag a folder onto another one to nest it, drag a result onto
-         one to file it there, and drop either on empty space to send it to the root.
-         <code>new folder</code> makes one that is still empty.</p>
-    </section>
-  </div>
-
-  <p id="count" class="count"></p>
-
-  <!-- Only on screen when something is marked. What is selected and what can be
-       done with it, in one line, because a selection nobody can see is a way to
-       delete the wrong thing. -->
-  <div id="selbar" class="selbar hidden">
-    <span id="sel-count" class="sel-count"></span>
-    <div class="spacer"></div>
-    <button type="button" id="sel-move" class="ghost">move to…</button>
-    <button type="button" id="sel-delete" class="ghost sel-danger">delete</button>
-    <button type="button" id="sel-clear" class="linkish">clear</button>
-  </div>
-
-  <ul id="results" class="results"></ul>
-  <p id="empty" class="empty hidden"></p>
-  </div><!-- /content -->
-  </div><!-- /layout -->
-
-  <!-- On phones there is no keyboard: the floating button is how you add. -->
-  <button id="fab" class="fab" title="New bookmark" aria-label="New bookmark">+</button>
-</main>
-
-<!-- ---------- MODAL ---------- -->
-<div id="modal" class="modal hidden">
-  <form id="bm-form" class="modal-card">
-    <h2 id="modal-title">New bookmark</h2>
-    <label>URL<input id="b-url" placeholder="https://example.com" autocomplete="off"></label>
-    <label>Title<input id="b-title" placeholder="Bookmark name" autocomplete="off"></label>
-    <div class="row">
-      <label>Folder<input id="b-folder" placeholder="dev/linux" autocomplete="off" list="dl-folders"></label>
-      <label>Category<input id="b-category" placeholder="studies" autocomplete="off" list="dl-categories"></label>
+      <button type="button" class="btn primary" id="btn-new" title="New link (n)"><svg><use href="#i-plus"/></svg><span>New</span></button>
+    </header>
+    <div class="list-meta">
+      <span id="count" class="muted"></span>
+      <button type="button" class="btn link sm" id="btn-syntax">Search tips</button>
     </div>
-    <label>Tags<input id="b-tags" placeholder="kubernetes, go, cli" autocomplete="off"></label>
-    <label>Description<textarea id="b-description" rows="3" placeholder="what this link is for (optional)"></textarea></label>
-    <datalist id="dl-folders"></datalist>
-    <datalist id="dl-categories"></datalist>
-    <div class="modal-actions">
-      <button type="button" id="bm-delete" class="danger hidden">delete</button>
-      <div class="spacer"></div>
-      <button type="button" id="bm-cancel" class="ghost">cancel</button>
-      <button type="submit" class="primary">save</button>
+    <div id="syntax" class="syntax" hidden>
+      <code>#tag</code> <code>@category</code> <code>/folder</code> <code>title:word</code>
+      <code>"exact phrase"</code> <code>-exclude</code>
+      <span class="muted">Terms combine. Case and accents are ignored.</span>
     </div>
-    <p id="bm-error" class="error"></p>
-  </form>
-</div>
+    <ul id="list" class="list" role="listbox" aria-label="Links" aria-multiselectable="true"></ul>
+    <div id="empty" class="empty" hidden></div>
+  </main>
 
-<!-- ---------- FOLDER ---------- -->
-<!-- One field, because a folder is one thing: its path. The same card creates
-     and renames, since renaming is the one edit a folder has. -->
-<div id="folder-modal" class="modal hidden">
-  <form id="folder-form" class="modal-card folder-card">
-    <h2 id="folder-title">New folder</h2>
-    <label id="folder-path-label">Path<input id="f-path" placeholder="dev/linux" autocomplete="off" list="dl-folders"></label>
-    <p class="hint dim" id="folder-hint">Slashes nest it: <code>dev/linux</code> is <code>linux</code> inside <code>dev</code>.</p>
-    <div class="modal-actions">
-      <div class="spacer"></div>
-      <button type="button" id="folder-cancel" class="ghost">cancel</button>
-      <button type="submit" class="primary" id="folder-save">create</button>
+  <!-- ---------- organize ---------- -->
+  <!-- Two folders side by side. Pick links on one side, send them to the
+       other. That is the whole page. -->
+  <main id="view-organize" class="view" data-view="organize" hidden>
+    <header class="view-head">
+      <button type="button" class="btn icon only-mobile" data-open-menu title="Menu"><svg><use href="#i-menu"/></svg></button>
+      <div class="titles">
+        <h1>Organize</h1>
+        <p class="muted">Select links on one side and move them to the folder open on the other. Or drag them anywhere in the folder list.</p>
+      </div>
+    </header>
+    <div class="panes">
+      <section class="pane" id="pane-a" data-pane="a"></section>
+      <div class="pane-actions">
+        <button type="button" class="btn move-btn" id="move-ab" disabled title="Move selected to the right (→)">
+          <svg><use href="#i-right"/></svg><span></span></button>
+        <button type="button" class="btn move-btn" id="move-ba" disabled title="Move selected to the left (←)">
+          <svg><use href="#i-left"/></svg><span></span></button>
+      </div>
+      <section class="pane" id="pane-b" data-pane="b"></section>
     </div>
-    <p id="folder-error" class="error"></p>
-  </form>
-</div>
+  </main>
 
-<!-- ---------- CONFIRMAR ---------- -->
-<!-- Deleting is the only destructive action here and Ctrl+Del reaches it from
-     the keyboard, so it asks in the app's own frame instead of the browser's
-     confirm(): that one freezes the page and looks like the browser asking,
-     not us. Cancel holds the focus, so a stray Enter cancels. -->
-<div id="confirm-modal" class="modal hidden">
-  <div class="modal-card confirm-card" role="alertdialog" aria-modal="true"
-       aria-labelledby="confirm-title" aria-describedby="confirm-what">
-    <h2 id="confirm-title">Delete bookmark</h2>
-    <p class="confirm-lead">This cannot be undone.</p>
-    <p id="confirm-what" class="confirm-what"></p>
-    <div class="modal-actions">
-      <div class="spacer"></div>
-      <button type="button" id="confirm-cancel" class="ghost">cancel</button>
-      <button type="button" id="confirm-ok" class="danger">delete</button>
+  <!-- ---------- activity ---------- -->
+  <main id="view-activity" class="view" data-view="activity" hidden>
+    <header class="view-head">
+      <button type="button" class="btn icon only-mobile" data-open-menu title="Menu"><svg><use href="#i-menu"/></svg></button>
+      <div class="titles"><h1>Activity</h1><p class="muted">What you actually open.</p></div>
+      <div class="segmented" id="act-range">
+        <button type="button" data-days="7">7 days</button>
+        <button type="button" data-days="14">14 days</button>
+        <button type="button" data-days="30">30 days</button>
+      </div>
+    </header>
+    <div class="cards">
+      <section class="card wide">
+        <div class="card-head"><h2><span id="act-total">0</span> opens</h2></div>
+        <div id="act-chart" class="chart"></div>
+      </section>
+      <section class="card">
+        <div class="card-head"><h2>Most opened</h2></div>
+        <ol id="act-top" class="plain-list"></ol>
+      </section>
+      <section class="card">
+        <div class="card-head"><h2>Recent</h2></div>
+        <ul id="act-log" class="plain-list"></ul>
+      </section>
     </div>
-  </div>
-</div>
+  </main>
 
-<!-- ---------- IMPORTAR / EXPORTAR ---------- -->
-<!-- Browsing habits: what gets opened and when. The data comes from the
-     server's opens log, so it is the same on every device. -->
-<div id="insights-modal" class="modal hidden">
-  <div class="modal-card insights-card" role="dialog" aria-modal="true" aria-label="Insights">
-    <!-- The card scrolls, so the way out rides along at the top instead of
-         waiting at the end of the access log. -->
-    <div class="modal-head">
-      <h2>Insights</h2>
-      <button type="button" id="ins-close" class="icon-close" title="Close (Esc)" aria-label="Close">&times;</button>
-    </div>
-
-    <section class="io-section">
-      <div class="ins-head">
-        <h3>Last <span id="ins-days">7</span> days</h3>
-        <div class="ins-range">
-          <button type="button" class="linkish" data-days="7">7 days</button>
-          <button type="button" class="linkish" data-days="14">14 days</button>
-          <button type="button" class="linkish" data-days="30">30 days</button>
+  <!-- ---------- import / export ---------- -->
+  <main id="view-data" class="view" data-view="data" hidden>
+    <header class="view-head">
+      <button type="button" class="btn icon only-mobile" data-open-menu title="Menu"><svg><use href="#i-menu"/></svg></button>
+      <div class="titles"><h1>Import &amp; export</h1><p class="muted">Back the vault up, or bring links in.</p></div>
+    </header>
+    <div class="cards narrow">
+      <section class="card">
+        <div class="card-head"><h2>Export</h2></div>
+        <p class="muted">Downloads every link in this vault.</p>
+        <div class="btn-row">
+          <button type="button" class="btn" data-export="yaml">YAML</button>
+          <button type="button" class="btn" data-export="html">Browser HTML</button>
+          <button type="button" class="btn" data-export="json">JSON</button>
         </div>
-      </div>
-      <p class="io-hint"><b id="ins-total">0</b> opens in the window</p>
-      <div id="ins-chart" class="ins-chart"></div>
-    </section>
-
-    <!-- Two lists of the same shape: side by side once there is room, stacked
-         when there is not. -->
-    <div class="ins-split">
-      <section class="io-section">
-        <h3>Most opened</h3>
-        <p class="io-hint">In the window, and all time next to it.</p>
-        <ol id="ins-top" class="ins-top"></ol>
+        <p class="hint">YAML keeps everything and is editable by hand. HTML is what browsers import.</p>
       </section>
 
-      <section class="io-section">
-        <h3>Access log</h3>
-        <p class="io-hint">Every open in the window, newest first.</p>
-        <ul id="ins-log" class="ins-log"></ul>
+      <section class="card">
+        <div class="card-head"><h2>Import</h2></div>
+        <!-- Asked before the file is picked: a browser export is a weaker file
+             than a vault export, and the form changes to match what it can do. -->
+        <div class="segmented wide" id="io-source">
+          <button type="button" data-source="native" class="on">From this app<small>YAML or JSON</small></button>
+          <button type="button" data-source="browser">From a browser<small>Chrome, Firefox, Edge, Safari</small></button>
+        </div>
+        <label class="file-drop" id="io-drop">
+          <input type="file" id="io-file">
+          <span class="file-drop-main">Choose a file</span>
+          <span class="file-drop-name muted" id="io-filename">or drop it here</span>
+        </label>
+        <div class="field" id="io-prefix-row" hidden>
+          <span class="label">Put everything inside a folder <span class="muted">(optional)</span></span>
+          <div class="input-row">
+            <input id="io-prefix" placeholder="leave empty to keep the browser's folders at the top" autocomplete="off">
+            <button type="button" class="btn" id="io-prefix-dated">Dated folder</button>
+          </div>
+        </div>
+        <div id="io-plan" hidden>
+          <p class="io-stats" id="io-stats"></p>
+          <ul class="io-summary" id="io-summary"></ul>
+          <p class="io-warn" id="io-warn" hidden></p>
+          <fieldset class="choices" id="io-modes">
+            <legend>When a link is already in the vault</legend>
+            <label><input type="radio" name="io-mode" value="add" checked><span><b>Keep mine</b><small>only add what is missing</small></span></label>
+            <label><input type="radio" name="io-mode" value="update"><span><b>Use the file</b><small>overwrite what is here</small></span></label>
+            <label><input type="radio" name="io-mode" value="newest"><span><b>Keep the newest</b><small>last edited wins</small></span></label>
+            <label id="io-mode-replace"><input type="radio" name="io-mode" value="replace"><span><b>Replace everything</b><small>remove what the file does not have</small></span></label>
+          </fieldset>
+          <button type="button" class="btn primary" id="io-apply" disabled>Import</button>
+        </div>
+        <p class="form-error" id="io-error" role="alert"></p>
       </section>
     </div>
+  </main>
+
+  <!-- ---------- settings ---------- -->
+  <main id="view-settings" class="view" data-view="settings" hidden>
+    <header class="view-head">
+      <button type="button" class="btn icon only-mobile" data-open-menu title="Menu"><svg><use href="#i-menu"/></svg></button>
+      <div class="titles"><h1>Settings</h1></div>
+    </header>
+    <div class="cards narrow">
+      <section class="card">
+        <div class="card-head"><h2>Appearance</h2></div>
+        <div class="segmented" id="theme">
+          <button type="button" data-theme="auto">System</button>
+          <button type="button" data-theme="light">Light</button>
+          <button type="button" data-theme="dark">Dark</button>
+        </div>
+      </section>
+      <section class="card">
+        <div class="card-head"><h2>Vault</h2></div>
+        <form id="vault-form" class="input-row">
+          <input id="vault-name" placeholder="Name this vault" maxlength="80" autocomplete="off">
+          <button type="submit" class="btn">Save</button>
+        </form>
+        <p class="hint" id="vault-stats"></p>
+      </section>
+      <section class="card">
+        <div class="card-head"><h2>Access key</h2></div>
+        <p class="muted">Generate a new key if this one may have leaked. The old key stops
+          working at once and every other device is signed out.</p>
+        <div class="key-box" id="rotated" hidden>
+          <code id="rotated-key"></code>
+          <button type="button" class="btn icon" id="rotated-copy" title="Copy"><svg><use href="#i-copy"/></svg></button>
+        </div>
+        <div class="btn-row">
+          <button type="button" class="btn" id="btn-rotate"><svg><use href="#i-key"/></svg>Generate a new key</button>
+          <button type="button" class="btn danger-text" id="btn-signout">Sign out of this device</button>
+        </div>
+      </section>
+      <section class="card">
+        <div class="card-head"><h2>Keyboard</h2></div>
+        <dl class="keys">
+          <dt><kbd>/</kbd></dt><dd>Search</dd>
+          <dt><kbd>↑</kbd> <kbd>↓</kbd></dt><dd>Move through the list</dd>
+          <dt><kbd>Enter</kbd></dt><dd>Open</dd>
+          <dt><kbd>x</kbd> or <kbd>Ctrl</kbd>+click</dt><dd>Select (on a phone, press and hold)</dd>
+          <dt><kbd>Shift</kbd>+click</dt><dd>Select a range</dd>
+          <dt><kbd>Ctrl</kbd>+<kbd>A</kbd></dt><dd>Select everything listed</dd>
+          <dt><kbd>m</kbd></dt><dd>Move to a folder</dd>
+          <dt><kbd>e</kbd> or <kbd>F2</kbd></dt><dd>Edit</dd>
+          <dt><kbd>Del</kbd></dt><dd>Delete</dd>
+          <dt><kbd>n</kbd></dt><dd>New link</dd>
+          <dt><kbd>Esc</kbd></dt><dd>Clear selection, then search</dd>
+        </dl>
+        <p class="hint">Letter keys work when the caret is not in a text field. In the search box,
+          <kbd>Alt</kbd> with the same letter does it.</p>
+      </section>
+      <p class="hint center" id="build"></p>
+    </div>
+  </main>
+
+  <!-- Phones: the four places, under the thumb. -->
+  <nav class="tabbar">
+    <a href="#/" data-route="links"><svg><use href="#i-links"/></svg><span>Links</span></a>
+    <a href="#/organize" data-route="organize"><svg><use href="#i-columns"/></svg><span>Organize</span></a>
+    <button type="button" id="tab-new"><svg><use href="#i-plus"/></svg><span>New</span></button>
+    <a href="#/settings" data-route="settings"><svg><use href="#i-gear"/></svg><span>Settings</span></a>
+  </nav>
+
+  <!-- What is selected and what can be done with it, in one line. -->
+  <div id="selbar" class="selbar" hidden>
+    <span id="sel-count"></span>
+    <button type="button" class="btn" id="sel-edit" hidden><svg><use href="#i-edit"/></svg>Edit</button>
+    <button type="button" class="btn" id="sel-move"><svg><use href="#i-move"/></svg>Move to…</button>
+    <button type="button" class="btn danger-text" id="sel-delete"><svg><use href="#i-trash"/></svg>Delete</button>
+    <button type="button" class="btn icon" id="sel-clear" title="Clear selection (Esc)"><svg><use href="#i-x"/></svg></button>
   </div>
 </div>
 
-<div id="io-modal" class="modal hidden">
-  <div class="modal-card io-card">
-    <h2>Import and export</h2>
-
-    <section class="io-section">
-      <h3>Export</h3>
-      <p class="io-hint">Downloads every bookmark in this vault.</p>
-      <div class="io-buttons">
-        <button type="button" class="ghost" data-export="yaml">YAML</button>
-        <button type="button" class="ghost" data-export="html">Browser HTML</button>
-        <button type="button" class="ghost" data-export="json">JSON</button>
-      </div>
-      <p class="io-hint dim">YAML groups by folder, keeps everything and is editable by hand · HTML is what browsers import</p>
-    </section>
-
-    <section class="io-section">
-      <h3>Import</h3>
-      <p class="io-hint">Two different files, so two different flows. Say where this one came from.</p>
-
-      <!-- The choice is made before the file is picked, not discovered in an
-           error afterwards. A browser export is a weaker file than a vault
-           export, and the form changes to match what it can actually do. -->
-      <div class="io-sources" role="tablist" aria-label="Where the file came from">
-        <button type="button" role="tab" class="on" id="io-src-native" data-io-source="native" aria-selected="true">
-          <b>From this app</b><em>YAML or JSON exported here</em>
-        </button>
-        <button type="button" role="tab" id="io-src-browser" data-io-source="browser" aria-selected="false">
-          <b>From a browser</b><em>the HTML Chrome, Firefox, Edge or Safari exports</em>
-        </button>
-      </div>
-
-      <p class="io-hint io-src-hint" id="io-src-native-hint">
-        The vault's own format: ids, folders, categories, tags, descriptions and
-        counters all survive.<br>
-        Edited a YAML by hand? Choose <b>Use the file</b> below, or the edits are skipped.
-      </p>
-      <label class="io-file">
-        <input type="file" id="io-file" accept=".yaml,.yml,.json,application/json">
-        <span class="io-file-btn">choose file…</span>
-        <span class="io-file-name" id="io-filename">no file chosen</span>
-      </label>
-
-      <div class="io-prefix hidden" id="io-prefix-row">
-        <span>Put the whole tree inside</span>
-        <span class="io-prefix-field">
-          <input type="text" id="io-prefix" placeholder="optional: leave empty and the folders land at the root"
-                 maxlength="300" autocomplete="off" spellcheck="false">
-          <button type="button" id="io-prefix-dated" class="ghost">Imported-today</button>
-        </span>
-      </div>
-
-      <div id="io-plan" class="hidden">
-        <p class="io-hint io-label">What the file carries</p>
-        <p id="io-file-stats" class="io-filestats"></p>
-        <p class="io-hint io-label">What will happen</p>
-        <ul id="io-summary" class="io-summary"></ul>
-        <p id="io-warn" class="io-warn hidden"></p>
-
-        <p class="io-hint dim hidden" id="io-browser-note">
-          Nothing is removed by a browser import: it cannot replace the vault,
-          and what the format has no way to express, categories above all, is
-          left alone on the bookmarks you already have.
-        </p>
-
-        <fieldset class="io-modes">
-          <legend>If the bookmark already exists in the vault</legend>
-          <label>
-            <input type="radio" name="io-mode" value="add" checked>
-            <span><b>Keep what is here</b><em>only adds what is missing</em></span>
-          </label>
-          <label>
-            <input type="radio" name="io-mode" value="update">
-            <span><b>Use the file</b><em>overwrites the existing ones</em></span>
-          </label>
-          <label>
-            <input type="radio" name="io-mode" value="newest">
-            <span><b>Keep the newest</b><em>last edited wins</em></span>
-          </label>
-          <label id="io-mode-replace">
-            <input type="radio" name="io-mode" value="replace">
-            <span><b>Replace everything</b><em>anything not in the file is removed</em></span>
-          </label>
-        </fieldset>
-      </div>
-
-      <p id="io-error" class="error"></p>
-    </section>
-
-    <div class="modal-actions">
-      <div class="spacer"></div>
-      <button type="button" id="io-close" class="ghost">close</button>
-      <button type="button" id="io-apply" class="primary" disabled>import</button>
+<!-- ================= DIALOGS ================= -->
+<dialog id="dlg-edit" class="dialog">
+  <form method="dialog" id="edit-form">
+    <header class="dialog-head">
+      <h2 id="edit-title">New link</h2>
+      <button type="button" class="btn icon" data-close title="Close"><svg><use href="#i-x"/></svg></button>
+    </header>
+    <label class="field"><span class="label">URL</span>
+      <input id="e-url" inputmode="url" placeholder="https://" autocomplete="off" spellcheck="false"></label>
+    <label class="field"><span class="label">Title</span>
+      <input id="e-title" placeholder="What is this?" autocomplete="off"></label>
+    <div class="field">
+      <span class="label">Folder</span>
+      <button type="button" class="btn folder-field" id="e-folder"><svg><use href="#i-folder"/></svg><span></span><svg class="chev"><use href="#i-chev-down"/></svg></button>
     </div>
-  </div>
-</div>
+    <div class="grid-2">
+      <label class="field"><span class="label">Tags</span>
+        <input id="e-tags" placeholder="go, cli" autocomplete="off"></label>
+      <label class="field"><span class="label">Category</span>
+        <input id="e-category" placeholder="optional" autocomplete="off" list="dl-categories"></label>
+    </div>
+    <label class="field"><span class="label">Notes</span>
+      <textarea id="e-description" rows="3" placeholder="Optional"></textarea></label>
+    <datalist id="dl-categories"></datalist>
+    <p class="form-error" id="edit-error" role="alert"></p>
+    <footer class="dialog-foot">
+      <button type="button" class="btn danger-text" id="edit-delete" hidden><svg><use href="#i-trash"/></svg>Delete</button>
+      <span class="spacer"></span>
+      <button type="button" class="btn" data-close>Cancel</button>
+      <button type="submit" class="btn primary" id="edit-save">Save</button>
+    </footer>
+  </form>
+</dialog>
+
+<!-- One picker for every "which folder?" question: moving links, moving a
+     folder, the folder of a link, the folder a pane shows. -->
+<dialog id="dlg-picker" class="dialog picker">
+  <form method="dialog">
+    <header class="dialog-head">
+      <h2 id="picker-title">Move to</h2>
+      <button type="button" class="btn icon" data-close title="Close"><svg><use href="#i-x"/></svg></button>
+    </header>
+    <div class="search small">
+      <svg class="search-icon"><use href="#i-search"/></svg>
+      <input id="picker-q" placeholder="Find or create a folder" autocomplete="off" spellcheck="false">
+    </div>
+    <ul id="picker-list" class="picker-list" role="listbox"></ul>
+  </form>
+</dialog>
+
+<dialog id="dlg-confirm" class="dialog confirm" role="alertdialog">
+  <form method="dialog">
+    <h2 id="confirm-title"></h2>
+    <p id="confirm-text" class="muted"></p>
+    <footer class="dialog-foot">
+      <span class="spacer"></span>
+      <button value="no" class="btn" id="confirm-no" autofocus>Cancel</button>
+      <button value="yes" class="btn danger" id="confirm-yes">Delete</button>
+    </footer>
+  </form>
+</dialog>
+
+<dialog id="dlg-prompt" class="dialog confirm">
+  <form method="dialog" id="prompt-form">
+    <h2 id="prompt-title"></h2>
+    <label class="field"><span class="label" id="prompt-label"></span>
+      <input id="prompt-input" autocomplete="off" spellcheck="false"></label>
+    <p class="form-error" id="prompt-error" role="alert"></p>
+    <footer class="dialog-foot">
+      <span class="spacer"></span>
+      <button type="button" class="btn" data-close>Cancel</button>
+      <button type="submit" class="btn primary" id="prompt-ok">Save</button>
+    </footer>
+  </form>
+</dialog>
+
+<div id="toasts" class="toasts" aria-live="polite"></div>
 
 <script src="/search.js"></script>
-<script src="/app.js"></script>
+<script type="module" src="/app.js"></script>
 </body>
 </html>

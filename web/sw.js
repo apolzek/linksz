@@ -12,7 +12,7 @@
 'use strict';
 
 // Bump this version whenever a shell file changes.
-const VERSION = 'v58';
+const VERSION = 'v60';
 const SHELL_CACHE = `bookmarks-shell-${VERSION}`;
 
 const SHELL = [
@@ -21,6 +21,16 @@ const SHELL = [
   '/style.css',
   '/app.js',
   '/search.js',
+  '/js/http.js',
+  '/js/store.js',
+  '/js/ui.js',
+  '/js/links.js',
+  '/js/organize.js',
+  '/js/tree.js',
+  '/js/editor.js',
+  '/js/activity.js',
+  '/js/data.js',
+  '/js/settings.js',
   '/manifest.webmanifest',
   '/icon.svg',
   '/icon-192.png',

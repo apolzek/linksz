@@ -2,18 +2,22 @@
 //
 // No dependency: node has WebSocket built in and the browser is the one already
 // on the machine. What it covers is the half the node suite cannot see, the
-// part that only exists once a browser is running the page: keyboard handling,
-// modals, the service worker's shell and the two import flows.
+// part that only exists once a browser is running the page: the key screen,
+// the keyboard, the dialogs, the organizer and the two import flows.
 //
 // Started by tests/web.sh, which brings up a server on a throwaway vault and
-// passes its URL. Two hard-won rules about headless Chrome live here:
+// passes its URL and the vault's key. Two hard-won rules about headless Chrome
+// live here:
 //   * --headless (old) delivers Input events; --headless=new silently does not
 //   * navigating with Page.navigate kills input for the rest of the session, so
 //     the browser is launched on the URL and never told to go anywhere else
+//     (a hash change is fine; it is not a navigation)
 'use strict';
 
 const BASE = process.argv[2];
 const PORT = Number(process.argv[3] || 9222);
+const KEY = process.env.DEV_KEY;
+const FIXTURES = process.env.WEB_FIXTURES;
 
 let failures = 0;
 const ok = (m) => console.log(`  \x1b[32m✔\x1b[0m ${m}`);
@@ -22,7 +26,7 @@ const group = (m) => console.log(`\x1b[1;34m›\x1b[0m ${m}`);
 const is = (actual, expected, what) =>
   (JSON.stringify(actual) === JSON.stringify(expected)
     ? ok(what)
-    : bad(`${what}\n      esperado ${JSON.stringify(expected)}, veio ${JSON.stringify(actual)}`));
+    : bad(`${what}\n      expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 function rpc(ws) {
@@ -64,30 +68,66 @@ await cdp.send('DOM.enable');
 
 const ev = async (expr) => (await cdp.send('Runtime.evaluate',
   { expression: expr, awaitPromise: true, returnByValue: true })).result?.result?.value;
+const q = (sel) => JSON.stringify(sel);
 
+// A key the way a keyboard sends it: one keyDown carrying the text, so a
+// handler that calls preventDefault stops the character, as it would for real.
 async function key(k, code, keyCode, modifiers = 0) {
   const base = { modifiers, key: k, code, windowsVirtualKeyCode: keyCode, nativeVirtualKeyCode: keyCode };
-  const printable = k.length === 1 && !modifiers;
-  await cdp.send('Input.dispatchKeyEvent', { type: printable ? 'keyDown' : 'rawKeyDown', ...base, text: printable ? k : undefined });
-  if (printable) await cdp.send('Input.dispatchKeyEvent', { type: 'char', ...base, text: k });
+  const text = k === 'Enter' ? '\r' : (k.length === 1 && !(modifiers & 6) ? k : undefined);
+  await cdp.send('Input.dispatchKeyEvent', { type: text ? 'keyDown' : 'rawKeyDown', ...base, text });
   await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', ...base });
-  await sleep(350);
+  await sleep(150);
+}
+const letter = (c, modifiers = 0) => key(c, `Key${c.toUpperCase()}`, c.toUpperCase().charCodeAt(0), modifiers);
+const CTRL = 2;
+const SHIFT = 8;
+const ALT = 1;
+
+async function type(text) {
+  await cdp.send('Input.insertText', { text });
+  await sleep(200);
 }
 
-// Typing into a React-less input still needs the native setter, or the value
-// lands without the event the page listens for.
-const setInput = (sel, value) => ev(
-  `(() => { const el = document.querySelector(${JSON.stringify(sel)});
-    Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set.call(el, ${JSON.stringify(value)});
-    el.dispatchEvent(new Event('input', { bubbles: true })); return 1; })()`,
-);
+async function click(sel, modifiers = 0) {
+  const at = await ev(`(() => { const el = document.querySelector(${q(sel)}); if (!el) return null;
+    el.scrollIntoView({ block: 'nearest' }); const r = el.getBoundingClientRect();
+    return [r.x + r.width / 2, r.y + r.height / 2]; })()`);
+  if (!at) { bad(`nothing to click at ${sel}`); return; }
+  const [x, y] = at;
+  await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y });
+  await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', clickCount: 1, modifiers });
+  await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', clickCount: 1, modifiers });
+  await sleep(300);
+}
+
+// Native drag and drop cannot be driven over Input in headless Chrome, so the
+// events are dispatched by hand, with one DataTransfer carried across the three
+// of them the way the browser would.
+const drag = (src, dst) => ev(`(async () => {
+  const s = document.querySelector(${q(src)}), d = document.querySelector(${q(dst)});
+  if (!s || !d) return false;
+  const dt = new DataTransfer();
+  s.dispatchEvent(new DragEvent('dragstart', { bubbles: true, dataTransfer: dt }));
+  d.dispatchEvent(new DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer: dt }));
+  d.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: dt }));
+  s.dispatchEvent(new DragEvent('dragend', { bubbles: true, dataTransfer: dt }));
+  await new Promise((r) => setTimeout(r, 500));
+  return true;
+})()`);
 
 const pickFile = async (path) => {
   const doc = await cdp.send('DOM.getDocument', { depth: -1 });
   const found = await cdp.send('DOM.querySelector', { nodeId: doc.result.root.nodeId, selector: '#io-file' });
   await cdp.send('DOM.setFileInputFiles', { files: [path], nodeId: found.result.nodeId });
-  await sleep(1400);
+  await sleep(1200);
 };
+
+const server = (path) => ev(`fetch(${q(path)}, { headers: { authorization: 'Bearer ' + localStorage.getItem('bookmarks_token') } }).then((r) => r.json())`);
+const text = (sel) => ev(`document.querySelector(${q(sel)})?.textContent ?? null`);
+const hidden = (sel) => ev(`(() => { const el = document.querySelector(${q(sel)}); return !el || el.hidden || el.closest('[hidden]') !== null; })()`);
+const lastToast = () => ev("[...document.querySelectorAll('.toast')].pop()?.innerText ?? ''");
+const go = async (hash) => { await ev(`location.hash = ${q(hash)}`); await sleep(400); };
 
 await sleep(2500);
 await cdp.send('Page.bringToFront');
@@ -95,466 +135,258 @@ await cdp.send('Page.bringToFront');
 // Before anything else: if this browser does not deliver key events, every
 // check below would pass or fail for the wrong reason.
 await ev("window.__k = []; document.addEventListener('keydown', (e) => window.__k.push(e.key), true); 1");
-await key('a', 'KeyA', 65);
+await key('Shift', 'ShiftLeft', 16);
 if (await ev('window.__k.length') === 0) {
   console.error('this browser is not delivering input events; the rest would be meaningless');
   process.exit(2);
 }
 
-/* ---------------- the sign-in screen ---------------- */
-group('sign-in screen');
-is(await ev("document.body.innerText.includes('backend up at')"), false,
-  'a backend that answers says nothing');
-is(await ev("document.querySelector('#auth-status').classList.contains('hidden')"), true,
-  'the status block hides itself when there is no news');
-is(await ev("!!document.querySelector('.sub')"), false, 'no tagline under the wordmark');
+/* ---------------- the key screen ---------------- */
+group('the key screen');
+is(await hidden('#auth'), false, 'a browser with no session sees the key screen');
+is(await ev("!!document.querySelector('input[type=password]')"), false, 'there is no password field');
 
-await setInput('#f-login', 'teste');
-await setInput('#f-password', 'teste123');
-await ev("document.querySelector('#auth-form').requestSubmit()");
-await sleep(2500);
-is(await ev("!document.querySelector('#app').classList.contains('hidden')"), true, 'signs in');
+await click('#auth-key');
+await type('not a real key');
+await key('Enter', 'Enter', 13);
+await sleep(500);
+is(await hidden('#shell'), true, 'a wrong key opens nothing');
+is(await text('#auth-error'), 'that key does not open any vault', 'and says so');
 
-/* ---------------- keyboard ---------------- */
-group('keyboard');
-// Signing in swaps the whole screen; the tab has to be told it is the one in
-// front again or the keys go nowhere.
-await cdp.send('Page.bringToFront');
-await ev("window.__k = []; document.addEventListener('keydown', (e) => window.__k.push(e.key), true); 1");
-await key('a', 'KeyA', 65);
-is(await ev('window.__k.length') > 0, true, 'the browser is delivering real key events');
-await setInput('#q', '');
-await ev("document.querySelector('#q').focus()");
-await sleep(600);
+await ev("document.querySelector('#auth-key').value = ''");
+await click('#auth-key');
+await type(KEY.toLowerCase().replace(/-/g, ' '));
+is(await ev("document.querySelector('#auth-key').value"), KEY, 'the key is formatted in groups as it is typed');
+await key('Enter', 'Enter', 13);
+await sleep(1500);
+is(await hidden('#shell'), false, 'the right key opens the vault');
+is(await text('#count'), '3 links', 'with what is in it');
 
-is(await ev("document.activeElement.id"), 'q', 'the caret lives in the search box');
-await key('F2', 'F2', 113);
-is(await ev("!document.querySelector('#modal').classList.contains('hidden')"), true,
-  'F2 opens the editor from the search box, where a letter could not');
-is(await ev("document.querySelector('#modal-title').textContent"), 'Edit bookmark', 'and it is an edit, not a new one');
+/* ---------------- searching ---------------- */
+group('searching');
+is(await ev("document.activeElement.id"), 'q', 'the search box has the caret');
+await type('bookmark 2');
+await sleep(200);
+is(await text('#count'), '1 of 3 links', 'typing narrows the list');
+is(await ev("[...document.querySelectorAll('#list .row-title mark')].map((m) => m.textContent)"), ['Bookmark', '2'],
+  'and marks each term it matched');
+await key('Escape', 'Escape', 27);
+is(await ev("document.querySelector('#q').value"), '', 'Esc clears the search');
+is(await text('#count'), '3 links', 'and everything is back');
+
+await ev("document.activeElement.blur()");
+await letter('b');
+is(await ev("[document.activeElement.id, document.querySelector('#q').value]"), ['q', 'b'],
+  'a letter typed anywhere goes into the search');
 await key('Escape', 'Escape', 27);
 
-await ev("document.querySelector('#q').focus()");
-await key('e', 'KeyE', 69);
-is((await ev("document.querySelector('#q').value")).includes('e'), true, '"e" is still a letter while typing');
-await setInput('#q', '');
-await sleep(500);
+await key('ArrowDown', 'ArrowDown', 40);
+await key('ArrowDown', 'ArrowDown', 40);
+is(await ev("document.querySelector('.row.cursor')?.dataset.i"), '1', 'the arrows move a cursor through the list');
+
+/* ---------------- the folder list ---------------- */
+group('the folder list');
+await click('#tree .node[data-folder="pasta"] .node-name');
+is(await ev("[document.querySelector('#count').textContent, document.querySelector('#scope span')?.textContent]"),
+  ['3 links', 'pasta'], 'a folder narrows the list to itself and below');
+await click('#scope button');
+is(await hidden('#scope'), true, 'and the chip in the search box undoes it');
+
+/* ---------------- the editor ---------------- */
+group('the link form');
+await ev("document.activeElement.blur()");
+await letter('n');
+is(await ev("document.querySelector('#dlg-edit').open"), true, 'n opens a new link');
+is(await ev("document.querySelector('#e-url').value"), '', 'and the n itself is not typed into it');
+await type('example.org/web-test');
+await click('#e-title');
+await type('Made in the browser');
+await click('#e-folder');
+is(await ev("document.querySelector('#dlg-picker').open"), true, 'the folder opens the picker');
+await type('web/new');
+is(await ev("document.querySelector('#picker-list .cur')?.innerText"), 'Create “web/new”',
+  'a folder that does not exist is offered to be created');
+await key('Enter', 'Enter', 13);
+await sleep(400);
+is(await text('#e-folder span'), 'web/new', 'and lands in the form');
+await click('#edit-save');
+await sleep(700);
+let all = (await server('/api/bookmarks')).items;
+const made = all.find((b) => b.title === 'Made in the browser');
+is(made && [made.url, made.folder], ['https://example.org/web-test', 'web/new'],
+  'saving writes it, with a scheme on the bare domain');
+is((await server('/api/folders')).folders.some((f) => f.path === 'web/new'), true, 'the new folder is on the server');
+
+await ev("document.activeElement.blur()");
+await key('Escape', 'Escape', 27);
+await key('ArrowDown', 'ArrowDown', 40);
+await key('F2', 'F2', 113);
+is(await ev("document.querySelector('#dlg-edit').open"), true, 'F2 edits the row under the cursor');
+await key('Escape', 'Escape', 27);
+is(await ev("document.querySelector('#dlg-edit').open"), false, 'Esc closes the form');
 
 /* ---------------- deleting ---------------- */
 group('deleting');
-nativeDialogs.length = 0;
-await ev("document.querySelector('#q').focus()");
-await key('Delete', 'Delete', 46);
-is(nativeDialogs.length, 0, 'Delete alone in the search box asks nothing');
-is(await ev("document.querySelector('#confirm-modal').classList.contains('hidden')"), true, 'and opens no modal');
+await click('#q');
+await type('made in the browser');
+await key('ArrowDown', 'ArrowDown', 40);
+await key('Delete', 'Delete', 46, CTRL);
+await sleep(600);
+is(await text('#count'), '0 of 3 links', 'Ctrl+Del deletes at once, no question for one link');
+is(await lastToast(), 'Deleted “Made in the browser”\nUndo', 'and offers to undo');
+await click('.toast:last-child button');
+await sleep(800);
+is(await text('#count'), '1 of 4 links', 'undo brings it back');
+all = (await server('/api/bookmarks')).items;
+is(all.some((b) => b.id === made.id), true, 'with the same id, on the server too');
+await key('Escape', 'Escape', 27);
 
-await key('Delete', 'Delete', 46, 2);
-is(await ev("!document.querySelector('#confirm-modal').classList.contains('hidden')"), true, 'Ctrl+Delete asks');
-is(nativeDialogs.length, 0, 'in the app, not in a browser dialog');
-is(await ev("document.activeElement.id"), 'confirm-cancel', 'with the focus on cancel');
-const before = await ev("document.querySelectorAll('#results li').length");
+/* ---------------- selecting ---------------- */
+group('selecting rows');
+await ev("document.activeElement.blur()");
+await key('a', 'KeyA', 65, CTRL);
+is(await text('#sel-count'), '4 selected', 'Ctrl+A selects everything listed');
+is(await hidden('#selbar'), false, 'and the selection bar says so');
+await key('Escape', 'Escape', 27);
+is(await hidden('#selbar'), true, 'Esc drops the selection');
+
+await click('#list .row[data-i="0"]', CTRL);
+await click('#list .row[data-i="2"]', SHIFT);
+is(await text('#sel-count'), '3 selected', 'Ctrl+click and Shift+click build a run');
+await click('#sel-move');
+await type('moved/here');
 await key('Enter', 'Enter', 13);
-is(await ev("document.querySelector('#confirm-modal').classList.contains('hidden')"), true, 'Enter on cancel closes it');
-is(await ev("document.querySelectorAll('#results li').length"), before, 'and deletes nothing');
+await sleep(800);
+all = (await server('/api/bookmarks')).items;
+is(all.filter((b) => b.folder === 'moved/here').length, 3, 'move to… files them all, into a folder made on the way');
+is(await hidden('#selbar'), true, 'and the selection is done');
+is((await cdp.send('Target.getTargets')).result.targetInfos.filter((t) => t.type === 'page').length, 1,
+  'the Enter that picked the folder did not go on to open a link');
+await click('.toast:last-child button');
+await sleep(800);
+all = (await server('/api/bookmarks')).items;
+is(all.filter((b) => b.folder === 'moved/here').length, 0, 'undo puts each one back where it was');
 
-await ev("document.querySelector('#q').focus()");
-await key('Delete', 'Delete', 46, 2);
-await key('Escape', 'Escape', 27);
-is(await ev("document.querySelector('#confirm-modal').classList.contains('hidden')"), true, 'Esc closes it too');
-is(await ev("document.querySelectorAll('#results li').length"), before, 'still deletes nothing');
+/* ---------------- organize ---------------- */
+group('organize');
+await go('#/organize');
+await ev("(async () => { const o = await import('/js/organize.js'); o.openFolder('pasta/1', 'a'); o.openFolder('pasta/2', 'b'); })()");
+await sleep(300);
+is(await ev("[...document.querySelectorAll('.pane-folder span')].map((s) => s.textContent)"), ['1', '2'],
+  'two folders side by side');
+is(await ev("document.querySelector('#move-ab').disabled"), true, 'nothing selected, nothing to move');
+await click('#pane-a .orow[data-i="0"]');
+is(await ev("[document.querySelector('#move-ab').disabled, document.querySelector('#move-ab span').textContent]"),
+  [false, '1'], 'a click selects, and the arrow counts it');
+await click('#move-ab');
+await sleep(700);
+all = (await server('/api/bookmarks')).items;
+is(all.find((b) => b.title === 'Bookmark 1')?.folder, 'pasta/2', 'the arrow moves it to the other side');
+is(await ev("document.querySelectorAll('#pane-b .orow[data-i]').length"), 2, 'and it shows up there');
+is(await text('#pane-a .pane-folder span'), '1', 'the emptied side stays on its folder');
 
-/* ---------------- opening ---------------- */
-group('opening a result');
-await ev("window.__opened = []; window.open = (u, t, f) => { window.__opened.push(u); return null; }; 1");
-const target = JSON.parse(await ev(`(() => { const li = document.querySelector('#results li');
-  const r = li.getBoundingClientRect();
-  return JSON.stringify({ x: Math.round(r.left + 40), y: Math.round(r.top + r.height / 2) }); })()`));
-await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: target.x, y: target.y, button: 'middle', clickCount: 1, buttons: 4 });
-await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: target.x, y: target.y, button: 'middle', clickCount: 1, buttons: 0 });
-await sleep(900);
-is((await ev('window.__opened.length')) === 1, true, 'the wheel button opens the row in a new tab');
-is(await ev("location.pathname === '/'"), true, 'and leaves the app where it was');
+await click('#pane-b .orow[data-i="0"]');
+await click('#pane-b .orow[data-i="1"]');
+await key('ArrowLeft', 'ArrowLeft', 37);
+await sleep(700);
+all = (await server('/api/bookmarks')).items;
+is(all.filter((b) => b.folder === 'pasta/1').length, 2, '← sends the right-hand selection left');
 
-/* ---------------- the sync light ---------------- */
-group('sync light');
-is(await ev("document.querySelector('#sync-state').classList.contains('hidden')"), true, 'quiet while everything is synced');
-await ev("setSync('saving…', 'saving')");
-is(await ev("!document.querySelector('#sync-state').classList.contains('hidden')"), true, 'shows up for work in progress');
-await ev("setSync('save failed', 'err')");
-is(await ev("document.querySelector('#sync-state').className.includes('err')"), true, 'and for a failure');
-await ev("setSync('synced')");
-is(await ev("document.querySelector('#sync-state').classList.contains('hidden')"), true, 'then gets out of the way');
+await drag('#pane-a .orow[data-i="0"]', '#tree .node[data-folder="pasta/3"]');
+all = (await server('/api/bookmarks')).items;
+is(all.filter((b) => b.folder === 'pasta/3').length, 2, 'a link dragged onto the folder list is filed there');
 
-/* ---------------- insights ---------------- */
-group('insights');
-await ev("document.querySelector('#btn-insights').click()");
-await sleep(1200);
-is(await ev("!document.querySelector('#insights-modal').classList.contains('hidden')"), true, 'opens');
-is(await ev("getComputedStyle(document.querySelector('.modal-head')).position"), 'sticky', 'the header travels with the scroll');
-is(await ev("!!document.querySelector('#ins-close')"), true, 'with a close in the top bar');
-is(await ev("document.querySelector('.insights-card').getBoundingClientRect().width > 700"), true,
-  'and room for a chart and two lists');
-await key('Escape', 'Escape', 27);
-is(await ev("document.querySelector('#insights-modal').classList.contains('hidden')"), true, 'Esc closes it');
+await drag('#tree .node[data-folder="pasta/3"]', '#tree .node[data-folder="web"]');
+await sleep(300);
+all = (await server('/api/bookmarks')).items;
+is(all.filter((b) => b.folder === 'web/3').length, 2, 'a folder dragged onto another moves inside it, links and all');
+await click('.toast:last-child button');
+await sleep(800);
+all = (await server('/api/bookmarks')).items;
+is(all.filter((b) => b.folder === 'pasta/3').length, 2, 'and undo moves it back');
 
 /* ---------------- folders ---------------- */
-// The panel is the only place a folder can be created, renamed, deleted or
-// moved into, and none of it exists outside a browser: the node suite can see
-// the endpoints but not the gesture that reaches them.
-group('folders in the panel');
-
-// The middle of an element, which is what a pointer aims at.
-const spot = async (sel) => JSON.parse(await ev(
-  `(() => { const el = document.querySelector(${'`'}${'$'}{${JSON.stringify(sel)}}${'`'});
-    if (!el) return 'null';
-    const r = el.getBoundingClientRect();
-    return JSON.stringify({ x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) }); })()`,
-));
-
-// A drag is a press, a few moves and a release. More than one move on purpose:
-// the first crosses the threshold that tells a drag from a click, and the ones
-// after it are what put the target under the pointer.
-async function dragTo(fromSel, toSel) {
-  const a = await spot(fromSel);
-  const b = await spot(toSel);
-  if (!a || !b) return false;
-  await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: a.x, y: a.y, button: 'left', clickCount: 1, buttons: 1 });
-  const path = [{ x: a.x + 12, y: a.y + 8 }, { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }, b, b];
-  for (const point of path) {
-    await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: Math.round(point.x), y: Math.round(point.y), buttons: 1 });
-    await sleep(150);
-  }
-  await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: b.x, y: b.y, button: 'left', clickCount: 1, buttons: 0 });
-  await sleep(1500);
-  return true;
-}
-
-await setInput('#q', '');
-await sleep(500);
-is(await ev("document.querySelector('#browse').offsetParent !== null"), true, 'the panel is on screen');
-
-// Clicking folders one after another. Terms are ANDed, so two folder filters
-// ask for a path containing both and a bookmark is in exactly one folder: the
-// second click has to mean "that one instead".
-const query = () => ev("document.querySelector('#q').value.trim()");
-const clickFolder = async (path) => {
-  await ev(`document.querySelector('.tree-row[data-path="${path}"] .facet-row').click(); 1`);
-  await sleep(500);
-};
-
-await clickFolder('pasta/2');
-is(await query(), '/pasta/2', 'clicking a folder filters by it');
-await clickFolder('pasta/3');
-is(await query(), '/pasta/3', 'clicking another one replaces it instead of adding a second folder');
-await clickFolder('pasta/3');
-is(await query(), '', 'clicking the same one again turns the filter off');
-
-await setInput('#q', '#t1 -/arquivo');
-await sleep(400);
-await clickFolder('pasta/2');
-is(await query(), '#t1 -/arquivo /pasta/2',
-  'a tag and an exclusion are left alone: only the folder filter is the exclusive one');
-await setInput('#q', '');
-await sleep(500);
-is(await ev("[...document.querySelectorAll('.facet-folders .linkish')].some((b) => b.textContent === 'new folder')"),
-  true, 'with a way to create a folder');
-
-await ev("[...document.querySelectorAll('.facet-folders .linkish')].find((b) => b.textContent === 'new folder').click()");
-await sleep(500);
-is(await ev("!document.querySelector('#folder-modal').classList.contains('hidden')"), true, 'which opens a card');
-is(await ev("document.querySelector('#folder-title').textContent"), 'New folder', 'to create, not to rename');
-
-await setInput('#f-path', 'nova/vazia');
-await ev("document.querySelector('#folder-form').requestSubmit()");
-await sleep(2000);
-is(await ev("document.querySelector('#folder-modal').classList.contains('hidden')"), true, 'and closes on save');
-is(await ev("!!document.querySelector('.tree-row[data-path=\"nova/vazia\"]')"), true,
-  'the folder is on the tree holding nothing, which no bookmark could put there');
-is(await ev("!!document.querySelector('.tree-row[data-path=\"nova\"]')"), true, 'and so is the parent it needed');
-is(await ev("document.querySelector('.tree-row[data-path=\"nova/vazia\"] .facet-count').textContent"), '0',
-  'counted honestly at zero');
-
-// `nova` holds nothing and `pasta` holds three. Ordered by how full they are,
-// the new one would be last, which is where it is least useful.
-const roots = JSON.parse(await ev(`JSON.stringify([...document.querySelectorAll('.tree-row')]
-  .filter((r) => !r.dataset.path.includes('/')).map((r) => r.dataset.path))`));
-is(roots, ['nova', 'pasta'],
-  'the tree reads A to Z, so a folder sits under its own letter whether or not it holds anything');
-
-// Dragging a result onto it: the other half of "move things around in the UI".
-// The search narrows to one row first, so the test always drags the bookmark it
-// then makes claims about.
-await setInput('#q', 'Bookmark 3');
+group('folders');
+await click('#pane-a [data-act="new"]');
+await type('fresh');
+await key('Enter', 'Enter', 13);
 await sleep(600);
-const dragged = await ev("document.querySelector('#results li .item-title').textContent");
-const moved = await dragTo('#results li', '.tree-row[data-path="nova/vazia"]');
-is(moved, true, 'the row and the folder are both on screen to drag between');
-is(await ev(`(state.items.find((b) => (b.title || '') === ${JSON.stringify(dragged)}) || {}).folder`), 'nova/vazia',
-  'dropping a result on a folder files it there');
-is(await ev("document.querySelector('#folder-modal').classList.contains('hidden')"), true, 'and opens no editor on the way');
-
-// Renaming, from the buttons that live on the row.
-await ev("document.querySelector('.tree-row[data-path=\"nova/vazia\"] .tree-actions .icon-btn').click()");
+is((await server('/api/folders')).folders.some((f) => f.path === 'pasta/1/fresh'), true,
+  'a new folder is made inside the one on screen');
+await ev("(async () => (await import('/js/organize.js')).openFolder('pasta/1/fresh', 'a'))()");
+await sleep(200);
+await click('#pane-a [data-act="rename"]');
+await ev("document.querySelector('#prompt-input').select()");
+await type('renamed');
+await key('Enter', 'Enter', 13);
 await sleep(600);
-is(await ev("document.querySelector('#folder-title').textContent"), 'Rename folder', 'the pencil renames');
-is(await ev("document.querySelector('#f-path').value"), 'vazia', 'starting from the name alone, not the whole path');
-await setInput('#f-path', 'renomeada');
-await ev("document.querySelector('#folder-form').requestSubmit()");
-await sleep(2000);
-is(await ev("!!document.querySelector('.tree-row[data-path=\"nova/renomeada\"]')"), true, 'the folder took the new name');
-is(await ev(`(state.items.find((b) => (b.title || '') === ${JSON.stringify(dragged)}) || {}).folder`), 'nova/renomeada',
-  'and the bookmark inside came with it');
-
-// Dropping into a folder must not unfold it. A folder is closed because
-// somebody closed it, and having every drop reopen it undoes that by hand.
-await ev("state.closedFolders.add('nova'); saveClosedFolders(); renderBrowse(); 1");
-await sleep(500);
-is(await ev("!!document.querySelector('.tree-row[data-path=\"nova/vazia\"]')"), false,
-  'with `nova` closed, what is inside it is off screen');
-
-await setInput('#q', 'Bookmark 2');
+is(await text('#pane-a .pane-folder span'), 'renamed', 'renaming follows the folder in its pane');
+is((await server('/api/folders')).folders.some((f) => f.path === 'pasta/1/renamed'), true, 'and on the server');
+await click('#pane-a [data-act="delete"]');
+is(await ev("document.querySelector('#dlg-confirm').open"), true, 'deleting a folder asks first');
+is(nativeDialogs.length, 0, 'in the app, not with a browser dialog');
+await key('Enter', 'Enter', 13);
+await sleep(300);
+is((await server('/api/folders')).folders.some((f) => f.path === 'pasta/1/renamed'), true, 'Enter answers no');
+await click('#pane-a [data-act="delete"]');
+await click('#confirm-yes');
 await sleep(600);
-const second = await ev("document.querySelector('#results li .item-title').textContent");
-await dragTo('#results li', '.tree-row[data-path="nova"]');
-is(await ev(`(state.items.find((b) => (b.title || '') === ${JSON.stringify(second)}) || {}).folder`), 'nova',
-  'the bookmark lands in the closed folder');
-is(await ev("state.closedFolders.has('nova')"), true, 'and the folder stays as closed as it was');
-is(await ev("!!document.querySelector('.tree-row[data-path=\"nova/vazia\"]')"), false,
-  'nothing unfolded behind the drop');
+is((await server('/api/folders')).folders.some((f) => f.path === 'pasta/1/renamed'), false, 'and yes deletes');
+is(await text('#pane-a .pane-folder span'), '1', 'the pane steps up to the parent');
 
-await ev("state.closedFolders.delete('nova'); saveClosedFolders(); renderBrowse(); 1");
-await setInput('#q', '');
-await sleep(600);
-
-// A folder is dragged the same way, and by the same code: the gesture is
-// followed on the window, so it does not matter that the row being dragged
-// stops answering elementFromPoint halfway through.
-await ev("state.closedFolders.add('nova'); saveClosedFolders(); renderBrowse(); 1");
-await sleep(400);
-await dragTo('.tree-row[data-path="pasta/1"]', '.tree-row[data-path="nova"]');
-is(await ev("state.closedFolders.has('nova')"), true, 'moving a folder does not unfold the destination either');
-await ev("state.closedFolders.delete('nova'); saveClosedFolders(); renderBrowse(); 1");
-await sleep(500);
-is(await ev("!!document.querySelector('.tree-row[data-path=\"nova/1\"]')"), true,
-  'dragging a folder onto another one nests it');
-is(await ev("state.items.some((b) => b.folder === 'nova/1')"), true, 'with what was inside it');
-is(await ev("!!document.querySelector('.tree-row[data-path=\"pasta/1\"]')"), false, 'and nothing left behind');
-
-// Deleting, which takes what is inside and therefore has to ask first.
-await ev("[...document.querySelectorAll('.tree-row[data-path=\"nova/renomeada\"] .tree-actions .icon-btn')][1].click()");
-await sleep(700);
-is(await ev("!document.querySelector('#confirm-modal').classList.contains('hidden')"), true, 'deleting a folder asks');
-is((await ev("document.querySelector('#confirm-what').textContent")).includes('1 bookmark'), true,
-  'saying how much goes with it');
-await ev("document.querySelector('#confirm-ok').click()");
-await sleep(2000);
-is(await ev("!!document.querySelector('.tree-row[data-path=\"nova/renomeada\"]')"), false, 'the folder is gone');
-is(await ev(`state.items.some((b) => (b.title || '') === ${JSON.stringify(dragged)})`), false,
-  'and so is the bookmark that was inside it');
-
-/* ---------------- the panel's width ---------------- */
-// A folder path is as long as it is, so how wide the panel should be is a
-// preference. Only a browser can say whether dragging the handle moves it.
-group('resizing the browse panel');
-
-const panelWidth = () => ev("Math.round(document.querySelector('#browse').getBoundingClientRect().width)");
-
-is(await ev("!!document.querySelector('#browse-grip')"), true, 'there is a handle between the panel and the results');
-is(await ev("document.querySelector('#browse-grip').offsetParent !== null"), true, 'and it is on screen');
-
-const startedAt = await panelWidth();
-const grip = await spot('#browse-grip');
-await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: grip.x, y: grip.y, button: 'left', clickCount: 1, buttons: 1 });
-for (const dx of [8, 40, 80, 110]) {
-  await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: grip.x + dx, y: grip.y, buttons: 1 });
-  await sleep(120);
-}
-await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: grip.x + 110, y: grip.y, button: 'left', clickCount: 1, buttons: 0 });
-await sleep(600);
-
-const widened = await panelWidth();
-is(widened > startedAt + 80, true, `dragging it right widens the panel (${startedAt} to ${widened})`);
-is(await ev("Number(localStorage.getItem('bookmarks_browse_w')) > 0"), true, 'and the width is remembered');
-is(await ev("Math.round(Number(localStorage.getItem('bookmarks_browse_w')))"), widened, 'as the width actually on screen');
-
-// A panel that can be dragged to nothing is a panel you cannot get back.
-await ev('setBrowseWidth(10); 1');
-await sleep(300);
-is(await panelWidth(), 180, 'it will not shrink past a usable width');
-await ev('setBrowseWidth(9999); 1');
-await sleep(300);
-is(await panelWidth(), 560, 'nor grow until the results have no room');
-
-await ev("document.querySelector('#browse-grip').dispatchEvent(new MouseEvent('dblclick', { bubbles: true })); 1");
-await sleep(400);
-is(await panelWidth(), 232, 'double click puts it back where it started');
-
-/* ---------------- selecting rows ---------------- */
-// Marking many rows and doing one thing to all of them. None of it exists
-// outside a browser: it is keyboard, modifier clicks and a drag.
-group('selecting rows');
-
-// Four bookmarks of its own, so this group does not depend on what the ones
-// above left behind, and a tag to isolate them with.
-await ev(`(async () => {
-  for (const n of [1, 2, 3, 4]) {
-    await api('/api/bookmarks', { method: 'POST', body: JSON.stringify({
-      url: 'https://sel-' + n + '.example', title: 'Sel ' + n,
-      folder: 'selorigem', tags: 'seltest' }) });
-  }
-  await api('/api/folders', { method: 'POST', body: JSON.stringify({ path: 'selalvo' }) });
-  await loadAll();
-  return 1;
-})()`);
-await setInput('#q', '#seltest');
-await sleep(800);
-is(await ev("document.querySelectorAll('#results li').length"), 4, 'four rows to work with');
-
-const marked = () => ev("document.querySelectorAll('#results li.marked').length");
-const selbarShown = () => ev("!document.querySelector('#selbar').classList.contains('hidden')");
-const clickRow = (i, mods) => ev(
-  `(() => { document.querySelectorAll('#results li')[${i}]
-    .dispatchEvent(new MouseEvent('click', { bubbles: true, ${mods} })); return 1; })()`);
-
-is(await selbarShown(), false, 'with nothing marked the bar stays out of the way');
-
-// Ctrl+A, with the caret out of the search box.
-await ev("document.querySelector('#q').blur(); 1");
-await sleep(300);
-await key('a', 'KeyA', 65, 2);
-is(await marked(), 4, 'Ctrl+A marks every result');
-is(await selbarShown(), true, 'and the bar shows up');
-is(await ev("document.querySelector('#sel-count').textContent"), '4 selected', 'saying how many');
-
-await clickRow(0, 'ctrlKey: true');
-await sleep(300);
-is(await marked(), 3, 'Ctrl+click unmarks the one under it');
-await clickRow(0, 'ctrlKey: true');
-await sleep(300);
-is(await marked(), 4, 'and marks it again');
-
-await key('Escape', 'Escape', 27);
-is(await marked(), 0, 'Esc drops the selection');
-is(await selbarShown(), false, 'and takes the bar with it');
-is(await ev("document.querySelector('#q').value"), '#seltest', 'without throwing away the search too');
-
-// A run, from the first to the third.
-await clickRow(0, 'ctrlKey: true');
-await sleep(300);
-await clickRow(2, 'shiftKey: true');
-await sleep(300);
-is(await marked(), 3, 'Shift+click marks the whole run up to it');
-
-await key('Escape', 'Escape', 27);
-await ev("document.querySelector('#q').blur(); 1");
-await sleep(300);
-await key('a', 'KeyA', 65, 2);
-is(await marked(), 4, 'marked again, all four');
-
-// Dragging one marked row carries the whole selection.
-await dragTo('#results li', '.tree-row[data-path="selalvo"]');
-is(await ev("state.items.filter((b) => b.folder === 'selalvo' && b.tags.includes('seltest')).length"), 4,
-  'dragging one marked row files every marked row');
-is(await ev("state.items.filter((b) => b.folder === 'selorigem').length"), 0, 'and none is left behind');
-
-// Delete, on the group.
-await ev("document.querySelector('#q').blur(); 1");
-await sleep(300);
-await key('a', 'KeyA', 65, 2);
-is(await marked(), 4, 'marked once more');
-await key('Delete', 'Delete', 46);
-await sleep(600);
-is(await ev("!document.querySelector('#confirm-modal').classList.contains('hidden')"), true,
-  'Delete on a selection asks first');
-is((await ev("document.querySelector('#confirm-what').textContent")).includes('4 bookmarks'), true,
-  'saying how many go');
-await ev("document.querySelector('#confirm-ok').click()");
-await sleep(1500);
-is(await ev("state.items.filter((b) => b.tags.includes('seltest')).length"), 0, 'and all four are gone');
-is(await selbarShown(), false, 'the bar goes with them');
-
-await setInput('#q', '');
-await sleep(500);
+/* ---------------- sync between tabs ---------------- */
+group('sync');
+await go('#/');
+await ev(`fetch('/api/bookmarks', { method: 'POST', headers: { 'content-type': 'application/json',
+  authorization: 'Bearer ' + localStorage.getItem('bookmarks_token') },
+  body: JSON.stringify({ url: 'https://elsewhere.example', title: 'From another device' }) })`);
+await sleep(5800);
+is(await text('#count'), '5 links', 'a change made elsewhere shows up without a reload');
 
 /* ---------------- import ---------------- */
 group('import: two flows');
-await ev("document.querySelector('#btn-io').click()");
-await sleep(700);
-is(await ev("document.querySelector('[data-io-source].on').dataset.ioSource"), 'native', 'opens on the vault flow');
-is(await ev("document.querySelector('#io-prefix-row').offsetParent === null"), true,
-  'a vault file is not dropped under a folder');
-
-await ev("document.querySelector('#io-src-browser').click()");
-await sleep(400);
-is(await ev("document.querySelector('[data-io-source].on').dataset.ioSource"), 'browser', 'switches to the browser flow');
-is(await ev("document.querySelector('#io-prefix-row').offsetParent !== null"), true, 'which offers a folder to land in');
-is(await ev("document.querySelector('#io-file').accept"), '',
-  'no file filter: the browser\'s own Bookmarks has no extension');
-
-const fixtures = process.env.WEB_FIXTURES;
-await pickFile(`${fixtures}/browser-export.html`);
-is(await ev("document.querySelector('#io-error').textContent"), '', 'reads an exported HTML');
-is((await ev("document.querySelector('#io-file-stats').textContent")).includes('no categories'), true,
-  'and says up front that it carries none');
-
-await pickFile(`${fixtures}/browser-profile.json`);
-is(await ev("document.querySelector('#io-error').textContent"), '', "reads the browser's own profile file");
-
-await ev("document.querySelector('#io-prefix-dated').click()");
+await go('#/data');
+await click('#io-source [data-source="browser"]');
+is(await hidden('#io-prefix-row'), false, 'the browser flow can put everything under a folder');
+await pickFile(`${FIXTURES}/browser-export.html`);
+is(await hidden('#io-plan'), false, 'a browser export gets a plan before anything is written');
+is(await ev("document.querySelector('#io-mode-replace').hidden"), true, 'a browser file is never offered the replace');
+await click('#io-prefix-dated');
+await sleep(800);
+await click('#io-apply');
 await sleep(1200);
-const dated = await ev("document.querySelector('#io-prefix').value");
-is(/^Imported-\d{4}-\d{2}-\d{2}$/.test(dated), true, 'one click dates the folder everything lands in');
-is((await ev("document.querySelector('#io-file-stats').textContent")).includes(dated), true,
-  'and the plan says so before anything is written');
+all = (await server('/api/bookmarks')).items;
+const stamp = new Date().toISOString().slice(0, 10);
+const dated = `Imported-${stamp}`;
+is(all.filter((b) => b.folder === dated || b.folder.startsWith(`${dated}/`)).length, 2, 'it lands under the dated folder');
+is(await ev("document.querySelector('#nav-count').textContent"), '7', 'and the app sees it at once');
 
-await setInput('#io-prefix', '');
+await pickFile(`${FIXTURES}/vault.yaml`);
+is(await ev("document.querySelector('#io-error').textContent.length > 0"), true,
+  'a vault file in the browser flow is refused');
+await click('#io-source [data-source="native"]');
+is(await ev("document.querySelector('#io-mode-replace').hidden"), false, 'the vault flow keeps the replace');
+await pickFile(`${FIXTURES}/vault.yaml`);
+await click('#io-apply');
 await sleep(1000);
-await pickFile(`${fixtures}/vault.yaml`);
-is((await ev("document.querySelector('#io-error').textContent")).includes('From this app'), true,
-  'a vault file here is refused, pointing at the other flow');
-is(await ev("document.querySelector('#io-apply').disabled"), true, 'and nothing can be imported meanwhile');
+all = (await server('/api/bookmarks')).items;
+is(all.find((b) => b.title === 'From the vault')?.category, 'infra', 'the vault file brings everything it carries');
 
-await ev("document.querySelector('#io-src-native').click()");
-await sleep(400);
-await pickFile(`${fixtures}/browser-export.html`);
-is((await ev("document.querySelector('#io-error').textContent")).includes('From a browser'), true,
-  'and the other way round as well');
-
-// The modes only exist once a file has been read, so what each flow offers is
-// asked here and not at the moment the modal opens, where the whole block is
-// hidden and every answer would be "invisible".
-//
-// And asked of the layout, never of the class list. `hidden` sat on this label
-// while it stayed on screen: `.io-modes label` carries display:flex !important
-// and beats the generic `.hidden` on specificity. A test that reads the class
-// list agrees with the bug.
-group('import: what each flow may do, with a plan on screen');
-await pickFile(`${fixtures}/vault.yaml`);
-is(await ev("document.querySelector('#io-plan').offsetParent !== null"), true, 'a vault file gives a plan');
-is(await ev("getComputedStyle(document.querySelector('#io-mode-replace')).display !== 'none'"), true,
-  'and the vault flow may replace the vault');
-is(await ev("document.querySelector('#io-browser-note').offsetParent === null"), true,
-  'the browser-only promise is not shown here');
-
-await ev("document.querySelector('#io-src-browser').click()");
-await sleep(400);
-await pickFile(`${fixtures}/browser-export.html`);
-is(await ev("document.querySelector('#io-plan').offsetParent !== null"), true, 'a browser file gives a plan');
-is(await ev("getComputedStyle(document.querySelector('#io-mode-replace')).display"), 'none',
-  'and the browser flow may never replace the vault');
-is(await ev("document.querySelector('input[name=\"io-mode\"]:checked').value"), 'add',
-  'defaulting to the merge that only adds what is missing');
-is(await ev("document.querySelector('#io-browser-note').offsetParent !== null"), true,
-  'with the promise that nothing is removed spelled out');
+/* ---------------- leaving ---------------- */
+group('signing out');
+await go('#/settings');
+await click('#btn-signout');
+await sleep(800);
+is(await hidden('#auth'), false, 'signing out goes back to the key screen');
+is(await ev('localStorage.getItem("bookmarks_token")'), null, 'the session is gone');
+is(await ev(`new Promise((r) => { const o = indexedDB.open('bookmarks', 1);
+  o.onsuccess = () => { const t = o.result.transaction('vaults').objectStore('vaults').getAllKeys(); t.onsuccess = () => r(t.result.length); }; })`),
+  0, 'and so is the copy of the vault on this device');
 
 group('nothing threw');
-is(jsErrors, [], 'no uncaught error in the console');
-is(nativeDialogs, [], 'no native dialog anywhere in the run');
+is(jsErrors, [], 'no uncaught error in the page');
+is(nativeDialogs, [], 'no native dialog anywhere');
 
 ws.close();
-console.log('');
-if (failures) {
-  console.log(`\x1b[31m✖ ${failures} check(s) failed\x1b[0m`);
-  process.exit(1);
-}
-console.log('\x1b[32m✔ web ok\x1b[0m');
+console.log(failures ? `\n\x1b[31m${failures} failure(s)\x1b[0m` : '\n\x1b[32mweb: all green\x1b[0m');
+process.exit(failures ? 1 : 0);

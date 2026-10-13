@@ -42,6 +42,45 @@ function addUsageColumns(db) {
   if (!columns.includes('last_open_at')) db.exec('ALTER TABLE bookmarks ADD COLUMN last_open_at INTEGER NOT NULL DEFAULT 0');
 }
 
+// Vaults from before the access keys had an email, a username and a password
+// hash, all NOT NULL. SQLite cannot drop a NOT NULL column in place, so the table
+// is rebuilt: the documented twelve steps, with the foreign keys off while the
+// old table is gone, so the bookmarks pointing at it are never orphaned. The id
+// is kept, which is what keeps every bookmark in its vault. The username becomes
+// the vault's name; the password goes with the table.
+function migrateUsersToKeys(db) {
+  const columns = db.prepare('SELECT name FROM pragma_table_info(?)').all('users').map((c) => c.name);
+  if (!columns.includes('pass_hash')) return;
+
+  db.exec('PRAGMA foreign_keys = OFF');
+  db.exec('BEGIN');
+  try {
+    db.exec(`
+      CREATE TABLE users_keyed (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        name       TEXT NOT NULL DEFAULT '',
+        key_hash   TEXT UNIQUE,
+        created_at INTEGER NOT NULL
+      );
+      INSERT INTO users_keyed (id, name, key_hash, created_at)
+        SELECT id, username, NULL, created_at FROM users;
+      DROP TABLE users;
+      ALTER TABLE users_keyed RENAME TO users;
+      -- A session was proof of a password that no longer exists.
+      DELETE FROM sessions;
+    `);
+    db.exec('COMMIT');
+  } catch (err) {
+    db.exec('ROLLBACK');
+    throw err;
+  } finally {
+    db.exec('PRAGMA foreign_keys = ON');
+  // WAL makes NORMAL safe against corruption; what it gives up is the last
+  // transaction on a power cut, in exchange for not syncing on every write.
+  db.exec('PRAGMA synchronous = NORMAL');
+  }
+}
+
 function open(dbPath = defaultDbPath()) {
   if (dbPath !== ':memory:') fs.mkdirSync(path.dirname(dbPath), { recursive: true });
 
@@ -50,11 +89,14 @@ function open(dbPath = defaultDbPath()) {
   db.exec('PRAGMA foreign_keys = ON');
 
   db.exec(`
+    -- A vault. It is called users because every other table points at it by
+    -- that name. There is no login and no password: the access key is the
+    -- credential, and only its SHA-256 is kept. NULL means the vault has no key
+    -- yet, which only a vault from before the keys can be; the boot issues one.
     CREATE TABLE IF NOT EXISTS users (
       id         INTEGER PRIMARY KEY AUTOINCREMENT,
-      email      TEXT NOT NULL UNIQUE,
-      username   TEXT NOT NULL UNIQUE,
-      pass_hash  TEXT NOT NULL,
+      name       TEXT NOT NULL DEFAULT '',
+      key_hash   TEXT UNIQUE,
       created_at INTEGER NOT NULL
     );
 
@@ -123,6 +165,7 @@ function open(dbPath = defaultDbPath()) {
     CREATE INDEX IF NOT EXISTS idx_opens_when ON opens_log(user_id, at);
   `);
 
+  migrateUsersToKeys(db);
   migrateNotesToDescription(db);
   addUsageColumns(db);
   return db;

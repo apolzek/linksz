@@ -293,3 +293,14 @@ test('a broken counter counts as zero', () => {
     assert.deepEqual(ids(items, 'x'), ['a', 'b'], `opens = ${String(opens)}`);
   }
 });
+
+test('a bookmark replaced by an edited copy is searched by its new text', () => {
+  // The normalized text is kept per object. The app replaces a bookmark on
+  // every change instead of mutating it, and that is what keeps this honest.
+  const before = { id: 'a', title: 'grafana', url: '', tags: '', category: '', folder: '', description: '', updated_at: 1 };
+  assert.deepEqual(ids([before], 'grafana'), ['a']);
+  const after = { ...before, title: 'prometheus' };
+  assert.deepEqual(ids([after], 'grafana'), []);
+  assert.deepEqual(ids([after], 'prometheus'), ['a']);
+  assert.deepEqual(ids([before], 'grafana'), ['a'], 'the old object still answers for its own text');
+});

@@ -14,8 +14,8 @@ From a clone that builds them:
 Nothing to configure first: `.env` is optional (see The vault below) and the
 vault directory ships with the clone, so the command above is the whole install.
 
-Then open http://localhost:8080 and sign in with `teste` / `teste123`, or
-register your own account.
+Then open http://localhost:8080 and choose **Create one** to make a vault. Its
+access key is shown once; keep it, it is the only way in.
 
 From the published images, with no clone at all:
 
@@ -108,18 +108,35 @@ TLS (Tailscale, Cloudflare) or a reverse proxy you already run, and point it at
     BOOKMARKS_WEB_PORT        host port nginx is published on, default 8080
     BOOKMARKS_DB              path to the vault inside the container, default /data/bookmarks.db
     BOOKMARKS_ALLOWED_ORIGINS origins allowed to call the API from a browser, empty by default
-    BOOKMARKS_SEED=0          do not create the test account
-    BOOKMARKS_SEED_PASSWORD   password for it, default teste123
-    BOOKMARKS_COMMIT          build stamp shown next to the sync light
+    BOOKMARKS_DEV_KEY         an access key; a vault that opens with it is made on boot.
+                              For development and tests only: unset by default
+    BOOKMARKS_COMMIT          build stamp shown at the bottom of Settings
     BOOKMARKS_DEPLOYED_AT     the other half of that stamp
 
 `BOOKMARKS_PORT` and `BOOKMARKS_WEB_PORT` are different things on purpose: the
 first is internal to the api container, the second is the only port that
 reaches your machine.
 
-The stack seeds a `teste` / `teste123` account on every boot. On a network
-anyone else can reach, set `BOOKMARKS_SEED=0` or change the password before
-leaving it running.
+## Access keys
+
+There are no users and no passwords. Each vault has one access key, 160 random
+bits in Crockford base32 (`XXXX-XXXX-…`, eight groups), and the server keeps
+only its SHA-256. Typing the key exchanges it for a session token, which is
+what a device holds.
+
+Anyone who can reach the stack can create a vault, as anyone could register
+before. Opening someone else's vault takes their key.
+
+A vault from before the keys keeps its bookmarks and gets a key on the first
+boot with this version, printed once:
+
+    docker compose logs api | grep 'access key'
+
+The host can always issue a new key, which also signs out every device using
+the old one:
+
+    docker compose exec api node api/keys.js              list the vaults
+    docker compose exec api node api/keys.js issue <id>   a new key for that vault
 
 ## CORS
 

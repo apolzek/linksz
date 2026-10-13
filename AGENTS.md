@@ -41,8 +41,8 @@ Three rules the code depends on:
   `/data`, so the api runs as the uid that owns it rather than the image's own
   user. Anything that starts the stack from this repository inherits the real
   `.env`, which is why `tests/compose.sh` exports a throwaway
-  `BOOKMARKS_VAULT_DIR` before it does: a test that registers accounts in
-  somebody's actual vault is a bug, not a test.
+  `BOOKMARKS_VAULT_DIR` before it does: a test that creates vaults in
+  somebody's actual database is a bug, not a test.
 * **CORS is closed.** The API sets no `access-control-allow-origin` unless
   `BOOKMARKS_ALLOWED_ORIGINS` names the origin. The app is same-origin behind
   nginx and needs none, so anything that wants the header should say why.
@@ -70,5 +70,5 @@ Validate against the real thing when the change is user-facing: hit the running
 server with `curl`, or drive the page in a browser. A change nobody exercised is
 a change that is not done.
 
-Test accounts belong in a throwaway database. Pointing them at the running
+Test vaults belong in a throwaway database. Pointing them at the running
 server leaves users and bookmarks behind in the real vault.

@@ -43,10 +43,6 @@ services:
       # makes a cross-origin request. Fill it in (comma separated, or `*`) only
       # for something else that has to reach this API from a page.
       BOOKMARKS_ALLOWED_ORIGINS: ${BOOKMARKS_ALLOWED_ORIGINS:-}
-      # Test account created on every boot (default: teste / teste123).
-      # Change the password, or turn it off with BOOKMARKS_SEED=0, before
-      # putting this anywhere else can reach.
-      BOOKMARKS_SEED_PASSWORD: ${BOOKMARKS_SEED_PASSWORD:-teste123}
     volumes:
       # The vault directory, not the file: SQLite writes bookmarks.db-wal and
       # bookmarks.db-shm next to it, and mounting the single file would strand

@@ -1,0 +1,361 @@
+// Organize: two folders side by side, and links moving between them.
+//
+// Each pane shows one folder: its subfolders first, then the links filed
+// directly in it. Clicking a link selects it (here selecting is the point, so
+// it takes no modifier), Shift extends the run, and the arrow buttons between
+// the panes send the selection across. Dragging works too, onto the other
+// pane, onto a subfolder row, onto a breadcrumb or onto the folder list.
+
+import * as store from './store.js';
+import {
+  $, esc, icon, favicon, hostOf, plural, folderLabel, pickFolder, dropTarget,
+  startLinkDrag, startFolderDrag, moveLinks, deleteLinks, askNewFolder,
+  askRenameFolder, askDeleteFolder, fail,
+} from './ui.js';
+
+const KEY = 'bookmarks_organize';
+
+function pane(id) {
+  return { id, path: '', filter: '', marked: new Set(), anchor: -1, links: [], el: null };
+}
+
+const panes = { a: pane('a'), b: pane('b') };
+let focused = 'a';
+let ready = false;
+
+const other = (id) => (id === 'a' ? 'b' : 'a');
+
+function save() {
+  try { localStorage.setItem(KEY, JSON.stringify({ a: panes.a.path, b: panes.b.path })); } catch { /* fine */ }
+}
+
+// The first visit opens the fullest folder on the left, since that is the pile
+// waiting to be sorted, and a different one on the right.
+function pickDefaults() {
+  let saved = null;
+  try { saved = JSON.parse(localStorage.getItem(KEY) || 'null'); } catch { /* none */ }
+  const t = store.tree();
+  if (saved && t.has(saved.a) && t.has(saved.b)) {
+    panes.a.path = saved.a;
+    panes.b.path = saved.b;
+    return;
+  }
+  let fullest = '';
+  for (const p of ['', ...t.paths]) if (t.direct(p) > t.direct(fullest)) fullest = p;
+  panes.a.path = fullest;
+  panes.b.path = t.children('').find((p) => p !== fullest && !fullest.startsWith(p + '/')) ?? '';
+}
+
+export function openFolder(path, which = focused) {
+  const p = panes[which];
+  if (p.path === path) return;
+  p.path = path;
+  p.filter = '';
+  p.marked.clear();
+  p.anchor = -1;
+  save();
+  paintPane(p);
+  paintActions();
+}
+
+export function focusedPath() {
+  return panes[focused].path;
+}
+
+/* ---------------- painting ---------------- */
+
+function crumbs(path) {
+  const parts = path ? path.split('/') : [];
+  let html = `<button type="button" data-folder="">All</button>`;
+  let acc = '';
+  for (const part of parts) {
+    acc = acc ? `${acc}/${part}` : part;
+    html += `${icon('chev')}<button type="button" data-folder="${esc(acc)}">${esc(part)}</button>`;
+  }
+  return html;
+}
+
+function paintPane(p) {
+  const el = p.el;
+  const root = p.path === '';
+  el.innerHTML = `
+    <div class="pane-head">
+      <button type="button" class="btn pane-folder" data-act="pick" title="Choose the folder for this side">
+        ${icon(root ? 'inbox' : 'folder')}<span>${esc(root ? 'Unfiled' : store.nameOf(p.path))}</span>${icon('chev-down', 'chev')}</button>
+      <button type="button" class="btn icon" data-act="new" title="New folder inside">${icon('folder-plus')}</button>
+      ${root ? '' : `<button type="button" class="btn icon" data-act="rename" title="Rename this folder">${icon('edit')}</button>
+      <button type="button" class="btn icon" data-act="delete" title="Delete this folder">${icon('trash')}</button>`}
+    </div>
+    <div class="crumbs">${root ? '<span class="muted">Top-level folders, and links in no folder</span>' : crumbs(p.path)}</div>
+    <div class="pane-tools">
+      <span class="check-box" data-act="all" title="Select all"></span>
+      <input type="search" placeholder="Filter" value="${esc(p.filter)}" autocomplete="off" spellcheck="false">
+      <span class="pane-count"></span>
+    </div>
+    <ul class="pane-list" role="listbox" aria-multiselectable="true"></ul>`;
+  el.querySelector('input').addEventListener('input', (e) => {
+    p.filter = e.target.value;
+    paintList(p);
+  });
+  paintList(p);
+}
+
+function paintList(p) {
+  const S = globalThis.BookmarksSearch;
+  const t = store.tree();
+  const q = p.filter.trim();
+  const nq = S.norm(q);
+
+  let links = store.inFolder(p.path);
+  if (q) links = S.search(links, q, links.length || 1);
+  else links.sort((x, y) => (x.title || x.url).localeCompare(y.title || y.url, undefined, { sensitivity: 'base' }));
+  p.links = links;
+
+  // Marks on links that left this folder (moved, deleted, synced away) go.
+  const here = new Set(links.map((b) => b.id));
+  for (const id of p.marked) if (!here.has(id)) p.marked.delete(id);
+
+  let folders = t.children(p.path);
+  if (q) folders = folders.filter((f) => S.norm(store.nameOf(f)).includes(nq));
+
+  let html = '';
+  if (p.path && !q) {
+    const up = store.parentOf(p.path);
+    html += `<li class="orow folder up" data-folder="${esc(up)}" title="Up to ${esc(folderLabel(up))}">${icon('up')}<div class="orow-main"><span class="orow-title muted">${esc(up ? store.nameOf(up) : 'All folders')}</span></div></li>`;
+  }
+  for (const f of folders) {
+    html += `<li class="orow folder" data-folder="${esc(f)}" draggable="true">${icon('folder')}<div class="orow-main"><span class="orow-title">${esc(store.nameOf(f))}</span></div><span class="pane-count">${t.total(f)}</span>${icon('chev')}</li>`;
+  }
+  links.forEach((b, i) => {
+    const host = hostOf(b.url);
+    html += `<li class="orow${p.marked.has(b.id) ? ' marked' : ''}" data-i="${i}" draggable="true" role="option">
+      <span class="check-box">${icon('check')}</span>${favicon(b.url, b.title)}
+      <div class="orow-main"><span class="orow-title">${esc(b.title || host || b.url)}</span><span class="orow-host">${esc(host)}</span></div>
+      <a class="btn icon open-link" href="${esc(b.url)}" target="_blank" rel="noopener noreferrer" title="Open" draggable="false">${icon('ext')}</a></li>`;
+  });
+  if (!folders.length && !links.length) {
+    html += `<li class="pane-empty">${q ? 'Nothing matches the filter.' : 'Empty. Move links here from the other side.'}</li>`;
+  }
+  const ul = p.el.querySelector('.pane-list');
+  ul.innerHTML = html;
+  paintCount(p);
+}
+
+function paintCount(p) {
+  const n = p.links.length;
+  const m = p.marked.size;
+  p.el.querySelector('.pane-count').textContent = m ? `${m} of ${n}` : plural(n, 'link');
+  const box = p.el.querySelector('[data-act="all"]');
+  box.className = 'check-box' + (m && m === n ? ' on' : m ? ' some' : '');
+  box.innerHTML = m && m === n ? icon('check') : '';
+  paintActions();
+}
+
+function paintActions() {
+  const set = (btn, from, to) => {
+    const n = from.marked.size;
+    btn.disabled = !n || from.path === to.path;
+    btn.querySelector('span').textContent = n ? String(n) : '';
+    btn.title = n
+      ? `Move ${plural(n, 'link')} to ${folderLabel(to.path)}`
+      : `Select links on the ${from.id === 'a' ? 'left' : 'right'} to move them`;
+  };
+  set($('#move-ab'), panes.a, panes.b);
+  set($('#move-ba'), panes.b, panes.a);
+}
+
+function paintRow(p, i) {
+  const li = p.el.querySelector(`[data-i="${i}"]`);
+  if (li) li.classList.toggle('marked', p.marked.has(p.links[i].id));
+}
+
+/* ---------------- acting ---------------- */
+
+async function send(fromId) {
+  const from = panes[fromId];
+  const to = panes[other(fromId)];
+  const ids = [...from.marked];
+  if (!ids.length || from.path === to.path) return;
+  from.marked.clear();
+  try { await moveLinks(ids, to.path); } catch (err) { fail(err); }
+}
+
+async function moveMarkedElsewhere(p) {
+  const ids = [...p.marked];
+  if (!ids.length) return;
+  const folder = await pickFolder({ title: `Move ${plural(ids.length, 'link')} to`, current: p.path });
+  if (folder == null) return;
+  p.marked.clear();
+  moveLinks(ids, folder).catch(fail);
+}
+
+async function deleteMarked(p) {
+  const ids = [...p.marked];
+  try {
+    await deleteLinks(ids, { before: () => p.marked.clear() });
+  } catch (err) { fail(err); }
+}
+
+function setFocus(id) {
+  focused = id;
+  panes.a.el.classList.toggle('focus', id === 'a');
+  panes.b.el.classList.toggle('focus', id === 'b');
+}
+
+function wirePane(p) {
+  const el = p.el;
+  el.addEventListener('pointerdown', () => setFocus(p.id));
+  el.addEventListener('focusin', () => setFocus(p.id));
+
+  el.addEventListener('click', async (e) => {
+    const act = e.target.closest('[data-act]')?.dataset.act;
+    if (act === 'pick') {
+      const path = await pickFolder({ title: `Open on the ${p.id === 'a' ? 'left' : 'right'}`, current: p.path });
+      if (path != null) openFolder(path, p.id);
+      return;
+    }
+    if (act === 'new') {
+      const made = await askNewFolder(p.path);
+      if (made) paintPane(p);
+      return;
+    }
+    if (act === 'rename') {
+      const to = await askRenameFolder(p.path).catch(fail);
+      if (to) {
+        for (const q of Object.values(panes)) {
+          if (q.path === p.path || q.path.startsWith(p.path + '/')) q.path = to + q.path.slice(p.path.length);
+        }
+        save();
+        paintAll();
+      }
+      return;
+    }
+    if (act === 'delete') {
+      const path = p.path;
+      const gone = await askDeleteFolder(path).catch(fail);
+      if (gone) {
+        for (const q of Object.values(panes)) {
+          if (q.path === path || q.path.startsWith(path + '/')) q.path = store.parentOf(path);
+        }
+        save();
+        paintAll();
+      }
+      return;
+    }
+    if (act === 'all') {
+      if (p.marked.size === p.links.length) p.marked.clear();
+      else for (const b of p.links) p.marked.add(b.id);
+      for (let i = 0; i < p.links.length; i++) paintRow(p, i);
+      paintCount(p);
+      return;
+    }
+
+    const crumb = e.target.closest('.crumbs [data-folder]');
+    if (crumb) { openFolder(crumb.dataset.folder, p.id); return; }
+
+    const row = e.target.closest('.orow');
+    if (!row) return;
+    if (row.dataset.folder != null) { openFolder(row.dataset.folder, p.id); return; }
+
+    const i = Number(row.dataset.i);
+    const b = p.links[i];
+    if (e.target.closest('.open-link')) { store.registerOpen(b.id); return; }
+    if (e.shiftKey && p.anchor >= 0) {
+      const [a, z] = p.anchor < i ? [p.anchor, i] : [i, p.anchor];
+      for (let k = a; k <= z; k++) { p.marked.add(p.links[k].id); paintRow(p, k); }
+    } else {
+      if (p.marked.has(b.id)) p.marked.delete(b.id); else p.marked.add(b.id);
+      p.anchor = i;
+      paintRow(p, i);
+    }
+    paintCount(p);
+  });
+
+  el.addEventListener('dblclick', (e) => {
+    const row = e.target.closest('.orow[data-i]');
+    if (!row) return;
+    const b = p.links[Number(row.dataset.i)];
+    store.registerOpen(b.id);
+    window.open(b.url, '_blank', 'noopener');
+  });
+
+  el.addEventListener('dragstart', (e) => {
+    const row = e.target.closest('.orow');
+    if (!row) return;
+    if (row.dataset.folder != null) { startFolderDrag(e, row.dataset.folder); return; }
+    const b = p.links[Number(row.dataset.i)];
+    if (!p.marked.has(b.id)) {
+      p.marked.add(b.id);
+      paintRow(p, Number(row.dataset.i));
+      paintCount(p);
+    }
+    startLinkDrag(e, [...p.marked]);
+  });
+
+  // Over a folder row or a breadcrumb: that folder. Anywhere else in the pane:
+  // the folder the pane shows.
+  dropTarget(el, (e) => {
+    const f = e.target.closest('[data-folder]');
+    if (f) return { path: f.dataset.folder, el: f };
+    return { path: p.path, el };
+  });
+}
+
+// `settle` steps a pane up from a folder that is no longer there (deleted on
+// another device, say) to the closest one still standing. Only on arrival:
+// while the page is open, a pane stays put even when its folder empties and
+// drops off the tree, because emptying a folder is what this page is for and
+// the pane should not wander off the moment it happens.
+function paintAll({ settle = false } = {}) {
+  const t = store.tree();
+  for (const p of Object.values(panes)) {
+    if (settle) while (p.path && !t.has(p.path)) p.path = store.parentOf(p.path);
+    paintPane(p);
+  }
+  setFocus(focused);
+}
+
+/* ---------------- keyboard ---------------- */
+
+export function onKey(e, typing) {
+  const p = panes[focused];
+  if (e.key === 'Escape') {
+    const had = panes.a.marked.size + panes.b.marked.size;
+    for (const q of Object.values(panes)) { q.marked.clear(); paintList(q); }
+    return had > 0;
+  }
+  if (typing) return false;
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a') {
+    for (const b of p.links) p.marked.add(b.id);
+    paintList(p);
+    return true;
+  }
+  if (e.key === 'ArrowRight' && !e.ctrlKey && !e.metaKey && !e.altKey) { send('a'); return true; }
+  if (e.key === 'ArrowLeft' && !e.ctrlKey && !e.metaKey && !e.altKey) { send('b'); return true; }
+  if (e.key === 'Delete' || e.key === 'Backspace') { deleteMarked(p); return true; }
+  if (e.key === 'm') { moveMarkedElsewhere(p); return true; }
+  return false;
+}
+
+/* ---------------- lifecycle ---------------- */
+
+export function init() {
+  panes.a.el = $('#pane-a');
+  panes.b.el = $('#pane-b');
+  wirePane(panes.a);
+  wirePane(panes.b);
+  $('#move-ab').onclick = () => send('a');
+  $('#move-ba').onclick = () => send('b');
+  store.subscribe(() => {
+    if (document.body.dataset.route !== 'organize') return;
+    // A sync or a move repaints the lists, not the filter boxes, so typing in
+    // one is never interrupted.
+    paintList(panes.a);
+    paintList(panes.b);
+  });
+}
+
+export function show() {
+  if (!ready) { pickDefaults(); ready = true; }
+  paintAll({ settle: true });
+}

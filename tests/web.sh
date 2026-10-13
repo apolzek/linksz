@@ -25,8 +25,12 @@ CHROME_PID=""
 
 cleanup() {
   [[ -n "$CHROME_PID" ]] && kill "$CHROME_PID" 2>/dev/null || true
+  # Chrome writes to its profile on the way out; removing it before the
+  # process is gone leaves a half-deleted directory behind.
+  [[ -n "$CHROME_PID" ]] && wait "$CHROME_PID" 2>/dev/null || true
   [[ -n "$SERVER_PID" ]] && kill "$SERVER_PID" 2>/dev/null || true
-  rm -rf "$WORK"
+  # Its helper processes can outlive it by a moment, still writing.
+  for _ in 1 2 3 4 5 6 7 8 9 10; do rm -rf "$WORK" 2>/dev/null && break; sleep 0.3; done
 }
 trap cleanup EXIT
 
@@ -74,11 +78,14 @@ folders:
     tags: yaml
 EOF
 
+# A known key for the throwaway vault, made fresh on every run.
+DEV_KEY=$(node -e 'console.log(require("./api/auth").newAccessKey())')
+
 echo "starting the backend on a throwaway vault"
 BOOKMARKS_DB="$WORK/bookmarks.db" \
 BOOKMARKS_HOST=127.0.0.1 \
 BOOKMARKS_PORT="$APP_PORT" \
-BOOKMARKS_SEED_PASSWORD=teste123 \
+BOOKMARKS_DEV_KEY="$DEV_KEY" \
   node api/server.js >"$WORK/server.log" 2>&1 &
 SERVER_PID=$!
 
@@ -89,8 +96,8 @@ done
 curl -sf "http://127.0.0.1:$APP_PORT/api/health" >/dev/null || { echo "the backend never answered"; cat "$WORK/server.log"; exit 1; }
 
 # A vault with something in it, so the list has rows to act on.
-TOKEN=$(curl -s -X POST "http://127.0.0.1:$APP_PORT/api/auth/login" -H 'content-type: application/json' \
-  -d '{"login":"teste","password":"teste123"}' | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')
+TOKEN=$(curl -s -X POST "http://127.0.0.1:$APP_PORT/api/auth/key" -H 'content-type: application/json' \
+  -d "{\"key\":\"$DEV_KEY\"}" | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')
 for i in 1 2 3; do
   curl -s -o /dev/null -X POST "http://127.0.0.1:$APP_PORT/api/bookmarks" \
     -H 'content-type: application/json' -H "authorization: Bearer $TOKEN" \
@@ -112,4 +119,4 @@ for _ in $(seq 60); do
 done
 curl -sf "http://127.0.0.1:$CDP_PORT/json/version" >/dev/null || { echo "chrome never opened its debugging port"; tail -5 "$WORK/chrome.log"; exit 1; }
 
-WEB_FIXTURES="$WORK/fixtures" node tests/web.mjs "http://127.0.0.1:$APP_PORT/" "$CDP_PORT"
+WEB_FIXTURES="$WORK/fixtures" DEV_KEY="$DEV_KEY" node tests/web.mjs "http://127.0.0.1:$APP_PORT/" "$CDP_PORT"

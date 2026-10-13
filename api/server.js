@@ -4,13 +4,14 @@
 // cover it. There is no framework and no router; routes are an object keyed by
 // "METHOD /path", and anything not under /api/ is served as a static file.
 //
-// Authentication is an opaque token in the `Authorization: Bearer` header,
+// A vault is opened with its access key, which is exchanged for an opaque
+// session token. The token travels in the `Authorization: Bearer` header and is
 // stored in the `sessions` table. There is no cookie, so there is no CSRF to
 // consider: a cross-site request carries no credentials of its own.
 //
 // Neighbours:
 //   db.js             schema and connection
-//   auth.js           password hashing and tokens
+//   auth.js           access keys and tokens
 //   portability.js    import/export
 //   ../web/search.js  the same search engine that runs in the browser
 'use strict';
@@ -23,7 +24,7 @@ const { execFileSync } = require('node:child_process');
 
 const { open } = require('./db');
 const { search } = require('../web/search');
-const { hashPassword, verifyPassword, newToken, looksLikeEmail } = require('./auth');
+const { newAccessKey, hashKey, newToken } = require('./auth');
 const portability = require('./portability');
 
 const WEB_DIR = path.join(__dirname, '..', 'web');
@@ -186,9 +187,20 @@ function buildInfo() {
 function createApp(dbPath) {
   const db = open(dbPath);
 
-  // Filled in at boot (ensureSeedUser). Kept out of `q` because it is process
-  // state, not database state.
-  const runtime = { demo: null };
+  // Several writes as one: a batch of 900 moves is one commit instead of 900,
+  // which in SQLite is the difference between instant and a visible pause, and
+  // it can no longer end half applied.
+  function tx(fn) {
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      const out = fn();
+      db.exec('COMMIT');
+      return out;
+    } catch (err) {
+      db.exec('ROLLBACK');
+      throw err;
+    }
+  }
 
   // Which origins may drive this API from a browser, read from
   // BOOKMARKS_ALLOWED_ORIGINS (comma separated). Empty is the default and the
@@ -207,12 +219,15 @@ function createApp(dbPath) {
   const anyOriginAllowed = allowedOrigins.has('*');
 
   const q = {
-    userByLogin: db.prepare('SELECT * FROM users WHERE email = ? OR username = ?'),
-    userById: db.prepare('SELECT id, email, username, created_at FROM users WHERE id = ?'),
-    insertUser: db.prepare('INSERT INTO users (email, username, pass_hash, created_at) VALUES (?, ?, ?, ?)'),
+    userByKey: db.prepare('SELECT id FROM users WHERE key_hash = ?'),
+    userById: db.prepare('SELECT id, name, created_at FROM users WHERE id = ?'),
+    insertUser: db.prepare('INSERT INTO users (name, key_hash, created_at) VALUES (?, ?, ?)'),
+    setKey: db.prepare('UPDATE users SET key_hash = ? WHERE id = ?'),
+    rename: db.prepare('UPDATE users SET name = ? WHERE id = ?'),
     insertSession: db.prepare('INSERT INTO sessions (token, user_id, created_at) VALUES (?, ?, ?)'),
     sessionByToken: db.prepare('SELECT * FROM sessions WHERE token = ?'),
     deleteSession: db.prepare('DELETE FROM sessions WHERE token = ?'),
+    deleteOtherSessions: db.prepare('DELETE FROM sessions WHERE user_id = ? AND token <> ?'),
     allBookmarks: db.prepare('SELECT * FROM bookmarks WHERE user_id = ? AND deleted = 0 ORDER BY updated_at DESC'),
     // >= and not >: the cursor is a millisecond, and a change written in the
     // same millisecond as the previous answer would fall in the gap and never
@@ -290,13 +305,36 @@ function createApp(dbPath) {
     burnFolder: db.prepare('UPDATE folders SET deleted = 1, updated_at = ? WHERE user_id = ? AND path = ?'),
   };
 
+  function bearer(req) {
+    const m = /^Bearer\s+(.+)$/i.exec(req.headers.authorization || '');
+    return m ? m[1] : '';
+  }
+
   function auth(req) {
-    const h = req.headers.authorization || '';
-    const m = /^Bearer\s+(.+)$/i.exec(h);
-    if (!m) return null;
-    const s = q.sessionByToken.get(m[1]);
+    const token = bearer(req);
+    const s = token && q.sessionByToken.get(token);
     if (!s) return null;
     return q.userById.get(s.user_id) || null;
+  }
+
+  function startSession(userId) {
+    const token = newToken();
+    q.insertSession.run(token, userId, now());
+    return token;
+  }
+
+  // A key that hashes to nothing already in the table. 160 random bits will
+  // not collide, but the UNIQUE index would turn the one-in-never into a 500.
+  function freshKey() {
+    for (;;) {
+      const key = newAccessKey();
+      const hash = hashKey(key);
+      if (!q.userByKey.get(hash)) return { key, hash };
+    }
+  }
+
+  function vaultName(v) {
+    return str(v, 80);
   }
 
   // Writes a bookmark coming from a client. The client's `updated_at` wins when
@@ -377,39 +415,47 @@ function createApp(dbPath) {
   }
 
   const routes = {
-    'POST /api/auth/register': async (req, res) => {
+    // A new vault, and its key. The key is in this answer and nowhere else:
+    // only its hash is stored, so losing it means asking the host for another
+    // (see keys.js), never reading it back.
+    'POST /api/auth/vault': async (req, res) => {
       const b = await readBody(req);
-      const email = str(b.email, 200).toLowerCase();
-      const username = str(b.username, 60).toLowerCase();
-      const password = String(b.password || '');
-
-      if (!looksLikeEmail(email)) return json(res, 400, { error: 'invalid email' });
-      if (!/^[a-z0-9._-]{2,60}$/.test(username)) return json(res, 400, { error: 'username must be 2-60 chars (a-z 0-9 . _ -)' });
-      if (password.length < 6) return json(res, 400, { error: 'password needs at least 6 characters' });
-      if (q.userByLogin.get(email, username)) return json(res, 409, { error: 'email or username already exists' });
-
-      const info = q.insertUser.run(email, username, hashPassword(password), now());
-      const token = newToken();
-      q.insertSession.run(token, Number(info.lastInsertRowid), now());
-      return json(res, 201, { token, user: q.userById.get(Number(info.lastInsertRowid)) });
+      const { key, hash } = freshKey();
+      const info = q.insertUser.run(vaultName(b.name), hash, now());
+      const id = Number(info.lastInsertRowid);
+      return json(res, 201, { key, token: startSession(id), user: q.userById.get(id) });
     },
 
-    'POST /api/auth/login': async (req, res) => {
+    'POST /api/auth/key': async (req, res) => {
       const b = await readBody(req);
-      const login = str(b.login || b.email || b.username, 200).toLowerCase();
-      const user = q.userByLogin.get(login, login);
-      if (!user || !verifyPassword(String(b.password || ''), user.pass_hash)) {
-        return json(res, 401, { error: 'invalid credentials' });
-      }
-      const token = newToken();
-      q.insertSession.run(token, user.id, now());
-      return json(res, 200, { token, user: q.userById.get(user.id) });
+      const hash = hashKey(b.key);
+      const row = hash && q.userByKey.get(hash);
+      if (!row) return json(res, 401, { error: 'that key does not open any vault' });
+      return json(res, 200, { token: startSession(row.id), user: q.userById.get(row.id) });
     },
 
-    'POST /api/auth/logout': async (req, res, user, url) => {
-      const m = /^Bearer\s+(.+)$/i.exec(req.headers.authorization || '');
-      if (m) q.deleteSession.run(m[1]);
+    // A new key for this vault. The old one stops working at once, and every
+    // other device is signed out with it: a key is rotated because it may have
+    // leaked, and a session opened with a leaked key is the leak.
+    'POST /api/auth/rotate': async (req, res, user) => {
+      const { key, hash } = freshKey();
+      tx(() => {
+        q.setKey.run(hash, user.id);
+        q.deleteOtherSessions.run(user.id, bearer(req));
+      });
+      return json(res, 200, { key });
+    },
+
+    'POST /api/auth/logout': async (req, res) => {
+      const token = bearer(req);
+      if (token) q.deleteSession.run(token);
       return json(res, 200, { ok: true });
+    },
+
+    'POST /api/me': async (req, res, user) => {
+      const b = await readBody(req);
+      q.rename.run(vaultName(b.name), user.id);
+      return json(res, 200, { user: q.userById.get(user.id) });
     },
 
     'GET /api/me': async (req, res, user) => json(res, 200, { user }),
@@ -439,7 +485,7 @@ function createApp(dbPath) {
         // format and browsers drop an empty <DL> on import, and the JSON is a
         // flat list of bookmarks with nowhere to put a folder that has none.
         yaml: () => [portability.toYaml(items, {
-          user: user.username,
+          user: user.name,
           folders: q.allFolders.all(user.id).map((f) => f.path),
         }), 'application/yaml; charset=utf-8', `bookmarks-${stamp}.yaml`],
         html: () => [portability.toNetscapeHtml(items),
@@ -519,40 +565,42 @@ function createApp(dbPath) {
       if (!b.apply) return json(res, 200, { ...preview, applied: false });
 
       const ts = now();
-      for (const { incoming } of plan.create) {
-        // The id in the file is kept: an export is a backup, and restoring one
-        // has to give back the same bookmarks, not copies of them. The one
-        // catch is a tombstone with that id (deleted here, still in the file):
-        // the last-write-wins gate would drop the write and the bookmark would
-        // never come back, so that write is stamped now.
-        const buried = incoming.id ? q.getOne.get(user.id, incoming.id) : null;
-        // Strictly newer than the tombstone, not merely now: a client with a
-        // clock running ahead can leave a timestamp in the future, and a
-        // restore losing to it would fail quietly.
-        const stamp = buried ? Math.max(ts, buried.updated_at + 1) : ts;
-        writeBookmark(user.id, buried ? { ...incoming, updated_at: stamp } : incoming, ts);
-      }
-      for (const { incoming } of plan.update) writeBookmark(user.id, { ...incoming, updated_at: ts }, ts);
-      for (const { current } of plan.remove) q.softDelete.run(ts, user.id, current.id);
-
-      // Folders travel outside the plan. There is nothing to decide about one:
-      // a folder in the file either is already on the tree or is written down,
-      // and neither answer can lose a bookmark.
-      const keep = new Set();
-      for (const path of parsed.folders) {
-        for (const step of ancestry(path)) keep.add(step);
-      }
-      for (const path of keep) recordFolder(user.id, path, ts);
-      // `replace` means the file is the truth, for folders as much as for
-      // bookmarks: one that the file does not mention goes with the rest.
-      // Only for the YAML, though. The other formats have no way to write an
-      // empty folder down, so their silence is not an answer and pruning on it
-      // would delete folders the file never had an opinion about.
-      if (mode === 'replace' && parsed.format === 'yaml') {
-        for (const row of q.allFolders.all(user.id)) {
-          if (!keep.has(row.path)) q.burnFolder.run(ts, user.id, row.path);
+      tx(() => {
+        for (const { incoming } of plan.create) {
+          // The id in the file is kept: an export is a backup, and restoring one
+          // has to give back the same bookmarks, not copies of them. The one
+          // catch is a tombstone with that id (deleted here, still in the file):
+          // the last-write-wins gate would drop the write and the bookmark would
+          // never come back, so that write is stamped now.
+          const buried = incoming.id ? q.getOne.get(user.id, incoming.id) : null;
+          // Strictly newer than the tombstone, not merely now: a client with a
+          // clock running ahead can leave a timestamp in the future, and a
+          // restore losing to it would fail quietly.
+          const stamp = buried ? Math.max(ts, buried.updated_at + 1) : ts;
+          writeBookmark(user.id, buried ? { ...incoming, updated_at: stamp } : incoming, ts);
         }
-      }
+        for (const { incoming } of plan.update) writeBookmark(user.id, { ...incoming, updated_at: ts }, ts);
+        for (const { current } of plan.remove) q.softDelete.run(ts, user.id, current.id);
+
+        // Folders travel outside the plan. There is nothing to decide about one:
+        // a folder in the file either is already on the tree or is written down,
+        // and neither answer can lose a bookmark.
+        const keep = new Set();
+        for (const path of parsed.folders) {
+          for (const step of ancestry(path)) keep.add(step);
+        }
+        for (const path of keep) recordFolder(user.id, path, ts);
+        // `replace` means the file is the truth, for folders as much as for
+        // bookmarks: one that the file does not mention goes with the rest.
+        // Only for the YAML, though. The other formats have no way to write an
+        // empty folder down, so their silence is not an answer and pruning on it
+        // would delete folders the file never had an opinion about.
+        if (mode === 'replace' && parsed.format === 'yaml') {
+          for (const row of q.allFolders.all(user.id)) {
+            if (!keep.has(row.path)) q.burnFolder.run(ts, user.id, row.path);
+          }
+        }
+      });
 
       return json(res, 200, { ...preview, applied: true, total: q.allBookmarks.all(user.id).length });
     },
@@ -573,13 +621,15 @@ function createApp(dbPath) {
 
       const ts = now();
       let moved = 0;
-      for (const id of ids) {
-        const row = q.getOne.get(user.id, id);
-        if (!row || row.deleted || row.folder === folder) continue;
-        writeBookmark(user.id, { ...row, folder, updated_at: ts }, ts);
-        moved += 1;
-      }
-      return json(res, 200, { moved, folder });
+      tx(() => {
+        for (const id of ids) {
+          const row = q.getOne.get(user.id, id);
+          if (!row || row.deleted || row.folder === folder) continue;
+          writeBookmark(user.id, { ...row, folder, updated_at: ts }, ts);
+          moved += 1;
+        }
+      });
+      return json(res, 200, { moved, folder, now: ts });
     },
 
     // The same batch, for deleting. Tombstones, like every other deletion here,
@@ -591,12 +641,14 @@ function createApp(dbPath) {
 
       const ts = now();
       let deleted = 0;
-      for (const id of ids) {
-        const row = q.getOne.get(user.id, id);
-        if (!row || row.deleted) continue;
-        q.softDelete.run(ts, user.id, id);
-        deleted += 1;
-      }
+      tx(() => {
+        for (const id of ids) {
+          const row = q.getOne.get(user.id, id);
+          if (!row || row.deleted) continue;
+          q.softDelete.run(ts, user.id, id);
+          deleted += 1;
+        }
+      });
       return json(res, 200, { deleted });
     },
 
@@ -632,7 +684,7 @@ function createApp(dbPath) {
       }
 
       // LIKE with the separator attached, so `dev` does not also match `devops`.
-      const { moved, folders } = moveBranch(user.id, from, target);
+      const { moved, folders } = tx(() => moveBranch(user.id, from, target));
       return json(res, 200, { moved, folders, from, to: target });
     },
 
@@ -679,7 +731,7 @@ function createApp(dbPath) {
         return json(res, 409, { error: `folder /${target} already exists` });
       }
 
-      const { moved, folders } = moveBranch(user.id, from, target);
+      const { moved, folders } = tx(() => moveBranch(user.id, from, target));
       return json(res, 200, { moved, folders, from, to: target });
     },
 
@@ -695,10 +747,13 @@ function createApp(dbPath) {
 
       const like = escapeLike(path) + '/%';
       const ts = now();
-      const rows = q.inFolder.all(user.id, path, like);
-      for (const row of rows) q.softDelete.run(ts, user.id, row.id);
-      const branch = q.folderBranch.all(user.id, path, like);
-      for (const row of branch) q.burnFolder.run(ts, user.id, row.path);
+      const { rows, branch } = tx(() => {
+        const rows = q.inFolder.all(user.id, path, like);
+        for (const row of rows) q.softDelete.run(ts, user.id, row.id);
+        const branch = q.folderBranch.all(user.id, path, like);
+        for (const row of branch) q.burnFolder.run(ts, user.id, row.path);
+        return { rows, branch };
+      });
 
       return json(res, 200, { path, bookmarks: rows.length, folders: branch.length });
     },
@@ -741,7 +796,7 @@ function createApp(dbPath) {
       const pushed = Array.isArray(b.changes) ? b.changes : [];
       const ts = now();
       // A push never revives: see writeBookmark.
-      for (const item of pushed) writeBookmark(user.id, item, ts, { revive: false });
+      tx(() => { for (const item of pushed) writeBookmark(user.id, item, ts, { revive: false }); });
       const changes = q.since.all(user.id, since);
       // `folders` is additive, and a client that predates it ignores the key.
       // It only comes down: no client creates a folder while offline, so there
@@ -836,11 +891,11 @@ function createApp(dbPath) {
     try {
       if (!pathname.startsWith('/api/')) return serveStatic(res, pathname);
       if (pathname === '/api/health') {
-        return json(res, 200, { ok: true, service: 'bookmarks', demo: runtime.demo, build: buildInfo() });
+        return json(res, 200, { ok: true, service: 'bookmarks', build: buildInfo() });
       }
 
       const key = `${req.method} ${pathname}`;
-      const isPublic = key === 'POST /api/auth/register' || key === 'POST /api/auth/login';
+      const isPublic = key === 'POST /api/auth/vault' || key === 'POST /api/auth/key';
       const user = auth(req);
       if (!isPublic && !user) return json(res, 401, { error: 'not authenticated' });
 
@@ -858,64 +913,58 @@ function createApp(dbPath) {
     }
   });
 
-  return { server, db, runtime };
+  return { server, db };
 }
 
-// Test account, guaranteed on every boot of the stack.
+// Every vault leaves the boot with a key.
 //
-// Without it a fresh database opens the login screen with nobody to log in as,
-// and the first thing everyone does is register an account by hand just to see
-// the app running. Idempotent: if the account exists it only resets the
-// password, and it never touches that account's bookmarks.
-//
-// The password is known by design, so this is for local development and
-// testing. Before putting the instance anywhere else can reach it, turn it off
-// with BOOKMARKS_SEED=0, or anyone who reads this file can log in.
-function ensureSeedUser(db) {
-  if (process.env.BOOKMARKS_SEED === '0') return null;
-
-  const username = String(process.env.BOOKMARKS_SEED_USER || 'teste').toLowerCase();
-  const email = String(process.env.BOOKMARKS_SEED_EMAIL || `${username}@bookmarks.local`).toLowerCase();
-  const password = String(process.env.BOOKMARKS_SEED_PASSWORD || 'teste123');
-  // Whether the shortcut on the login screen can work, which is a question
-  // about the credentials themselves and not about where they came from: the
-  // button signs in as teste / teste123 and nothing else. The compose file
-  // spells that password out, so reading this off `BOOKMARKS_SEED_PASSWORD`
-  // being set hid the shortcut on the one stack that ships with it.
-  const isDefaultPassword = username === 'teste' && password === 'teste123';
-
-  const existing = db.prepare('SELECT * FROM users WHERE email = ? OR username = ?').get(email, username);
-  if (existing) {
-    // Only rewrites when the current password does not match: avoids a fresh hash on every boot.
-    if (!verifyPassword(password, existing.pass_hash)) {
-      db.prepare('UPDATE users SET pass_hash = ? WHERE id = ?').run(hashPassword(password), existing.id);
-    }
-    return { username: existing.username, password, isDefaultPassword, created: false };
+// Vaults from before the access keys come out of the migration with none, and
+// nobody could open them. Each gets one here, written to the log once: the log
+// is the one place the person who owns the host can read and nobody else can,
+// and after this boot the vault has a key and is never listed again. Lost it
+// anyway? `node api/keys.js` issues another.
+function issueMissingKeys(db) {
+  const rows = db.prepare('SELECT id, name FROM users WHERE key_hash IS NULL').all();
+  const out = [];
+  for (const row of rows) {
+    let key;
+    let hash;
+    do {
+      key = newAccessKey();
+      hash = hashKey(key);
+    } while (db.prepare('SELECT 1 FROM users WHERE key_hash = ?').get(hash));
+    db.prepare('UPDATE users SET key_hash = ? WHERE id = ?').run(hash, row.id);
+    out.push({ id: row.id, name: row.name, key });
   }
+  return out;
+}
 
-  db.prepare('INSERT INTO users (email, username, pass_hash, created_at) VALUES (?, ?, ?, ?)')
-    .run(email, username, hashPassword(password), now());
-  return { username, password, isDefaultPassword, created: true };
+// A known vault for development and tests, opened by the key in
+// BOOKMARKS_DEV_KEY. Off unless that variable is set: a key in an environment
+// file is a key anyone who reads the file has.
+function ensureDevVault(db, raw = process.env.BOOKMARKS_DEV_KEY) {
+  if (!raw) return null;
+  const hash = hashKey(raw);
+  if (!hash) throw new Error('BOOKMARKS_DEV_KEY is not a valid access key (32 base32 characters)');
+  const existing = db.prepare('SELECT id FROM users WHERE key_hash = ?').get(hash);
+  if (existing) return { id: existing.id, created: false };
+  const info = db.prepare('INSERT INTO users (name, key_hash, created_at) VALUES (?, ?, ?)').run('dev', hash, now());
+  return { id: Number(info.lastInsertRowid), created: true };
 }
 
 if (require.main === module) {
   const port = Number(process.env.BOOKMARKS_PORT) || 8787;
   const host = process.env.BOOKMARKS_HOST || '127.0.0.1';
-  const { server, db, runtime } = createApp();
+  const { server, db } = createApp();
 
-  const seed = ensureSeedUser(db);
-  // Only announced when the password is the default one: with a custom password
-  // the shortcut on the login screen could not work anyway.
-  runtime.demo = seed && seed.isDefaultPassword ? { login: seed.username } : null;
+  ensureDevVault(db);
+  const issued = issueMissingKeys(db);
   server.listen(port, host, () => {
     console.log(`bookmarks running on http://${host}:${port}`);
-    if (seed) {
-      // The password only reaches the log when it is the default one, which is
-      // already in this file. A BOOKMARKS_SEED_PASSWORD stays out of the journal.
-      const shown = seed.isDefaultPassword ? ` / ${seed.password}` : ' (password from BOOKMARKS_SEED_PASSWORD)';
-      console.log(`test user: ${seed.username}${shown}`);
+    for (const v of issued) {
+      console.log(`vault #${v.id}${v.name ? ` (${v.name})` : ''} had no access key; it is now: ${v.key}`);
     }
   });
 }
 
-module.exports = { createApp, ensureSeedUser };
+module.exports = { createApp, issueMissingKeys, ensureDevVault };

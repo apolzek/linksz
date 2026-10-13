@@ -2,17 +2,13 @@
   "id": "/",
   "name": "Bookmarks",
   "short_name": "Bookmarks",
-  "description": "Self-hosted bookmark manager with instant substring search.",
+  "description": "Self-hosted bookmark manager with instant search.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
-  "display_override": [
-    "window-controls-overlay",
-    "standalone"
-  ],
   "orientation": "any",
-  "background_color": "#0f1115",
-  "theme_color": "#0f1115",
+  "background_color": "#f6f6f4",
+  "theme_color": "#f6f6f4",
   "lang": "en",
   "dir": "ltr",
   "categories": [
