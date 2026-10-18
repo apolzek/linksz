@@ -575,16 +575,19 @@ function createApp(dbPath) {
       tx(() => {
         for (const { incoming } of plan.create) {
           // The id in the file is kept: an export is a backup, and restoring one
-          // has to give back the same bookmarks, not copies of them. The one
-          // catch is a tombstone with that id (deleted here, still in the file):
-          // the last-write-wins gate would drop the write and the bookmark would
-          // never come back, so that write is stamped now.
+          // has to give back the same bookmarks, not copies of them. Its
+          // timestamp is not: the sync hands out what changed since a client's
+          // cursor, and a bookmark written now under the file's older date sits
+          // behind every cursor already past it, so the clients already signed
+          // in would never receive it. A tombstone with that id (deleted here,
+          // still in the file) is the same problem twice over: the
+          // last-write-wins gate would also drop the write.
           const buried = incoming.id ? q.getOne.get(user.id, incoming.id) : null;
           // Strictly newer than the tombstone, not merely now: a client with a
           // clock running ahead can leave a timestamp in the future, and a
           // restore losing to it would fail quietly.
           const stamp = buried ? Math.max(ts, buried.updated_at + 1) : ts;
-          writeBookmark(user.id, buried ? { ...incoming, updated_at: stamp } : incoming, ts);
+          writeBookmark(user.id, { ...incoming, updated_at: stamp }, ts);
         }
         for (const { incoming } of plan.update) writeBookmark(user.id, { ...incoming, updated_at: ts }, ts);
         for (const { current } of plan.remove) q.softDelete.run(ts, user.id, current.id);

@@ -412,6 +412,17 @@ test('import applies and is idempotent afterwards', async () => {
   assert.deepEqual(await q('Importado'), ['Importado']);
 });
 
+test('an imported bookmark reaches a client that already synced', async () => {
+  const { body: { now: cursor } } = await call('POST', '/api/sync', { token, body: { since: 0 } });
+  const content = 'bookmarks:\n  - id: old-dated\n    title: Old dated\n    url: https://old-dated.com\n'
+    + '    updated_at: 1000\n';
+  await call('POST', '/api/import', { token, body: { content, mode: 'add', apply: true } });
+
+  const r = await call('POST', '/api/sync', { token, body: { since: cursor } });
+  assert.ok(r.body.changes.some((b) => b.id === 'old-dated'),
+    'the date in the file must not hide the bookmark behind the cursor');
+});
+
 test('import honours the chosen mode', async () => {
   const edited = 'bookmarks:\n  - title: Importado EDITADO\n    url: https://importado.com\n    tags: [novo]\n';
 
