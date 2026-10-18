@@ -69,9 +69,11 @@ moves or deletes the lot. Deleting and moving can be undone from the toast.
 **Organize.** One folder on each side. Click links to select them (Shift for a
 run, the box at the top for all), then the arrow between the panes, or the
 arrow keys, sends them across. Subfolders are listed first in each pane; click
-one to go in. Links dragged onto a subfolder, a breadcrumb, the other pane or a
-folder in the sidebar are filed there, and a folder dragged onto another moves
-inside it. Each pane can make, rename and delete the folder it shows.
+one to go in, or Ctrl+click (Cmd on a Mac) to select it instead, with Shift for
+a run. Selected folders move with the selected links. Links dragged onto a
+subfolder, a breadcrumb, the other pane or a folder in the sidebar are filed
+there, and a folder dragged onto another moves inside it, along with every
+other folder selected beside it. Each pane can make, rename and delete the folder it shows.
 
 **Saving from anywhere.** Put the app's address in front of any link; see
 [Saving a link from anywhere](#saving-a-link-from-anywhere).

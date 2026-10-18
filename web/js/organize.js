@@ -5,18 +5,26 @@
 // it takes no modifier), Shift extends the run, and the arrow buttons between
 // the panes send the selection across. Dragging works too, onto the other
 // pane, onto a subfolder row, onto a breadcrumb or onto the folder list.
+//
+// A subfolder row opens on a click, so marking one takes Ctrl (Cmd on a Mac),
+// the way a file manager does, and Shift extends the run from there. Marked
+// folders travel with the marked links: the arrows, `m` and dragging move them
+// all.
 
 import * as store from './store.js';
 import {
   $, esc, icon, favicon, hostOf, plural, folderLabel, pickFolder, dropTarget,
-  startLinkDrag, startFolderDrag, moveLinks, deleteLinks, askNewFolder,
+  startLinkDrag, startFolderDrag, moveLinks, moveFoldersTo, deleteLinks, askNewFolder,
   askRenameFolder, askDeleteFolder, fail,
 } from './ui.js';
 
 const KEY = 'bookmarks_organize';
 
 function pane(id) {
-  return { id, path: '', filter: '', marked: new Set(), anchor: -1, links: [], el: null };
+  return {
+    id, path: '', filter: '', marked: new Set(), anchor: -1, links: [],
+    folders: [], markedFolders: new Set(), folderAnchor: -1, el: null,
+  };
 }
 
 const panes = { a: pane('a'), b: pane('b') };
@@ -53,6 +61,8 @@ export function openFolder(path, which = focused) {
   p.filter = '';
   p.marked.clear();
   p.anchor = -1;
+  p.markedFolders.clear();
+  p.folderAnchor = -1;
   save();
   paintPane(p);
   paintActions();
@@ -117,15 +127,18 @@ function paintList(p) {
 
   let folders = t.children(p.path);
   if (q) folders = folders.filter((f) => S.norm(store.nameOf(f)).includes(nq));
+  p.folders = folders;
+  const shown = new Set(folders);
+  for (const f of p.markedFolders) if (!shown.has(f)) p.markedFolders.delete(f);
 
   let html = '';
   if (p.path && !q) {
     const up = store.parentOf(p.path);
     html += `<li class="orow folder up" data-folder="${esc(up)}" title="Up to ${esc(folderLabel(up))}">${icon('up')}<div class="orow-main"><span class="orow-title muted">${esc(up ? store.nameOf(up) : 'All folders')}</span></div></li>`;
   }
-  for (const f of folders) {
-    html += `<li class="orow folder" data-folder="${esc(f)}" draggable="true">${icon('folder')}<div class="orow-main"><span class="orow-title">${esc(store.nameOf(f))}</span></div><span class="pane-count">${t.total(f)}</span>${icon('chev')}</li>`;
-  }
+  folders.forEach((f, i) => {
+    html += `<li class="orow folder${p.markedFolders.has(f) ? ' marked' : ''}" data-folder="${esc(f)}" data-fi="${i}" draggable="true">${icon('folder')}<div class="orow-main"><span class="orow-title">${esc(store.nameOf(f))}</span></div><span class="pane-count">${t.total(f)}</span>${icon('chev')}</li>`;
+  });
   links.forEach((b, i) => {
     const host = hostOf(b.url);
     html += `<li class="orow${p.marked.has(b.id) ? ' marked' : ''}" data-i="${i}" draggable="true" role="option">
@@ -144,7 +157,11 @@ function paintList(p) {
 function paintCount(p) {
   const n = p.links.length;
   const m = p.marked.size;
-  p.el.querySelector('.pane-count').textContent = m ? `${m} of ${n}` : plural(n, 'link');
+  const f = p.markedFolders.size;
+  const parts = [];
+  if (f) parts.push(plural(f, 'folder'));
+  if (m) parts.push(`${m} of ${n}`);
+  p.el.querySelector('.pane-count').textContent = parts.length ? parts.join(' · ') : plural(n, 'link');
   const box = p.el.querySelector('[data-act="all"]');
   box.className = 'check-box' + (m && m === n ? ' on' : m ? ' some' : '');
   box.innerHTML = m && m === n ? icon('check') : '';
@@ -153,15 +170,28 @@ function paintCount(p) {
 
 function paintActions() {
   const set = (btn, from, to) => {
-    const n = from.marked.size;
+    const n = from.marked.size + from.markedFolders.size;
     btn.disabled = !n || from.path === to.path;
     btn.querySelector('span').textContent = n ? String(n) : '';
     btn.title = n
-      ? `Move ${plural(n, 'link')} to ${folderLabel(to.path)}`
-      : `Select links on the ${from.id === 'a' ? 'left' : 'right'} to move them`;
+      ? `Move ${what(from)} to ${folderLabel(to.path)}`
+      : `Select links or Ctrl+click folders on the ${from.id === 'a' ? 'left' : 'right'} to move them`;
   };
   set($('#move-ab'), panes.a, panes.b);
   set($('#move-ba'), panes.b, panes.a);
+}
+
+// "3 links", "2 folders", "2 folders and 3 links".
+function what(p) {
+  const parts = [];
+  if (p.markedFolders.size) parts.push(plural(p.markedFolders.size, 'folder'));
+  if (p.marked.size) parts.push(plural(p.marked.size, 'link'));
+  return parts.join(' and ');
+}
+
+function paintFolderRow(p, i) {
+  const li = p.el.querySelector(`[data-fi="${i}"]`);
+  if (li) li.classList.toggle('marked', p.markedFolders.has(p.folders[i]));
 }
 
 function paintRow(p, i) {
@@ -171,22 +201,33 @@ function paintRow(p, i) {
 
 /* ---------------- acting ---------------- */
 
-async function send(fromId) {
+// Links first, then folders: moving a folder rewrites the paths under it, and
+// the marked links are filed in the pane's folder, not in those.
+async function moveMarked(p, folder) {
+  const ids = [...p.marked];
+  const paths = [...p.markedFolders];
+  p.marked.clear();
+  p.markedFolders.clear();
+  try {
+    if (ids.length) await moveLinks(ids, folder);
+    if (paths.length) await moveFoldersTo(paths, folder);
+  } catch (err) { fail(err); }
+  paintList(p);
+}
+
+function send(fromId) {
   const from = panes[fromId];
   const to = panes[other(fromId)];
-  const ids = [...from.marked];
-  if (!ids.length || from.path === to.path) return;
-  from.marked.clear();
-  try { await moveLinks(ids, to.path); } catch (err) { fail(err); }
+  if (!from.marked.size && !from.markedFolders.size) return;
+  if (from.path === to.path) return;
+  return moveMarked(from, to.path);
 }
 
 async function moveMarkedElsewhere(p) {
-  const ids = [...p.marked];
-  if (!ids.length) return;
-  const folder = await pickFolder({ title: `Move ${plural(ids.length, 'link')} to`, current: p.path });
+  if (!p.marked.size && !p.markedFolders.size) return;
+  const folder = await pickFolder({ title: `Move ${what(p)} to`, current: p.path });
   if (folder == null) return;
-  p.marked.clear();
-  moveLinks(ids, folder).catch(fail);
+  return moveMarked(p, folder);
 }
 
 async function deleteMarked(p) {
@@ -194,6 +235,20 @@ async function deleteMarked(p) {
   try {
     await deleteLinks(ids, { before: () => p.marked.clear() });
   } catch (err) { fail(err); }
+}
+
+// Ctrl toggles one folder; Shift marks the run from the last one toggled.
+function markFolder(p, i, range) {
+  if (range && p.folderAnchor >= 0) {
+    const [a, z] = p.folderAnchor < i ? [p.folderAnchor, i] : [i, p.folderAnchor];
+    for (let k = a; k <= z; k++) { p.markedFolders.add(p.folders[k]); paintFolderRow(p, k); }
+  } else {
+    const f = p.folders[i];
+    if (p.markedFolders.has(f)) p.markedFolders.delete(f); else p.markedFolders.add(f);
+    p.folderAnchor = i;
+    paintFolderRow(p, i);
+  }
+  paintCount(p);
 }
 
 function setFocus(id) {
@@ -255,6 +310,10 @@ function wirePane(p) {
 
     const row = e.target.closest('.orow');
     if (!row) return;
+    if (row.dataset.fi != null && (e.ctrlKey || e.metaKey || (e.shiftKey && p.folderAnchor >= 0))) {
+      markFolder(p, Number(row.dataset.fi), e.shiftKey);
+      return;
+    }
     if (row.dataset.folder != null) { openFolder(row.dataset.folder, p.id); return; }
 
     const i = Number(row.dataset.i);
@@ -282,7 +341,13 @@ function wirePane(p) {
   el.addEventListener('dragstart', (e) => {
     const row = e.target.closest('.orow');
     if (!row) return;
-    if (row.dataset.folder != null) { startFolderDrag(e, row.dataset.folder); return; }
+    if (row.dataset.folder != null) {
+      // A marked folder carries every marked folder with it; an unmarked one
+      // goes alone, as it always did.
+      const f = row.dataset.folder;
+      startFolderDrag(e, p.markedFolders.has(f) ? [...p.markedFolders] : f);
+      return;
+    }
     const b = p.links[Number(row.dataset.i)];
     if (!p.marked.has(b.id)) {
       p.marked.add(b.id);
@@ -320,8 +385,13 @@ function paintAll({ settle = false } = {}) {
 export function onKey(e, typing) {
   const p = panes[focused];
   if (e.key === 'Escape') {
-    const had = panes.a.marked.size + panes.b.marked.size;
-    for (const q of Object.values(panes)) { q.marked.clear(); paintList(q); }
+    let had = 0;
+    for (const q of Object.values(panes)) {
+      had += q.marked.size + q.markedFolders.size;
+      q.marked.clear();
+      q.markedFolders.clear();
+      paintList(q);
+    }
     return had > 0;
   }
   if (typing) return false;

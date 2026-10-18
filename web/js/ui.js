@@ -268,11 +268,21 @@ export function startLinkDrag(e, ids) {
   }
 }
 
-export function startFolderDrag(e, path) {
-  dragging = { folder: path };
+// One folder, or several: the Organize page drags every folder marked in a pane.
+export function startFolderDrag(e, paths) {
+  const folders = [].concat(paths);
+  dragging = { folders };
   e.dataTransfer.effectAllowed = 'move';
-  e.dataTransfer.setData(FOLDER, path);
-  e.dataTransfer.setData('text/plain', path);
+  e.dataTransfer.setData(FOLDER, JSON.stringify(folders));
+  e.dataTransfer.setData('text/plain', folders.join('\n'));
+  if (folders.length > 1) {
+    const ghost = document.createElement('div');
+    ghost.className = 'drag-ghost';
+    ghost.textContent = `${folders.length} folders`;
+    document.body.append(ghost);
+    e.dataTransfer.setDragImage(ghost, 12, 12);
+    setTimeout(() => ghost.remove(), 0);
+  }
 }
 
 document.addEventListener('dragend', () => {
@@ -282,10 +292,7 @@ document.addEventListener('dragend', () => {
 
 function canDrop(target) {
   if (!dragging) return false;
-  if (dragging.folder != null) {
-    const from = dragging.folder;
-    return target !== from && target !== store.parentOf(from) && !target.startsWith(from + '/');
-  }
+  if (dragging.folders) return dragging.folders.every((from) => canDropFolder(from, target));
   return true;
 }
 
@@ -316,11 +323,14 @@ export function dropTarget(el, resolve) {
     if (!hit) return;
     e.preventDefault();
     const ids = e.dataTransfer.getData(LINKS);
-    const folder = e.dataTransfer.getData(FOLDER);
+    const folders = e.dataTransfer.getData(FOLDER);
     dragging = null;
     try {
       if (ids) await moveLinks(JSON.parse(ids), hit.path);
-      else if (folder && canDropFolder(folder, hit.path)) await moveFolderTo(folder, hit.path);
+      else if (folders) {
+        const paths = JSON.parse(folders);
+        if (paths.every((from) => canDropFolder(from, hit.path))) await moveFoldersTo(paths, hit.path);
+      }
     } catch (err) { fail(err); }
   });
 }
@@ -348,6 +358,30 @@ export async function moveFolderTo(from, toParent) {
     onAction: () => store.moveFolder(target, store.parentOf(from)).catch(fail),
   });
   return target;
+}
+
+// Several folders at once, one after the other, with one toast and one undo
+// for all of them. A folder that cannot go (a name already taken there) stops
+// the run: the ones before it stay moved and can still be undone.
+export async function moveFoldersTo(paths, toParent) {
+  if (paths.length === 1) return [await moveFolderTo(paths[0], toParent)];
+  const done = [];
+  let error = null;
+  for (const from of paths) {
+    try { done.push([from, await store.moveFolder(from, toParent)]); } catch (err) { error = err; break; }
+  }
+  if (done.length) {
+    toast(`Moved ${plural(done.length, 'folder')} to ${folderLabel(toParent)}`, {
+      action: 'Undo',
+      onAction: async () => {
+        try {
+          for (const [from, target] of [...done].reverse()) await store.moveFolder(target, store.parentOf(from));
+        } catch (err) { fail(err); }
+      },
+    });
+  }
+  if (error) throw error;
+  return done.map(([, target]) => target);
 }
 
 // `before` runs once the answer is yes and before anything changes on screen.

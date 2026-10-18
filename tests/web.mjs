@@ -305,6 +305,32 @@ await sleep(800);
 all = (await server('/api/bookmarks')).items;
 is(all.filter((b) => b.folder === 'pasta/3').length, 2, 'and undo moves it back');
 
+// Modifier bits in the DevTools protocol: 2 is Ctrl, 8 is Shift.
+await ev("(async () => { const o = await import('/js/organize.js'); o.openFolder('pasta', 'a'); o.openFolder('web', 'b'); })()");
+await sleep(300);
+await click('#pane-a .orow[data-folder="pasta/1"]', 2);
+is(await text('#pane-a .pane-folder span'), 'pasta', 'Ctrl+click on a folder selects it instead of opening it');
+// By now pasta holds 1 and 3: the moves above emptied pasta/2 off the tree.
+const runOf = "[...document.querySelectorAll('#pane-a .orow.folder.marked')].map((li) => li.dataset.folder)";
+await click('#pane-a .orow[data-folder="pasta/3"]', 8);
+is(await ev(runOf), ['pasta/1', 'pasta/3'], 'Shift+click marks the run of folders');
+await click('#pane-a .orow[data-folder="pasta/3"]', 2);
+is(await ev(runOf), ['pasta/1'], 'Ctrl+click on a marked folder unmarks it');
+await click('#pane-a .orow[data-folder="pasta/3"]', 2);
+is(await ev("document.querySelector('#move-ab span').textContent"), '2', 'and the arrow counts folders');
+await click('#move-ab');
+await sleep(900);
+all = (await server('/api/bookmarks')).items;
+is([all.some((b) => b.folder === 'web/1'), all.some((b) => b.folder === 'web/3'), all.some((b) => b.folder.startsWith('pasta/'))],
+  [true, true, false], 'the arrow moves every marked folder');
+await click('.toast:last-child button');
+await sleep(1000);
+all = (await server('/api/bookmarks')).items;
+is([all.some((b) => b.folder === 'pasta/1'), all.some((b) => b.folder === 'pasta/3'), all.some((b) => b.folder === 'web/1' || b.folder === 'web/3')],
+  [true, true, false], 'one undo puts all of them back');
+await ev("(async () => { const o = await import('/js/organize.js'); o.openFolder('pasta/1', 'a'); o.openFolder('pasta/2', 'b'); })()");
+await sleep(300);
+
 /* ---------------- folders ---------------- */
 group('folders');
 await click('#pane-a [data-act="new"]');

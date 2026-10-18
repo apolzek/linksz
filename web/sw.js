@@ -12,7 +12,7 @@
 'use strict';
 
 // Bump this version whenever a shell file changes.
-const VERSION = 'v64';
+const VERSION = 'v65';
 const SHELL_CACHE = `bookmarks-shell-${VERSION}`;
 
 const SHELL = [
