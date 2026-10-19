@@ -354,11 +354,22 @@ function registerServiceWorker() {
 
   $('#sel-move').onclick = () => links.moveSelected();
   $('#sel-delete').onclick = () => links.deleteSelected();
-  $('#tab-new').onclick = () => openEditor(null, { folder: links.getScope() || '' });
+  // On the organizer, the new link goes where the pane in focus is looking.
+  $('#tab-new').onclick = () => openEditor(null, {
+    folder: (document.body.dataset.route === 'organize' ? organize.focusedPath() : links.getScope()) || '',
+  });
   $('#side-new-folder').onclick = () => askNewFolder().catch(fail);
   for (const b of $$('[data-open-menu]')) b.onclick = openMenu;
   $('#scrim').onclick = closeMenu;
   document.addEventListener('keydown', onKey);
+  // On the organizer a pasted link is filed in the folder in focus. A paste
+  // into a text field is that field's.
+  document.addEventListener('paste', (e) => {
+    if (document.body.dataset.route !== 'organize' || anyDialogOpen() || $('#shell').hidden) return;
+    const el = document.activeElement;
+    if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) return;
+    organize.onPaste(e);
+  });
 
   fetch('/api/health', { cache: 'no-store' }).then((r) => r.json()).then((b) => settings.showBuild(b.build)).catch(() => {});
 

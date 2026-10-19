@@ -24,8 +24,8 @@ node --test tests/search.test.js
 heading "saving from the address bar, and the theme (node:test)"
 node --test tests/address.test.mjs tests/theme.test.js
 
-heading "yaml + import/export (node:test)"
-node --test tests/yaml.test.js tests/portability.test.js
+heading "yaml, import/export and link titles (node:test)"
+node --test tests/yaml.test.js tests/portability.test.js tests/titles.test.js
 
 heading "backend, api and pwa (node:test)"
 node --test tests/api.test.js

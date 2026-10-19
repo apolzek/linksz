@@ -360,6 +360,149 @@ await sleep(600);
 is((await server('/api/folders')).folders.some((f) => f.path === 'pasta/1/renamed'), false, 'and yes deletes');
 is(await text('#pane-a .pane-folder span'), '1', 'the pane steps up to the parent');
 
+await ev("(async () => { const s = await import('/js/store.js'); await s.createFolder('pasta/1/x'); await s.createFolder('pasta/1/y'); })()");
+await sleep(400);
+const markedIn = (sel) => ev(`document.querySelectorAll('#pane-a ${sel}.marked').length`);
+const listedIn = (sel) => ev(`document.querySelectorAll('#pane-a ${sel}').length`);
+await click('#pane-a .pane-list');
+await key('a', 'KeyA', 65, CTRL);
+is([await markedIn('.orow.folder[data-fi]'), await markedIn('.orow[data-i]')],
+  [await listedIn('.orow.folder[data-fi]'), await listedIn('.orow[data-i]')], 'Ctrl+A in a pane selects its folders and its links');
+await key('Escape', 'Escape', 27);
+is(await markedIn('.orow'), 0, 'Esc clears it');
+await click('#pane-a .orow[data-folder="pasta/1/x"]', CTRL);
+await click('#pane-a .orow[data-folder="pasta/1/y"]', CTRL);
+is(await hidden('#pane-a [data-act="delete-marked"]'), false, 'selecting folders shows the bin');
+await key('Delete', 'Delete', 46);
+is(await ev("document.querySelector('#dlg-confirm').open"), true, 'Del on selected folders asks first');
+await click('#confirm-yes');
+await sleep(800);
+const left = (await server('/api/folders')).folders.map((f) => f.path);
+is([left.includes('pasta/1/x'), left.includes('pasta/1/y'), left.includes('pasta/1')], [false, false, true],
+  'and deletes the selected folders, not the one they are in');
+
+// A folder and a link of its own, so the counts the later groups expect stand.
+await ev(`(async () => { const s = await import('/js/store.js'); await s.createFolder('pasta/1/z');
+  await fetch('/api/bookmarks', { method: 'POST', headers: { 'content-type': 'application/json',
+    authorization: 'Bearer ' + localStorage.getItem('bookmarks_token') },
+    body: JSON.stringify({ url: 'https://to-the-bin.example', title: 'To the bin', folder: 'pasta/1' }) });
+  await s.pull(); })()`);
+await sleep(600);
+const loose = 'To the bin';
+const binRow = await ev("[...document.querySelectorAll('#pane-a .orow[data-i]')].find((li) => li.textContent.includes('To the bin'))?.dataset.i");
+await click('#pane-a .orow[data-folder="pasta/1/z"]', CTRL);
+await click(`#pane-a .orow[data-i="${binRow}"]`);
+await click('#pane-a [data-act="delete-marked"]');
+is(await text('#confirm-title'), 'Delete 1 folder and 1 link?', 'the bin asks once for folders and links together');
+await click('#confirm-yes');
+await sleep(800);
+all = (await server('/api/bookmarks')).items;
+is([(await server('/api/folders')).folders.some((f) => f.path === 'pasta/1/z'), all.some((b) => b.title === loose)],
+  [false, false], 'and removes both');
+is(await hidden('#pane-a [data-act="delete-marked"]'), true, 'with nothing selected the bin goes away');
+
+await click('#pane-a [data-act="new-link"]');
+is(await ev("document.querySelector('#dlg-edit').open"), true, 'the plus on a pane opens a new link');
+is(await text('#e-folder span'), 'pasta/1', 'filed in the folder that pane shows');
+await type('example.org/from-organize');
+await click('#edit-save');
+await sleep(700);
+let fromPane = (await server('/api/bookmarks')).items.find((b) => b.url === 'https://example.org/from-organize');
+is(fromPane?.folder, 'pasta/1', 'and saved there');
+is(await ev("[...document.querySelectorAll('#pane-a .orow[data-i]')].some((li) => li.textContent.includes('example.org'))"), true,
+  'the pane shows it at once');
+await click('#pane-b .pane-list');
+await letter('n');
+is(await ev("document.querySelector('#dlg-edit').open"), true, 'n on the organizer opens a new link');
+is(await text('#e-folder span'), 'pasta/2', 'in the folder of the pane in focus');
+is(await ev("document.querySelector('#e-url').value"), '', 'and the n is not typed into it');
+await key('Escape', 'Escape', 27);
+// Out of the way, so the counts the later groups expect stand.
+await ev(`fetch('/api/bookmarks/${fromPane?.id}', { method: 'DELETE', headers: {
+  authorization: 'Bearer ' + localStorage.getItem('bookmarks_token') } })`);
+await sleep(300);
+
+// A paste the way the browser delivers one. Ctrl+V itself cannot be driven in
+// headless Chrome without clipboard permissions, so the event is made by hand.
+const paste = (textOnClipboard, target = 'document.body') => ev(`(() => {
+  const dt = new DataTransfer();
+  dt.setData('text/plain', ${q(textOnClipboard)});
+  (${target}).dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
+})()`);
+const pasted = async () => (await server('/api/bookmarks')).items.filter((b) => /paste-\d\.example/.test(b.url));
+await click('#pane-a .pane-list');
+await ev('document.activeElement.blur()');
+await paste('https://paste-1.example/a?b=c#d');
+await sleep(700);
+let p1 = (await pasted()).find((b) => b.url === 'https://paste-1.example/a?b=c#d');
+is(p1?.folder, 'pasta/1', 'Ctrl+V files the link on the clipboard in the pane in focus');
+is([p1?.title, p1?.description, p1?.tags, p1?.category], ['', '', '', ''], 'with the URL and nothing else');
+is(await ev("[...document.querySelectorAll('#pane-a .orow[data-i]')].some((li) => li.textContent.includes('paste-1.example'))"), true,
+  'and the pane shows it at once');
+await paste('https://paste-1.example/a?b=c#d');
+await sleep(500);
+is((await pasted()).length, 1, 'the same link pasted again is not filed twice');
+is(await lastToast(), 'Already in pasta/1', 'it says so');
+await paste('paste-2.example\n  https://paste-3.example/x  \nnot a link at all\n');
+await sleep(900);
+is((await pasted()).map((b) => b.url).sort(), ['https://paste-1.example/a?b=c#d', 'https://paste-2.example', 'https://paste-3.example/x'],
+  'one link per line, a bare domain gets https, prose is passed over');
+await click('#pane-b .pane-list');
+await ev('document.activeElement.blur()');
+await paste('just some words');
+await sleep(400);
+is((await pasted()).length, 3, 'a clipboard with no link files nothing');
+is(await lastToast(), 'Nothing to paste: the clipboard holds no link', 'and says why');
+await click('#pane-a .pane-tools input');
+await paste('https://paste-4.example', "document.querySelector('#pane-a .pane-tools input')");
+await sleep(400);
+is((await pasted()).length, 3, 'a paste into the filter box is the filter box\'s');
+
+// Editing from the organizer, on a link of its own.
+const editRow = "[...document.querySelectorAll('#pane-a .orow[data-i]')].find((li) => li.textContent.includes('paste-1.example'))";
+await ev('document.activeElement.blur()');
+await click('#pane-a .pane-list');
+const editAt = await ev(`${editRow}?.dataset.i`);
+await click(`#pane-a .orow[data-i="${editAt}"] .edit-link`);
+is(await ev("document.querySelector('#dlg-edit').open"), true, 'the pencil on a link opens the form');
+is(await ev("document.querySelector('#e-url').value"), 'https://paste-1.example/a?b=c#d', 'on that link');
+is(await ev(`${editRow}?.classList.contains('marked')`), false, 'and does not select it');
+await ev("document.querySelector('#e-title').select()");
+await type('Edited in the organizer');
+await click('#edit-save');
+await sleep(700);
+is((await pasted()).find((b) => b.url === 'https://paste-1.example/a?b=c#d')?.title, 'Edited in the organizer', 'the change is saved');
+is((await pasted()).find((b) => b.url === 'https://paste-1.example/a?b=c#d')?.folder, 'pasta/1', 'in the same folder');
+is(await ev(`${editRow}?.querySelector('.orow-title').textContent`), 'Edited in the organizer', 'and the pane shows it');
+await click(`#pane-a .orow[data-i="${await ev(`${editRow}?.dataset.i`)}"]`);
+await letter('e');
+is(await ev("document.querySelector('#e-title').value"), 'Edited in the organizer', 'e edits the one link selected');
+await key('Escape', 'Escape', 27);
+await key('F2', 'F2', 113);
+is(await ev("document.querySelector('#dlg-edit').open"), true, 'so does F2');
+await key('Escape', 'Escape', 27);
+await click(`#pane-a .orow[data-i="${(Number(await ev(`${editRow}?.dataset.i`)) + 1) % 2}"]`);
+await letter('e');
+is(await ev("document.querySelector('#dlg-edit').open"), false, 'with two selected, e does nothing');
+await key('Escape', 'Escape', 27);
+
+// A .example address never resolves, so the title can only come from the
+// address: the page half is covered by tests/titles.test.js.
+await key('Escape', 'Escape', 27);
+await ev('document.activeElement.blur()');
+await paste('https://paste-5.example/2024/an-article-worth-reading.html');
+await sleep(150);
+is((await pasted()).some((b) => b.url.includes('paste-5')), true, 'the link is saved before its title is found');
+await sleep(1500);
+is((await pasted()).find((b) => b.url.includes('paste-5'))?.title, 'An Article Worth Reading',
+  'and then gets a title, from the address when the page cannot be read');
+is(await ev("[...document.querySelectorAll('#pane-a .orow-title')].some((s) => s.textContent === 'An Article Worth Reading')"), true,
+  'which the pane shows');
+
+await ev(`(async () => { const s = await import('/js/store.js');
+  await s.removeMany(s.all().filter((b) => /paste-\\d\\.example/.test(b.url)).map((b) => b.id)); })()`);
+await sleep(400);
+
 /* ---------------- sync between tabs ---------------- */
 group('sync');
 await go('#/');
@@ -397,6 +540,22 @@ await click('#io-apply');
 await sleep(1000);
 all = (await server('/api/bookmarks')).items;
 is(all.find((b) => b.title === 'From the vault')?.category, 'infra', 'the vault file brings everything it carries');
+await pickFile(`${FIXTURES}/vault.yaml`);
+await click('#io-modes input[value="update"]');
+await sleep(600);
+is(await text('#io-apply'), 'Nothing to import', 'the same file again has nothing to import');
+is(await hidden('#io-none'), false, 'and the page says why, instead of a silent grey button');
+await pickFile(`${FIXTURES}/vault.json`);
+is(await hidden('#io-plan'), false, 'a json export with its folders up front gets a plan');
+await click('#io-apply');
+await sleep(1000);
+all = (await server('/api/bookmarks')).items;
+is(all.find((b) => b.title === 'From the json')?.folder, 'curated/topic-7/subtopic', 'and lands in its folder');
+is((await server('/api/folders')).folders.some((f) => f.path === 'curated/empty'), true, 'empty folders included');
+// Out of the way, so the counts the later groups expect stand.
+await ev(`fetch('/api/folders/delete', { method: 'POST', headers: { 'content-type': 'application/json',
+  authorization: 'Bearer ' + localStorage.getItem('bookmarks_token') }, body: JSON.stringify({ path: 'curated' }) })`);
+await sleep(300);
 
 /* ---------------- leaving ---------------- */
 group('settings: saving from anywhere');

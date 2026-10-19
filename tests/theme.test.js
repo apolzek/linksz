@@ -73,3 +73,28 @@ test('the font ships with the app and is there offline', () => {
   assert.ok(fs.existsSync(path.join(WEB, 'fonts', 'OFL.txt')), 'the font licence travels with it');
   assert.match(light['--font'], /--mono/, 'everything is set in the mono face');
 });
+
+/* ---------------- legible text ---------------- */
+
+// WCAG contrast between two #rrggbb colours.
+function contrast(a, b) {
+  const lum = (hex) => {
+    const [r, g, bl] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255)
+      .map((c) => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4));
+    return 0.2126 * r + 0.7152 * g + 0.0722 * bl;
+  };
+  const [hi, lo] = [lum(a), lum(b)].sort((x, y) => y - x);
+  return (hi + 0.05) / (lo + 0.05);
+}
+
+test('the caption under a chosen segment takes the colour of the button', () => {
+  assert.match(css, /\.segmented button\.on small\s*\{[^}]*color:\s*inherit/,
+    'muted grey on the accent is unreadable');
+});
+
+for (const [name, theme] of [['light', light], ['dark', darkByChoice]]) {
+  test(`segmented captions read in ${name}, chosen or not`, () => {
+    assert.ok(contrast(theme['--on-accent'], theme['--accent']) >= 4.5, 'on the accent');
+    assert.ok(contrast(theme['--muted'], theme['--surface-2']) >= 4.5, 'on the track');
+  });
+}

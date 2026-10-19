@@ -77,6 +77,14 @@ folders:
     category: infra
     tags: yaml
 EOF
+# A JSON export the way it first came out of the app: the folder list ahead of
+# the bookmarks, long enough to push the "bookmarks" key past the first 2000
+# characters. Read as YAML, that froze the server.
+node -e '
+const folders = Array.from({ length: 120 }, (_, i) => `curated/topic-${i}/subtopic`).concat("curated/empty");
+const bookmarks = [{ id: "json-1", title: "From the json", url: "https://do-json.example", folder: "curated/topic-7/subtopic" }];
+process.stdout.write(JSON.stringify({ version: 2, count: 1, folders, bookmarks }, null, 2));
+' > "$WORK/fixtures/vault.json"
 
 # A known key for the throwaway vault, made fresh on every run.
 DEV_KEY=$(node -e 'console.log(require("./api/auth").newAccessKey())')

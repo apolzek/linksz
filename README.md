@@ -73,7 +73,19 @@ one to go in, or Ctrl+click (Cmd on a Mac) to select it instead, with Shift for
 a run. Selected folders move with the selected links. Links dragged onto a
 subfolder, a breadcrumb, the other pane or a folder in the sidebar are filed
 there, and a folder dragged onto another moves inside it, along with every
-other folder selected beside it. Each pane can make, rename and delete the folder it shows.
+other folder selected beside it. Ctrl+A selects every folder and link the
+pane lists, and Del, or the bin that appears next to the count, deletes what is
+selected, folders with everything in them, after asking once. Each pane can
+make, rename and delete the folder it shows, and add a link to it: the plus at
+its top, or `n` for the pane in focus. Ctrl+V with a link on the clipboard
+files it in the folder in focus at once, and a moment later gives it a title:
+the one the page gives itself (the server reads it, as itself, never posing as
+another site's crawler, and never from an address on a private network), or,
+when the page answers with a challenge or a shell, the words in its address.
+Several lines of links file them all, and one already in that folder is not
+filed twice. The
+pencil on a link, shown on hover, edits it; so do `e` and F2 with one link
+selected.
 
 **Saving from anywhere.** Put the app's address in front of any link; see
 [Saving a link from anywhere](#saving-a-link-from-anywhere).
@@ -186,8 +198,9 @@ accent insensitive, and terms combine with AND.
 Export is YAML, browser HTML or JSON. Import comes in two flows, because the
 two files are not the same thing and pretending otherwise loses data:
 
-    From this app     YAML or JSON exported here. Ids, folders, categories,
-                      tags, descriptions and counters all survive.
+    From this app     YAML or JSON exported here. Ids, the folder tree (empty
+                      folders too), categories, tags, descriptions and
+                      counters all survive.
     From a browser    two files work: the HTML Chrome, Firefox, Edge and
                       Safari export, and the browser's own `Bookmarks` file
                       from its profile directory, which on Linux is

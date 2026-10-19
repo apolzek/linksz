@@ -667,8 +667,35 @@ test('the file counts an empty folder among its folders', () => {
 test('the formats that cannot express an empty folder say nothing, not zero', () => {
   const html = p.readImport(p.toNetscapeHtml(VAULT), { source: 'browser' });
   assert.deepEqual(html.folders, [], 'the HTML has no way to write one down');
-  const json = p.parseImport(p.toJson(VAULT));
-  assert.deepEqual(json.folders, []);
+});
+
+test('the json carries the folders written down, empty ones included', () => {
+  const text = p.toJson(VAULT, { folders: ['zz/empty', 'dev'] });
+  assert.deepEqual(JSON.parse(text).folders, ['dev', 'zz/empty'], 'sorted, so two exports diff cleanly');
+  assert.deepEqual(p.parseImport(text).folders, ['dev', 'zz/empty']);
+});
+
+test('a json from before the folders key still reads, with none', () => {
+  const old = JSON.stringify({ version: 2, count: VAULT.length, bookmarks: VAULT });
+  const { items, folders } = p.parseImport(old);
+  assert.equal(items.length, VAULT.length);
+  assert.deepEqual(folders, []);
+});
+
+test('a bare json list keeps each entry\'s own folder, not its position', () => {
+  const text = JSON.stringify([
+    { url: 'https://a.example', tags: ['x', 'y'], category: 'LABY' },
+    { url: 'https://b.example', folder: 'dev/go' },
+    { url: 'https://c.example' },
+  ]);
+  const { items } = p.parseImport(text);
+  assert.deepEqual(items.map((b) => b.folder), ['', 'dev/go', ''], 'no folder named "0", "1" or "2"');
+  assert.equal(items[0].tags, 'x,y');
+});
+
+test('junk in the json folders list is dropped, not imported', () => {
+  const text = JSON.stringify({ bookmarks: VAULT, folders: ['/ok/', 7, null, '', 'ok'] });
+  assert.deepEqual(p.parseImport(text).folders, ['ok']);
 });
 
 /* ---------------- compatibility with older files ---------------- */
@@ -710,4 +737,20 @@ test('a file using the old field name (notes) still imports', () => {
   const yaml = ['bookmarks:', '  - title: Old', '    url: https://old.com', '    notes: came from the old format'].join('\n');
   const { items } = p.parseImport(yaml, 'yaml');
   assert.equal(items[0].description, 'came from the old format');
+});
+
+/* ---------------- telling json from yaml ---------------- */
+
+test('a json export is json wherever its "bookmarks" key falls', () => {
+  const folders = Array.from({ length: 200 }, (_, i) => `topic-${i}/sub`);
+  const first = JSON.stringify({ version: 2, count: VAULT.length, folders, bookmarks: VAULT }, null, 2);
+  assert.ok(first.indexOf('"bookmarks"') > 2000, 'the key is past the part a header sniff reads');
+  assert.equal(p.detectFormat(first), 'json');
+  assert.equal(p.parseImport(first).items.length, VAULT.length);
+  assert.equal(p.detectFormat(p.toJson(VAULT, { folders })), 'json');
+});
+
+test('the browser profile file is still told apart from a vault json', () => {
+  assert.equal(p.detectFormat('{"checksum":"x","roots":{}}'), 'chrome');
+  assert.equal(p.detectFormat('{"version":2,"bookmarks":[]}'), 'json');
 });

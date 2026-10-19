@@ -1394,3 +1394,109 @@ test('a sync push does not bring a deleted bookmark back', async () => {
   assert.equal(back.status, 200, 'an import still restores it, because that one is deliberate');
   assert.equal(back.body.item.opens, 3, 'and the opens counted while it was gone survived');
 });
+
+/* ---------------- the folder tree survives export and import ---------------- */
+
+// A vault with links nested a few levels down, a link in no folder and a folder
+// holding nothing, exported in each format and brought into a fresh vault.
+async function treeVault() {
+  const t = (await call('POST', '/api/auth/vault', { body: { name: 'tree' } })).body.token;
+  const mk = (folder, title) => call('POST', '/api/bookmarks', {
+    token: t, body: { url: `https://${title}.example`, title, folder },
+  });
+  await mk('it/dev/go', 'tree-go');
+  await mk('it/dev/go/web', 'tree-web');
+  await mk('it/sec', 'tree-sec');
+  await mk('', 'tree-loose');
+  await call('POST', '/api/folders', { token: t, body: { path: 'learning/thinking' } });
+  return t;
+}
+
+// The tree as the app draws it: the folders written down, plus every folder a
+// link sits in and the way down to it.
+async function treeOf(t) {
+  const all = new Set(await paths(t));
+  for (const b of (await call('GET', '/api/bookmarks?limit=500', { token: t })).body.items) {
+    for (let f = b.folder; f; f = f.includes('/') ? f.slice(0, f.lastIndexOf('/')) : '') all.add(f);
+  }
+  return [...all].sort();
+}
+
+const placements = async (t) => (await call('GET', '/api/bookmarks?limit=500', { token: t })).body.items
+  .map((b) => `${b.folder}|${b.url}`).sort();
+
+async function roundTrip(format, source = 'native') {
+  const from = await treeVault();
+  const text = await fetch(`${base}/api/export?format=${format}`, {
+    headers: { authorization: `Bearer ${from}` },
+  }).then((r) => r.text());
+  const to = (await call('POST', '/api/auth/vault', { body: { name: 'tree copy' } })).body.token;
+  const r = await call('POST', '/api/import', { token: to, body: { content: text, source, apply: true } });
+  assert.equal(r.status, 200, JSON.stringify(r.body));
+  return { from, to };
+}
+
+test('a yaml export brings the whole tree back, empty folders included', async () => {
+  const { from, to } = await roundTrip('yaml');
+  assert.deepEqual(await placements(to), await placements(from));
+  assert.deepEqual(await treeOf(to), await treeOf(from));
+  assert.ok((await paths(to)).includes('learning/thinking'));
+});
+
+test('a json export brings the whole tree back, empty folders included', async () => {
+  const { from, to } = await roundTrip('json');
+  assert.deepEqual(await placements(to), await placements(from));
+  assert.deepEqual(await treeOf(to), await treeOf(from));
+  assert.ok((await paths(to)).includes('learning/thinking'));
+});
+
+test('an html export keeps every link in its folder', async () => {
+  const { from, to } = await roundTrip('html', 'browser');
+  assert.deepEqual(await placements(to), await placements(from));
+});
+
+/* ---------------- a title for a pasted link ---------------- */
+
+test('the title endpoint needs a session and an http url', async () => {
+  assert.equal((await call('GET', '/api/title?url=https%3A%2F%2Fexample.com')).status, 401);
+  assert.equal((await call('GET', '/api/title?url=file%3A%2F%2F%2Fetc%2Fpasswd', { token })).status, 400);
+  assert.equal((await call('GET', '/api/title', { token })).status, 400);
+});
+
+test('the title endpoint never reads a private address, and falls back to the url', async () => {
+  let hits = 0;
+  const page = require('node:http').createServer((req, res) => { hits += 1; res.end('<title>Secret</title>'); });
+  await new Promise((r) => page.listen(0, '127.0.0.1', r));
+  const target = `http://127.0.0.1:${page.address().port}/an-internal-page-name`;
+  const r = await call('GET', `/api/title?url=${encodeURIComponent(target)}`, { token });
+  page.close();
+  assert.deepEqual(r.body, { title: 'An Internal Page Name', source: 'url' });
+  assert.equal(hits, 0, 'the page was never contacted');
+});
+
+test('the title endpoint reads the page when it may, and writes nothing', async () => {
+  const page = require('node:http').createServer((req, res) => {
+    res.writeHead(200, { 'content-type': 'text/html' });
+    res.end('<head><meta property="og:title" content="O Profeta - Khalil Gibran: Edição Integral"></head>');
+  });
+  await new Promise((r) => page.listen(0, '127.0.0.1', r));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bookmarks-title-'));
+  const app = createApp(path.join(dir, 'b.db'), { titles: { allow: (ip) => ip === '127.0.0.1' } });
+  await new Promise((r) => app.server.listen(0, '127.0.0.1', r));
+  const at = `http://127.0.0.1:${app.server.address().port}`;
+  try {
+    const vault = await fetch(`${at}/api/auth/vault`, { method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'titles' }) }).then((x) => x.json());
+    const url = `http://127.0.0.1:${page.address().port}/book`;
+    const r = await fetch(`${at}/api/title?url=${encodeURIComponent(url)}`, {
+      headers: { authorization: `Bearer ${vault.token}` } }).then((x) => x.json());
+    assert.deepEqual(r, { title: 'O Profeta - Khalil Gibran: Edição Integral', source: 'page' });
+    const list = await fetch(`${at}/api/bookmarks`, { headers: { authorization: `Bearer ${vault.token}` } }).then((x) => x.json());
+    assert.equal(list.total, 0, 'asking for a title saves nothing');
+  } finally {
+    app.server.close();
+    page.close();
+    app.db.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

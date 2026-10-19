@@ -314,28 +314,34 @@ function opensQuote(text, i) {
   return true;
 }
 
-// Did a flow structure ([...] or {...}) close inside this text?
-function flowComplete(text) {
-  let quoteChar = '';
-  let depth = 0;
-  for (let i = 0; i < text.length; i++) {
-    const c = text[i];
+// Did a flow structure ([...] or {...}) close yet? It is fed one line at a
+// time and carries its state from one to the next, so a long structure is read
+// once. Rescanning everything gathered so far on every line made a long one (a
+// JSON file offered as YAML, say) quadratic, and froze the server for minutes.
+// `prev` is the last character that was not whitespace, which is what decides
+// whether a quote opens a scalar (see opensQuote).
+function flowScan(chunk, state = { depth: 0, quoteChar: '', prev: '', skip: false }) {
+  let { depth, quoteChar, prev, skip } = state;
+  for (let i = 0; i < chunk.length; i++) {
+    const c = chunk[i];
+    if (skip) { skip = false; continue; }
     if (quoteChar) {
-      if (c === '\\' && quoteChar === '"') { i++; continue; }
+      if (c === '\\' && quoteChar === '"') { skip = true; continue; }
       if (c === quoteChar) {
-        if (quoteChar === "'" && text[i + 1] === "'") { i++; continue; }
+        if (quoteChar === "'" && chunk[i + 1] === "'") { skip = true; continue; }
         quoteChar = '';
       }
-    } else if ((c === '"' || c === "'") && opensQuote(text, i)) {
+    } else if ((c === '"' || c === "'") && (prev === '' || prev === ',' || prev === '[' || prev === '{' || prev === ':')) {
       quoteChar = c;
     } else if (c === '[' || c === '{') {
       depth++;
     } else if (c === ']' || c === '}') {
       depth--;
-      if (depth === 0) return true;
+      if (depth === 0) return { done: true, depth, quoteChar, prev: c, skip };
     }
+    if (!/\s/.test(c)) prev = c;
   }
-  return false;
+  return { done: false, depth, quoteChar, prev, skip };
 }
 
 // Position of the ":" separating key from value in a flow mapping item.
@@ -475,13 +481,16 @@ class Reader {
     // A flow structure that did not close: emitters break `{a: 1, b: 2}` across
     // several lines when it gets long.
     if (head === '[' || head === '{') {
-      let acc = rest;
-      while (!flowComplete(acc)) {
+      const acc = [rest];
+      let scan = flowScan(rest);
+      while (!scan.done) {
         if (this.i >= this.lines.length) throw new YamlError('unclosed flow structure', lineNo);
-        acc += '\n' + this.lines[this.i].raw;
+        const raw = this.lines[this.i].raw;
+        acc.push(raw);
         this.i++;
+        scan = flowScan('\n' + raw, scan);
       }
-      return parseScalar(acc, lineNo);
+      return parseScalar(acc.join('\n'), lineNo);
     }
 
     if (head !== '"' && head !== "'") {

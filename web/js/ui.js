@@ -424,13 +424,27 @@ export async function askRenameFolder(path) {
 }
 
 export async function askDeleteFolder(path) {
-  const n = store.tree().total(path);
+  return askDeleteFolders([path]);
+}
+
+// Several folders, and the links marked beside them, under one question. The
+// links filed loose are counted apart from the ones the folders carry.
+export async function askDeleteFolders(paths, links = []) {
+  if (!paths.length) return deleteLinks(links).then((gone) => gone.length > 0);
+  const t = store.tree();
+  const n = paths.reduce((sum, p) => sum + t.total(p), 0);
+  const one = paths.length === 1 && !links.length;
+  const parts = [plural(paths.length, 'folder')];
+  if (links.length) parts.push(plural(links.length, 'link'));
   const yes = await confirmDialog({
-    title: `Delete ${store.nameOf(path)}?`,
-    text: n ? `It holds ${plural(n, 'link')}, and they go with it, along with every folder inside.` : 'The folder is empty.',
+    title: one ? `Delete ${store.nameOf(paths[0])}?` : `Delete ${parts.join(' and ')}?`,
+    text: one
+      ? (n ? `It holds ${plural(n, 'link')}, and they go with it, along with every folder inside.` : 'The folder is empty.')
+      : (n ? `The folders hold ${plural(n, 'link')}, and they go with them, along with every folder inside.` : 'The folders are empty.'),
   });
   if (!yes) return false;
-  await store.deleteFolder(path);
-  toast(`Deleted ${store.nameOf(path)}`);
+  if (links.length) await deleteLinks(links, { ask: false });
+  for (const p of paths) await store.deleteFolder(p);
+  toast(`Deleted ${one ? store.nameOf(paths[0]) : plural(paths.length, 'folder')}`);
   return true;
 }

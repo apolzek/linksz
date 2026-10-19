@@ -182,7 +182,10 @@ input[type="checkbox"], input[type="radio"] { width: auto; accent-color: var(--a
 .segmented button.on { background: var(--accent); color: var(--on-accent); }
 .segmented.wide { display: flex; width: 100%; margin-bottom: 12px; }
 .segmented.wide button { flex: 1; display: flex; flex-direction: column; padding: 8px; }
-.segmented small { font-weight: 400; font-size: 11.5px; color: var(--muted); }
+.segmented small { font-weight: 400; font-size: 12px; color: var(--muted); }
+/* On the chosen one the caption sits on the accent, where the grey all but
+   disappeared: it takes the button's own colour, a step lighter in weight. */
+.segmented button.on small { color: inherit; }
 
 /* ---------------- open a vault ---------------- */
 
@@ -457,8 +460,11 @@ mark { background: var(--mark); color: inherit; border-radius: 0; padding: 0 1px
 .orow-host { display: block; font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .orow.folder { font-weight: 550; }
 .orow.folder > svg { color: var(--faint); }
-.orow .open-link { opacity: 0; }
-.orow:hover .open-link { opacity: 1; }
+.orow .open-link, .orow .edit-link { opacity: 0; }
+.orow:hover .open-link, .orow:hover .edit-link,
+.orow .open-link:focus-visible, .orow .edit-link:focus-visible { opacity: 1; }
+/* No hover on a touch screen: the buttons are just there. */
+@media (hover: none) { .orow .open-link, .orow .edit-link { opacity: 1; } }
 .orow .btn.icon { width: 28px; height: 28px; }
 .pane-empty { padding: 32px 16px; text-align: center; color: var(--muted); font-size: 13px; }
 .pane-foot { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-top: 1px solid var(--border); font-size: 12.5px; }
@@ -511,6 +517,7 @@ mark { background: var(--mark); color: inherit; border-radius: 0; padding: 0 1px
 .io-summary b { font-variant-numeric: tabular-nums; }
 .io-summary em { display: block; font-style: normal; font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .io-warn { padding: 10px 12px; border-radius: 0; background: var(--danger-soft); color: var(--danger); font-size: 13px; }
+.io-none { font-size: 13px; }
 .choices { border: 0; padding: 0; margin: 12px 0 16px; display: grid; gap: 6px; }
 .choices legend { font-size: 12.5px; font-weight: 600; color: var(--muted); margin-bottom: 6px; }
 .choices label { display: flex; gap: 10px; align-items: flex-start; padding: 9px 11px; border: 1px solid var(--border); border-radius: 0; cursor: pointer; }

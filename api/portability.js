@@ -255,9 +255,11 @@ function toNetscapeHtml(bookmarks) {
 }
 
 // The raw dump: every column as it is stored, for scripts. Unlike the YAML it
-// does not reshape anything, which is the point of having it.
-function toJson(bookmarks) {
-  return JSON.stringify({ version: 2, count: bookmarks.length, bookmarks }, null, 2);
+// does not reshape anything, which is the point of having it. `folders` is
+// every folder written down, empty ones included, so the tree survives the
+// trip; an importer that predates the key walks past it.
+function toJson(bookmarks, { folders = [] } = {}) {
+  return JSON.stringify({ version: 2, count: bookmarks.length, bookmarks, folders: [...folders].sort() }, null, 2);
 }
 
 /* ======================= import: read ======================= */
@@ -497,10 +499,19 @@ function parseChromeJson(text) {
 }
 
 function parseJsonExport(text) {
+  return readJsonDoc(text).items;
+}
+
+function readJsonDoc(text) {
   const doc = JSON.parse(text);
   const list = Array.isArray(doc) ? doc : doc.bookmarks;
   if (!Array.isArray(list)) throw new Error('JSON without a "bookmarks" list');
-  return list.filter((i) => i && typeof i === 'object').map(normalizeIncoming);
+  const folders = Array.isArray(doc.folders)
+    ? [...new Set(doc.folders.filter((f) => typeof f === 'string').map(normFolder).filter(Boolean))]
+    : [];
+  // Not .map(normalizeIncoming): map's second argument is the index, and it
+  // would land in the folder parameter, filing every entry under "0", "1"...
+  return { items: list.filter((i) => i && typeof i === 'object').map((i) => normalizeIncoming(i)), folders };
 }
 
 function detectFormat(text) {
@@ -508,9 +519,16 @@ function detectFormat(text) {
   if (/^<!DOCTYPE NETSCAPE-Bookmark/i.test(head) || /<DT>\s*<A\s/i.test(head)) return 'html';
   // The browser's own profile file, before the generic JSON check: it is JSON
   // too, but with a shape of its own and no "bookmarks" list to match on.
-  if (head.startsWith('{') && /"roots"\s*:/.test(head)) return 'chrome';
-  if (head.startsWith('{') && /"bookmarks"\s*:/.test(head)) return 'json';
+  //
+  // Whatever opens with a brace is read as JSON and told apart by its keys, not
+  // by where they fall in the first lines: a JSON that slipped through to the
+  // YAML reader would be read as one enormous broken document.
   if (head.startsWith('[')) return 'json';
+  if (head.startsWith('{')) {
+    let doc = null;
+    try { doc = JSON.parse(text); } catch { return 'json'; }
+    return doc && typeof doc === 'object' && 'roots' in doc ? 'chrome' : 'json';
+  }
   return 'yaml';
 }
 
@@ -525,11 +543,12 @@ function parseImport(text, format = 'auto') {
   const parser = parsers[chosen];
   if (!parser) throw new Error(`unknown format: ${chosen}`);
 
-  // Only the YAML has a way to name a folder that holds nothing. For the other
-  // formats the list comes back empty, which is not the same as "no folders":
-  // their entries still carry folders, they just cannot mention an empty one.
-  const { items, folders } = chosen === 'yaml'
-    ? readYamlDoc(text)
+  // Only the YAML and this app's JSON have a way to name a folder that holds
+  // nothing. For the browser formats the list comes back empty, which is not
+  // the same as "no folders": their entries still carry folders, they just
+  // cannot mention an empty one.
+  const { items, folders } = chosen === 'yaml' ? readYamlDoc(text)
+    : chosen === 'json' ? readJsonDoc(text)
     : { items: parser(text), folders: [] };
   // With neither url nor title there is nothing to do with the entry.
   return { format: chosen, items: items.filter((b) => b.url || b.title), folders };

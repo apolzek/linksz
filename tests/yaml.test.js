@@ -201,3 +201,29 @@ test('round-trip over 200 generated combinations', () => {
     assert.deepEqual(roundTrip(doc), doc, `failed on ${JSON.stringify(doc)}`);
   }
 });
+
+/* ---------------- long flow structures ---------------- */
+
+// A flow structure is gathered a line at a time. Rescanning the whole of it on
+// every line was quadratic: a 1.7 MB JSON offered as YAML held the server for
+// minutes. These are a few hundred milliseconds when it is linear.
+test('a long flow structure spread over many lines reads in linear time', () => {
+  const lines = Array.from({ length: 60000 }, (_, i) => `  "item-${i}",`);
+  const text = `list: [\n${lines.join('\n')}\n  "last"\n]`;
+  const started = Date.now();
+  const doc = parse(text);
+  assert.equal(doc.list.length, 60001);
+  assert.equal(doc.list[60000], 'last');
+  assert.ok(Date.now() - started < 3000, `took ${Date.now() - started} ms`);
+});
+
+test('an unclosed flow structure fails fast instead of hanging', () => {
+  const text = '{\n' + Array.from({ length: 60000 }, (_, i) => `  "k${i}": "v",`).join('\n');
+  const started = Date.now();
+  assert.throws(() => parse(text), YamlError);
+  assert.ok(Date.now() - started < 3000, `took ${Date.now() - started} ms`);
+});
+
+test('a bracket inside a quote that spans lines does not close the structure', () => {
+  assert.deepEqual(parse('a: ["x ]\n y", z]'), { a: ['x ] y', 'z'] });
+});

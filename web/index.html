@@ -179,7 +179,7 @@
       <button type="button" class="btn icon only-mobile" data-open-menu title="Menu"><svg><use href="#i-menu"/></svg></button>
       <div class="titles">
         <h1>Organize</h1>
-        <p class="muted">Select links on one side, or Ctrl+click folders, and move them to the folder open on the other. Or drag them anywhere in the folder list.</p>
+        <p class="muted">Select links on one side, or Ctrl+click folders, and move them to the folder open on the other. Or drag them anywhere in the folder list. Ctrl+A selects everything, Del deletes it, n adds a link to the folder in focus, Ctrl+V files the link on the clipboard there, e edits the one selected.</p>
       </div>
     </header>
     <div class="panes">
@@ -270,6 +270,7 @@
             <label><input type="radio" name="io-mode" value="newest"><span><b>Keep the newest</b><small>last edited wins</small></span></label>
             <label id="io-mode-replace"><input type="radio" name="io-mode" value="replace"><span><b>Replace everything</b><small>remove what the file does not have</small></span></label>
           </fieldset>
+          <p class="io-none muted" id="io-none" hidden></p>
           <button type="button" class="btn primary" id="io-apply" disabled>Import</button>
         </div>
         <p class="form-error" id="io-error" role="alert"></p>

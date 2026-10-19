@@ -9,14 +9,21 @@
 // A subfolder row opens on a click, so marking one takes Ctrl (Cmd on a Mac),
 // the way a file manager does, and Shift extends the run from there. Marked
 // folders travel with the marked links: the arrows, `m` and dragging move them
-// all.
+// all, and Delete removes them all. Ctrl+A marks everything the pane lists,
+// folders included. `n`, or the plus on a pane, makes a new link right in the
+// folder that pane shows. Ctrl+V with a link on the clipboard files it there
+// as it is, and a moment later the server finds it a title: the page's own, or
+// the words in its address. The pencil on a link edits it, and so
+// do `e` and F2 when one link is selected.
 
 import * as store from './store.js';
 import {
   $, esc, icon, favicon, hostOf, plural, folderLabel, pickFolder, dropTarget,
   startLinkDrag, startFolderDrag, moveLinks, moveFoldersTo, deleteLinks, askNewFolder,
-  askRenameFolder, askDeleteFolder, fail,
+  askRenameFolder, askDeleteFolder, askDeleteFolders, fail, toast,
 } from './ui.js';
+import { openEditor } from './editor.js';
+import { api } from './http.js';
 
 const KEY = 'bookmarks_organize';
 
@@ -92,6 +99,7 @@ function paintPane(p) {
     <div class="pane-head">
       <button type="button" class="btn pane-folder" data-act="pick" title="Choose the folder for this side">
         ${icon(root ? 'inbox' : 'folder')}<span>${esc(root ? 'Unfiled' : store.nameOf(p.path))}</span>${icon('chev-down', 'chev')}</button>
+      <button type="button" class="btn icon" data-act="new-link" title="New link here (n)">${icon('plus')}</button>
       <button type="button" class="btn icon" data-act="new" title="New folder inside">${icon('folder-plus')}</button>
       ${root ? '' : `<button type="button" class="btn icon" data-act="rename" title="Rename this folder">${icon('edit')}</button>
       <button type="button" class="btn icon" data-act="delete" title="Delete this folder">${icon('trash')}</button>`}
@@ -101,6 +109,7 @@ function paintPane(p) {
       <span class="check-box" data-act="all" title="Select all"></span>
       <input type="search" placeholder="Filter" value="${esc(p.filter)}" autocomplete="off" spellcheck="false">
       <span class="pane-count"></span>
+      <button type="button" class="btn icon sm" data-act="delete-marked" title="Delete selected (Del)" hidden>${icon('trash')}</button>
     </div>
     <ul class="pane-list" role="listbox" aria-multiselectable="true"></ul>`;
   el.querySelector('input').addEventListener('input', (e) => {
@@ -144,6 +153,7 @@ function paintList(p) {
     html += `<li class="orow${p.marked.has(b.id) ? ' marked' : ''}" data-i="${i}" draggable="true" role="option">
       <span class="check-box">${icon('check')}</span>${favicon(b.url, b.title)}
       <div class="orow-main"><span class="orow-title">${esc(b.title || host || b.url)}</span><span class="orow-host">${esc(host)}</span></div>
+      <button type="button" class="btn icon edit-link" title="Edit (e)" draggable="false">${icon('edit')}</button>
       <a class="btn icon open-link" href="${esc(b.url)}" target="_blank" rel="noopener noreferrer" title="Open" draggable="false">${icon('ext')}</a></li>`;
   });
   if (!folders.length && !links.length) {
@@ -162,9 +172,11 @@ function paintCount(p) {
   if (f) parts.push(plural(f, 'folder'));
   if (m) parts.push(`${m} of ${n}`);
   p.el.querySelector('.pane-count').textContent = parts.length ? parts.join(' · ') : plural(n, 'link');
+  const all = m + f === n + p.folders.length;
   const box = p.el.querySelector('[data-act="all"]');
-  box.className = 'check-box' + (m && m === n ? ' on' : m ? ' some' : '');
-  box.innerHTML = m && m === n ? icon('check') : '';
+  box.className = 'check-box' + (m + f && all ? ' on' : m + f ? ' some' : '');
+  box.innerHTML = m + f && all ? icon('check') : '';
+  p.el.querySelector('[data-act="delete-marked"]').hidden = !(m + f);
   paintActions();
 }
 
@@ -230,11 +242,40 @@ async function moveMarkedElsewhere(p) {
   return moveMarked(p, folder);
 }
 
+// Marked folders go with everything in them, after one question. A pane that
+// was showing one of them steps up to where it was.
 async function deleteMarked(p) {
   const ids = [...p.marked];
-  try {
-    await deleteLinks(ids, { before: () => p.marked.clear() });
-  } catch (err) { fail(err); }
+  const paths = [...p.markedFolders];
+  if (!paths.length) {
+    try {
+      await deleteLinks(ids, { before: () => p.marked.clear() });
+    } catch (err) { fail(err); }
+    return;
+  }
+  const gone = await askDeleteFolders(paths, ids).catch(fail);
+  if (!gone) return;
+  p.marked.clear();
+  p.markedFolders.clear();
+  for (const q of Object.values(panes)) {
+    const hit = paths.find((f) => q.path === f || q.path.startsWith(f + '/'));
+    if (hit) q.path = store.parentOf(hit);
+  }
+  save();
+  paintAll();
+}
+
+// Everything the pane lists, folders and links; again, when all of it is
+// already marked, clears it.
+function markAll(p) {
+  const all = p.marked.size + p.markedFolders.size === p.links.length + p.folders.length;
+  p.marked.clear();
+  p.markedFolders.clear();
+  if (!all) {
+    for (const b of p.links) p.marked.add(b.id);
+    for (const f of p.folders) p.markedFolders.add(f);
+  }
+  paintList(p);
 }
 
 // Ctrl toggles one folder; Shift marks the run from the last one toggled.
@@ -269,6 +310,7 @@ function wirePane(p) {
       if (path != null) openFolder(path, p.id);
       return;
     }
+    if (act === 'new-link') { openEditor(null, { folder: p.path }); return; }
     if (act === 'new') {
       const made = await askNewFolder(p.path);
       if (made) paintPane(p);
@@ -297,13 +339,8 @@ function wirePane(p) {
       }
       return;
     }
-    if (act === 'all') {
-      if (p.marked.size === p.links.length) p.marked.clear();
-      else for (const b of p.links) p.marked.add(b.id);
-      for (let i = 0; i < p.links.length; i++) paintRow(p, i);
-      paintCount(p);
-      return;
-    }
+    if (act === 'all') { markAll(p); return; }
+    if (act === 'delete-marked') { deleteMarked(p); return; }
 
     const crumb = e.target.closest('.crumbs [data-folder]');
     if (crumb) { openFolder(crumb.dataset.folder, p.id); return; }
@@ -319,6 +356,7 @@ function wirePane(p) {
     const i = Number(row.dataset.i);
     const b = p.links[i];
     if (e.target.closest('.open-link')) { store.registerOpen(b.id); return; }
+    if (e.target.closest('.edit-link')) { openEditor(b); return; }
     if (e.shiftKey && p.anchor >= 0) {
       const [a, z] = p.anchor < i ? [p.anchor, i] : [i, p.anchor];
       for (let k = a; k <= z; k++) { p.marked.add(p.links[k].id); paintRow(p, k); }
@@ -396,15 +434,76 @@ export function onKey(e, typing) {
   }
   if (typing) return false;
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a') {
-    for (const b of p.links) p.marked.add(b.id);
-    paintList(p);
+    const all = p.marked.size + p.markedFolders.size === p.links.length + p.folders.length;
+    if (!all) markAll(p);
     return true;
   }
   if (e.key === 'ArrowRight' && !e.ctrlKey && !e.metaKey && !e.altKey) { send('a'); return true; }
   if (e.key === 'ArrowLeft' && !e.ctrlKey && !e.metaKey && !e.altKey) { send('b'); return true; }
   if (e.key === 'Delete' || e.key === 'Backspace') { deleteMarked(p); return true; }
   if (e.key === 'm') { moveMarkedElsewhere(p); return true; }
+  if (e.key === 'n' && !e.ctrlKey && !e.metaKey && !e.altKey) { openEditor(null, { folder: p.path }); return true; }
+  if ((e.key === 'e' && !e.ctrlKey && !e.metaKey && !e.altKey) || e.key === 'F2') {
+    if (p.marked.size !== 1) return false;
+    const b = store.get([...p.marked][0]);
+    if (b) openEditor(b);
+    return Boolean(b);
+  }
   return false;
+}
+
+/* ---------------- pasting ---------------- */
+
+// What on the clipboard reads as links: one per line, with or without the
+// scheme. A line with a space in it is prose, not a link, and is passed over.
+export function linksIn(text) {
+  const out = [];
+  for (const raw of String(text || '').split(/\r?\n/)) {
+    const s = raw.trim();
+    if (!s || /\s/.test(s)) continue;
+    const url = /^[a-z][a-z0-9+.-]*:\/\//i.test(s) ? s : `https://${s}`;
+    let u;
+    try { u = new URL(url); } catch { continue; }
+    if (!/^https?:$/.test(u.protocol)) continue;
+    if (!u.hostname.includes('.') && u.hostname !== 'localhost') continue;
+    if (!out.includes(url)) out.push(url);
+  }
+  return out;
+}
+
+// The links go into the folder of the pane in focus, saved at once with the URL
+// alone. One already filed there is not filed twice.
+
+// The title follows: reading the page takes a moment and may fail, and neither
+// should hold the save. A title typed in the meantime wins.
+async function fillTitle(b) {
+  try {
+    const r = await api(`/api/title?url=${encodeURIComponent(b.url)}`);
+    const now = store.get(b.id);
+    if (r.title && now && !now.title) await store.update(b.id, { title: r.title });
+  } catch { /* the link is saved; the title was a nicety */ }
+}
+
+export async function onPaste(e) {
+  const p = panes[focused];
+  const urls = linksIn(e.clipboardData?.getData('text/plain'));
+  if (!urls.length) { toast('Nothing to paste: the clipboard holds no link'); return; }
+  e.preventDefault();
+  const here = new Set(store.inFolder(p.path).map((b) => b.url));
+  const fresh = urls.filter((u) => !here.has(u));
+  if (!fresh.length) {
+    toast(urls.length === 1 ? `Already in ${folderLabel(p.path)}` : `All of them are already in ${folderLabel(p.path)}`);
+    return;
+  }
+  try {
+    const made = [];
+    for (const url of fresh) made.push(await store.create({ url, folder: p.path }));
+    for (const b of made) fillTitle(b);
+    toast(`Added ${made.length === 1 ? hostOf(fresh[0]) : plural(made.length, 'link')} to ${folderLabel(p.path)}`, {
+      action: 'Undo',
+      onAction: () => store.removeMany(made.map((b) => b.id)).catch(fail),
+    });
+  } catch (err) { fail(err); }
 }
 
 /* ---------------- lifecycle ---------------- */

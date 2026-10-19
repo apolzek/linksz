@@ -26,6 +26,7 @@ const { open } = require('./db');
 const { search } = require('../web/search');
 const { newAccessKey, hashKey, newToken } = require('./auth');
 const portability = require('./portability');
+const { titleFor } = require('./titles');
 
 const WEB_DIR = path.join(__dirname, '..', 'web');
 const MIME = {
@@ -191,7 +192,9 @@ function buildInfo() {
   return buildInfoCache;
 }
 
-function createApp(dbPath) {
+// `titles` reaches titleFor: the tests use it to let the title fetcher read a
+// page served on loopback, which it refuses everywhere else.
+function createApp(dbPath, { titles = {} } = {}) {
   const db = open(dbPath);
 
   // Several writes as one: a batch of 900 moves is one commit instead of 900,
@@ -488,16 +491,15 @@ function createApp(dbPath) {
       const stamp = new Date().toISOString().slice(0, 10);
 
       const renderers = {
-        // Only the YAML carries the empty folders. The HTML is a browser's
-        // format and browsers drop an empty <DL> on import, and the JSON is a
-        // flat list of bookmarks with nowhere to put a folder that has none.
+        // The YAML and the JSON carry the empty folders. The HTML is a
+        // browser's format, and browsers drop an empty <DL> on import.
         yaml: () => [portability.toYaml(items, {
           user: user.name,
           folders: q.allFolders.all(user.id).map((f) => f.path),
         }), 'application/yaml; charset=utf-8', `bookmarks-${stamp}.yaml`],
         html: () => [portability.toNetscapeHtml(items),
           'text/html; charset=utf-8', `bookmarks-${stamp}.html`],
-        json: () => [portability.toJson(items),
+        json: () => [portability.toJson(items, { folders: q.allFolders.all(user.id).map((f) => f.path) }),
           'application/json; charset=utf-8', `bookmarks-${stamp}.json`],
       };
       if (!renderers[format]) return json(res, 400, { error: 'format must be yaml, html or json' });
@@ -696,6 +698,15 @@ function createApp(dbPath) {
       // LIKE with the separator attached, so `dev` does not also match `devops`.
       const { moved, folders } = tx(() => moveBranch(user.id, from, target));
       return json(res, 200, { moved, folders, from, to: target });
+    },
+
+    // A title for a link that came without one: the page's own, or failing
+    // that the one in its address. Slow by nature, so the app asks after the
+    // link is already saved, and nothing here writes.
+    'GET /api/title': async (req, res, user, url) => {
+      const target = String(url.searchParams.get('url') || '').trim();
+      if (!/^https?:\/\//i.test(target)) return json(res, 400, { error: 'url must be http or https' });
+      return json(res, 200, await titleFor(target, titles));
     },
 
     // The folders written down, which is not the whole tree: the app unions

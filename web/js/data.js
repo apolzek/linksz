@@ -71,9 +71,18 @@ function paintPlan(plan) {
 
   $('#io-warn').hidden = !r.remove;
   if (r.remove) $('#io-warn').textContent = `${plural(r.remove, 'link')} in the vault ${r.remove === 1 ? 'is' : 'are'} not in the file and will be removed.`;
+  // A greyed-out button with no reason reads as broken: say why there is
+  // nothing to press, and what would make a difference.
+  const changes = r.create || r.update || r.remove;
+  $('#io-none').hidden = Boolean(changes);
+  if (!changes) {
+    $('#io-none').textContent = mode() === 'replace'
+      ? 'Every link in the file is already here, and nothing else is in the vault.'
+      : 'Every link in the file is already in the vault, exactly as it is. Nothing to import.';
+  }
   const btn = $('#io-apply');
-  btn.disabled = !(r.create || r.update || r.remove);
-  btn.textContent = r.remove ? 'Replace the vault' : 'Import';
+  btn.disabled = !changes;
+  btn.textContent = !changes ? 'Nothing to import' : r.remove ? 'Replace the vault' : 'Import';
   btn.className = r.remove ? 'btn danger' : 'btn primary';
   $('#io-plan').hidden = false;
 }
