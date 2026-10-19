@@ -9,6 +9,8 @@
  *   js/tree.js       the folder tree in the sidebar
  *   js/editor.js     the link form
  *   js/activity.js, js/data.js, js/settings.js   the other three pages
+ *   js/audit.js      the audit page: link changes and clicks
+ *   js/clicklog.js   records every click and sends them in batches
  * search.js is a classic script shared with the server, loaded before this.
  */
 
@@ -21,6 +23,8 @@ import * as tree from './js/tree.js';
 import * as activity from './js/activity.js';
 import * as data from './js/data.js';
 import * as settings from './js/settings.js';
+import * as audit from './js/audit.js';
+import * as clicklog from './js/clicklog.js';
 import { openEditor, initEditor } from './js/editor.js';
 import { linkFromAddress, sameLink, TEMP_FOLDER } from './js/address.js';
 
@@ -32,6 +36,7 @@ const ROUTES = {
   links: { view: '#view-links', show: () => links.show() },
   organize: { view: '#view-organize', show: () => organize.show() },
   activity: { view: '#view-activity', show: () => activity.show() },
+  audit: { view: '#view-audit', show: () => audit.show() },
   data: { view: '#view-data', show: () => {} },
   settings: { view: '#view-settings', show: () => settings.show() },
 };
@@ -93,6 +98,7 @@ function onKey(e) {
   if (e.key === 'F2' || cmd('e')) { e.preventDefault(); links.editCursor(); return; }
   if (cmd('m')) { e.preventDefault(); links.moveSelected(); return; }
   if (cmd('x')) { e.preventDefault(); links.toggleCursorMark(); return; }
+  if (cmd('g')) { e.preventDefault(); links.toggleMode(); return; }
   if (cmd('n')) { e.preventDefault(); openEditor(null, { folder: links.getScope() || '' }); return; }
   // Delete on its own is the forward-delete of a text field.
   if (e.key === 'Delete' && (!typing || e.ctrlKey || e.metaKey)) { e.preventDefault(); links.deleteSelected(); return; }
@@ -334,6 +340,8 @@ function registerServiceWorker() {
   organize.init();
   activity.init();
   data.init();
+  audit.init();
+  clicklog.init();
   tree.init({
     current: () => {
       const route = document.body.dataset.route;

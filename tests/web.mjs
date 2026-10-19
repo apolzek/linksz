@@ -267,6 +267,38 @@ await sleep(800);
 all = (await server('/api/bookmarks')).items;
 is(all.filter((b) => b.folder === 'moved/here').length, 0, 'undo puts each one back where it was');
 
+/* ---------------- by folder ---------------- */
+group('the list by folder');
+const groups = () => ev("[...document.querySelectorAll('#list .group')].map((g) => g.dataset.folder + ':' + g.querySelector('.group-n').textContent)");
+const rows = () => ev("document.querySelectorAll('#list .row').length");
+await click('#list-mode [data-mode="folders"]');
+is(await groups(), ['pasta/1:1', 'pasta/2:1', 'pasta/3:1', 'web/new:1'], 'every link under a heading for its folder, in order');
+is(await rows(), 4, 'with all the rows still there');
+is(await text('#count'), '4 links', 'the count is the same list');
+await click('#list .group[data-folder="pasta/1"] .group-toggle');
+is([await rows(), await ev("document.querySelector('#list .group[data-folder=\"pasta/1\"]').classList.contains('collapsed')")],
+  [3, true], 'a heading folds its folder away');
+await ev("document.activeElement.blur()");
+await key('a', 'KeyA', 65, CTRL);
+is(await text('#sel-count'), '3 selected', 'and Ctrl+A leaves what is folded alone');
+await key('Escape', 'Escape', 27);
+await click('#groups-fold');
+is([await rows(), await text('#groups-fold')], [0, 'Expand all'], 'collapse all folds them all, headings kept');
+await click('#groups-fold');
+is([await rows(), await text('#groups-fold')], [4, 'Collapse all'], 'expand all opens every folder');
+await click('#q');
+await type('bookmark 2');
+await sleep(200);
+is(await groups(), ['pasta/2:1'], 'a search keeps only the folders it found something in');
+await key('Escape', 'Escape', 27);
+await click('#list .group[data-folder="web/new"] [data-act="group-scope"]');
+is(await text('#scope span'), 'web/new', 'Open narrows the list to that folder');
+await click('#scope button');
+await ev("document.activeElement.blur()");
+await letter('g');
+is([await ev("document.querySelectorAll('#list .group').length"), await rows()], [0, 4], 'g goes back to the plain list');
+is(await ev("localStorage.getItem('bookmarks_list_mode')"), 'flat', 'and the choice is remembered');
+
 /* ---------------- organize ---------------- */
 group('organize');
 await go('#/organize');
@@ -556,6 +588,45 @@ is((await server('/api/folders')).folders.some((f) => f.path === 'curated/empty'
 await ev(`fetch('/api/folders/delete', { method: 'POST', headers: { 'content-type': 'application/json',
   authorization: 'Bearer ' + localStorage.getItem('bookmarks_token') }, body: JSON.stringify({ path: 'curated' }) })`);
 await sleep(300);
+
+/* ---------------- audit ---------------- */
+group('the audit log');
+const auditRows = () => ev("[...document.querySelectorAll('#audit-rows tr')].map((r) => [...r.cells].map((c) => c.innerText.trim()))");
+await click('.nav a[data-route="audit"]');
+await sleep(900);
+is(await ev("document.body.dataset.route"), 'audit', 'the sidebar opens the audit log');
+let arows = await auditRows();
+is(arows.length > 0 && arows.every((r) => /^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d$/.test(r[0])), true, 'every change has its date and time to the second');
+await click('#audit-q');
+await type('Made in the browser');
+await sleep(700);
+is((await auditRows()).map((r) => r[1]), ['Moved', 'Moved', 'Restored', 'Deleted', 'Added'],
+  'a link\'s whole history, newest first: added, deleted, undone, moved and moved back');
+await ev("(() => { const i = document.querySelector('#audit-q'); i.value = ''; i.dispatchEvent(new Event('input')); })()");
+await sleep(500);
+await click('#audit-action [data-action="move"]');
+await sleep(600);
+arows = await auditRows();
+is(arows.length > 0 && arows.every((r) => r[1] === 'Moved' && r[3].includes('→')), true, 'moves only, each with where from and where to');
+await click('#audit-action [data-action="edit"]');
+await sleep(600);
+arows = await auditRows();
+is(arows.length > 0 && arows.every((r) => r[1] === 'Edited'), true, 'edits only');
+is(arows.some((r) => /Title/.test(r[3]) && r[3].includes('→')), true, 'with the field and its value before and after');
+
+await click('#audit-tab [data-tab="clicks"]');
+await sleep(900);
+arows = await auditRows();
+is(arows[0]?.slice(1, 3), ['#/audit', 'Clicks'], 'the clicks tab starts with the click that opened it');
+is(arows.some((r) => r[2] === 'Audit log' && r[3].includes('a')), true, 'and the click on the sidebar before it');
+is(arows.some((r) => r[1] === '#/organize'), true, 'clicks on every page are there');
+is(await hidden('#audit-action'), true, 'the action filter is for link changes only');
+await click('#audit-q');
+await type('organize');
+await sleep(700);
+arows = await auditRows();
+is(arows.length > 0 && arows.every((r) => (r.join(' ')).toLowerCase().includes('organize')), true, 'the filter narrows the clicks');
+is(await ev("document.querySelector('#audit-rows').innerHTML.includes('do-vault')"), false, 'nothing typed was recorded, only clicks');
 
 /* ---------------- leaving ---------------- */
 group('settings: saving from anywhere');

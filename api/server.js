@@ -20,6 +20,7 @@ const http = require('node:http');
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
+const { AsyncLocalStorage } = require('node:async_hooks');
 const { execFileSync } = require('node:child_process');
 
 const { open } = require('./db');
@@ -27,6 +28,7 @@ const { search } = require('../web/search');
 const { newAccessKey, hashKey, newToken } = require('./auth');
 const portability = require('./portability');
 const { titleFor } = require('./titles');
+const audit = require('./audit');
 
 const WEB_DIR = path.join(__dirname, '..', 'web');
 const MIME = {
@@ -142,6 +144,15 @@ function ancestry(path) {
 // Usage counters arriving from a client. Never negative, never fractional:
 // they are merged with MAX and a bogus value would stick forever.
 const DAY = 86400000;
+
+// The part of the app a write came through, as the audit trail names it.
+// Anything not listed is the app itself: the form, a move, a delete, a sync.
+const VIA = {
+  'POST /api/import': 'import',
+  'POST /api/folders/move': 'folder',
+  'POST /api/folders/rename': 'folder',
+  'POST /api/folders/delete': 'folder',
+};
 // How far back the log is kept. Long enough for "the last week" to always be
 // complete, short enough that it stays a recent history.
 const OPENS_LOG_DAYS = 30;
@@ -313,7 +324,31 @@ function createApp(dbPath, { titles = {} } = {}) {
       SELECT * FROM folders
       WHERE user_id = ? AND deleted = 0 AND (path = ? OR path LIKE ? ESCAPE '\\')`),
     burnFolder: db.prepare('UPDATE folders SET deleted = 1, updated_at = ? WHERE user_id = ? AND path = ?'),
+    logChange: db.prepare(`
+      INSERT INTO audit_log (user_id, at, action, bookmark_id, title, url, folder, changes, via)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+    logClick: db.prepare('INSERT INTO click_log (user_id, at, route, label, target, href) VALUES (?, ?, ?, ?, ?, ?)'),
+    pruneClicks: db.prepare('DELETE FROM click_log WHERE user_id = ? AND at < ?'),
   };
+
+  // Which part of the app a write came through, for the audit trail. Set once
+  // per request by the dispatcher and read wherever the write lands, however
+  // many awaits away.
+  const requestVia = new AsyncLocalStorage();
+
+  function recordChange(userId, before, after, ts) {
+    const what = audit.describeChange(before, after);
+    if (!what) return;
+    q.logChange.run(userId, ts, what.action, after.id, after.title, after.url, after.folder,
+      JSON.stringify(what.changes), requestVia.getStore() || '');
+  }
+
+  // Deleting, logged. Every deletion in the API goes through here.
+  function buryBookmark(userId, id, ts = now()) {
+    const before = q.getOne.get(userId, id);
+    q.softDelete.run(ts, userId, id);
+    recordChange(userId, before, q.getOne.get(userId, id), ts);
+  }
 
   function bearer(req) {
     const m = /^Bearer\s+(.+)$/i.exec(req.headers.authorization || '');
@@ -362,6 +397,7 @@ function createApp(dbPath, { titles = {} } = {}) {
     const created = existing ? existing.created_at : (Number(b.created_at) > 0 ? Number(b.created_at) : ts);
     const buried = !revive && existing?.deleted === 1;
 
+    const before = existing;
     q.upsert.run(
       id, userId,
       str(b.title, 500), str(b.url, 2000),
@@ -370,7 +406,9 @@ function createApp(dbPath, { titles = {} } = {}) {
       created, updated, (buried || b.deleted) ? 1 : 0,
       counter(b.opens), counter(b.last_open_at),
     );
-    return q.getOne.get(userId, id);
+    const after = q.getOne.get(userId, id);
+    recordChange(userId, before, after, ts);
+    return after;
   }
 
   // Records a folder and the way down to it. Idempotent: a path that is
@@ -592,7 +630,7 @@ function createApp(dbPath, { titles = {} } = {}) {
           writeBookmark(user.id, { ...incoming, updated_at: stamp }, ts);
         }
         for (const { incoming } of plan.update) writeBookmark(user.id, { ...incoming, updated_at: ts }, ts);
-        for (const { current } of plan.remove) q.softDelete.run(ts, user.id, current.id);
+        for (const { current } of plan.remove) buryBookmark(user.id, current.id, ts);
 
         // Folders travel outside the plan. There is nothing to decide about one:
         // a folder in the file either is already on the tree or is written down,
@@ -657,7 +695,7 @@ function createApp(dbPath, { titles = {} } = {}) {
         for (const id of ids) {
           const row = q.getOne.get(user.id, id);
           if (!row || row.deleted) continue;
-          q.softDelete.run(ts, user.id, id);
+          buryBookmark(user.id, id, ts);
           deleted += 1;
         }
       });
@@ -770,7 +808,7 @@ function createApp(dbPath, { titles = {} } = {}) {
       const ts = now();
       const { rows, branch } = tx(() => {
         const rows = q.inFolder.all(user.id, path, like);
-        for (const row of rows) q.softDelete.run(ts, user.id, row.id);
+        for (const row of rows) buryBookmark(user.id, row.id, ts);
         const branch = q.folderBranch.all(user.id, path, like);
         for (const row of branch) q.burnFolder.run(ts, user.id, row.path);
         return { rows, branch };
@@ -811,6 +849,47 @@ function createApp(dbPath, { titles = {} } = {}) {
     },
 
     // Two-way sync: the client sends what changed locally and gets back what changed here.
+    // The audit trail. Newest first, a page at a time: `before` is the id of
+    // the last row already shown.
+    'GET /api/audit/changes': async (req, res, user, url) => {
+      const { before, limit, like } = auditPage(url);
+      const action = url.searchParams.get('action') || '';
+      if (action && !audit.ACTIONS.includes(action)) return json(res, 400, { error: `invalid action: ${action}` });
+      const rows = db.prepare(`
+        SELECT id, at, action, bookmark_id, title, url, folder, changes, via FROM audit_log
+        WHERE user_id = ? AND id < ? ${action ? 'AND action = ?' : ''}
+          ${like ? "AND (title LIKE ? ESCAPE '\\' OR url LIKE ? ESCAPE '\\' OR folder LIKE ? ESCAPE '\\' OR changes LIKE ? ESCAPE '\\')" : ''}
+        ORDER BY id DESC LIMIT ?`)
+        .all(user.id, before, ...(action ? [action] : []), ...(like ? [like, like, like, like] : []), limit + 1);
+      const items = rows.slice(0, limit).map((r) => ({ ...r, changes: JSON.parse(r.changes || '{}') }));
+      return json(res, 200, { items, next: rows.length > limit ? items[items.length - 1].id : null });
+    },
+
+    'GET /api/audit/clicks': async (req, res, user, url) => {
+      const { before, limit, like } = auditPage(url);
+      const rows = db.prepare(`
+        SELECT id, at, route, label, target, href FROM click_log
+        WHERE user_id = ? AND id < ?
+          ${like ? "AND (label LIKE ? ESCAPE '\\' OR route LIKE ? ESCAPE '\\' OR target LIKE ? ESCAPE '\\' OR href LIKE ? ESCAPE '\\')" : ''}
+        ORDER BY id DESC LIMIT ?`)
+        .all(user.id, before, ...(like ? [like, like, like, like] : []), limit + 1);
+      const items = rows.slice(0, limit);
+      return json(res, 200, { items, next: rows.length > limit ? items[items.length - 1].id : null });
+    },
+
+    'POST /api/audit/clicks': async (req, res, user) => {
+      const b = await readBody(req);
+      if (!Array.isArray(b.clicks)) return json(res, 400, { error: 'clicks must be a list' });
+      if (b.clicks.length > audit.CLICK_BATCH) return json(res, 400, { error: `at most ${audit.CLICK_BATCH} clicks at a time` });
+      const ts = now();
+      const clicks = b.clicks.map((c) => audit.normClick(c, ts)).filter(Boolean);
+      tx(() => {
+        for (const c of clicks) q.logClick.run(user.id, c.at, c.route, c.label, c.target, c.href);
+        q.pruneClicks.run(user.id, ts - audit.CLICK_DAYS * DAY);
+      });
+      return json(res, 200, { saved: clicks.length });
+    },
+
     'POST /api/sync': async (req, res, user) => {
       const b = await readBody(req);
       const since = Number(b.since) || 0;
@@ -826,6 +905,13 @@ function createApp(dbPath, { titles = {} } = {}) {
       return json(res, 200, { changes, folders, now: ts, pushed: pushed.length });
     },
   };
+
+  function auditPage(url) {
+    const before = Number(url.searchParams.get('before')) || Number.MAX_SAFE_INTEGER;
+    const limit = Math.min(Math.max(Number(url.searchParams.get('limit')) || 100, 1), 500);
+    const text = String(url.searchParams.get('q') || '').trim().slice(0, 200);
+    return { before, limit, like: text ? `%${escapeLike(text)}%` : '' };
+  }
 
   function handleBookmarkId(method, id, req, res, user) {
     // Rows with deleted=1 are tombstones (they exist only for sync); to the REST
@@ -845,7 +931,7 @@ function createApp(dbPath, { titles = {} } = {}) {
     }
     if (method === 'DELETE') {
       if (!live()) return json(res, 404, { error: 'not found' });
-      q.softDelete.run(now(), user.id, id);
+      buryBookmark(user.id, id);
       return json(res, 200, { ok: true });
     }
     if (method === 'GET') {
@@ -925,10 +1011,13 @@ function createApp(dbPath, { titles = {} } = {}) {
       // Named routes first: otherwise `POST /api/bookmarks/open` would be read
       // as a bookmark whose id is "open".
       const handler = routes[key];
-      if (handler) return await handler(req, res, user, url);
+      const via = VIA[key] || 'app';
+      if (handler) return await requestVia.run(via, () => handler(req, res, user, url));
 
       const idMatch = /^\/api\/bookmarks\/([^/]+)$/.exec(pathname);
-      if (idMatch) return await handleBookmarkId(req.method, decodeURIComponent(idMatch[1]), req, res, user);
+      if (idMatch) {
+        return await requestVia.run(via, () => handleBookmarkId(req.method, decodeURIComponent(idMatch[1]), req, res, user));
+      }
 
       return json(res, 404, { error: 'route not found' });
     } catch (err) {

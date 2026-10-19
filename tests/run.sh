@@ -30,6 +30,9 @@ node --test tests/yaml.test.js tests/portability.test.js tests/titles.test.js
 heading "backend, api and pwa (node:test)"
 node --test tests/api.test.js
 
+heading "audit trail: link changes and clicks (node:test)"
+node --test tests/audit.test.js
+
 if want --web; then
   heading "web: the app in a browser"
   bash tests/web.sh

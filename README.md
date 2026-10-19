@@ -48,11 +48,12 @@ front of `web:80`.
 
 ## The web UI
 
-Five pages, in the sidebar (and under the thumb on a phone):
+Six pages, in the sidebar (and under the thumb on a phone):
 
     All links         the search box and the list
     Organize          two folders side by side, for moving links between them
     Activity          opens per day, the most opened links, the recent ones
+    Audit log         every change to a link, and every click, with when
     Import & export   backups and bringing links in
     Settings          theme, the vault's name, saving from anywhere, the key,
                       signing out
@@ -65,6 +66,21 @@ edit, `m` move, `x` select, Del delete; in the search box, Alt plus the same
 letter. Ctrl+click and Shift+click select like a file manager (on a phone,
 press and hold), Ctrl+A selects everything listed, and the bar that appears
 moves or deletes the lot. Deleting and moving can be undone from the toast.
+The switch above the list, or `g`, shows the same results by folder: a heading
+per folder with its count, which folds its links away, and Open on the heading
+narrows the list to it. Search, selection and the keys work the same way in
+both; what is folded away is not selected.
+
+**Audit log.** Two lists, newest first, each with the date and time to the
+second. *Link changes* is every link added, edited, moved, deleted or
+restored, whichever way it happened: the form, a move, an import, a folder
+renamed, another device's sync. An edit shows each field before and after, a
+move where from and where to, and each row says what it came through (app,
+import, folder). The server works these out by comparing a link before and
+after each write, so no route can forget to log, and an open counted logs
+nothing. *Clicks* is everything clicked in the app, on every page: what it
+said, which element, where. Only clicks, never what was typed. Clicks are
+sent in batches and kept for 90 days; link changes are kept.
 
 **Organize.** One folder on each side. Click links to select them (Shift for a
 run, the box at the top for all), then the arrow between the panes, or the
@@ -241,7 +257,7 @@ skipped.
 ## Tests
 
     bash tests/run.sh              api, search, YAML, import/export, the address
-                                   bar and the theme
+                                   bar, the theme and the audit trail
     bash tests/run.sh --web        adds the app in headless Chrome
     bash tests/run.sh --compose    adds the two containers behind nginx
     bash tests/run.sh --all        both

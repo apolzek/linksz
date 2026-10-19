@@ -163,6 +163,37 @@ function open(dbPath = defaultDbPath()) {
     );
 
     CREATE INDEX IF NOT EXISTS idx_opens_when ON opens_log(user_id, at);
+
+    -- What happened to each link: created, edited, moved, deleted, restored.
+    -- The title, url and folder are copied in, so a row still reads after the
+    -- link itself is gone. \`changes\` is JSON, { field: [before, after] }.
+    CREATE TABLE IF NOT EXISTS audit_log (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      at          INTEGER NOT NULL,
+      action      TEXT NOT NULL,
+      bookmark_id TEXT NOT NULL,
+      title       TEXT NOT NULL DEFAULT '',
+      url         TEXT NOT NULL DEFAULT '',
+      folder      TEXT NOT NULL DEFAULT '',
+      changes     TEXT NOT NULL DEFAULT '{}',
+      via         TEXT NOT NULL DEFAULT ''
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_audit_user ON audit_log(user_id, id);
+
+    -- Every click in the app, as the app reports it, in batches.
+    CREATE TABLE IF NOT EXISTS click_log (
+      id      INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      at      INTEGER NOT NULL,
+      route   TEXT NOT NULL DEFAULT '',
+      label   TEXT NOT NULL DEFAULT '',
+      target  TEXT NOT NULL DEFAULT '',
+      href    TEXT NOT NULL DEFAULT ''
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_click_user ON click_log(user_id, id);
   `);
 
   migrateUsersToKeys(db);

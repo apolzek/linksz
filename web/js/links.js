@@ -13,6 +13,7 @@ import {
 import { openEditor } from './editor.js';
 
 const PAGE = 40;
+const MODE_KEY = 'bookmarks_list_mode';
 
 const view = {
   query: '',
@@ -24,7 +25,17 @@ const view = {
   anchor: -1,
   lastVersion: -1,
   needles: [],
+  // 'flat' is one ranked list; 'folders' is the same results under a heading
+  // per folder. What is drawn is `items`: a row is its index in `results`, a
+  // heading is { folder, n, collapsed }. `pos` maps a row to its item.
+  mode: 'flat',
+  collapsed: new Set(),
+  groups: [],
+  items: [],
+  pos: [],
 };
+
+try { if (localStorage.getItem(MODE_KEY) === 'folders') view.mode = 'folders'; } catch { /* flat */ }
 
 const list = () => $('#list');
 
@@ -42,6 +53,31 @@ export function setQuery(q) {
   $('#q').value = q;
   view.query = q;
   view.cursor = -1;
+  refresh({ reset: true });
+}
+
+export function getMode() {
+  return view.mode;
+}
+
+export function setMode(mode) {
+  view.mode = mode === 'folders' ? 'folders' : 'flat';
+  try { localStorage.setItem(MODE_KEY, view.mode); } catch { /* this tab only */ }
+  view.cursor = -1;
+  refresh({ reset: true });
+}
+
+export function toggleMode() {
+  setMode(view.mode === 'folders' ? 'flat' : 'folders');
+}
+
+function toggleGroup(folder) {
+  if (view.collapsed.has(folder)) view.collapsed.delete(folder); else view.collapsed.add(folder);
+  refresh();
+}
+
+function setAllGroups(collapse) {
+  view.collapsed = collapse ? new Set(view.groups.map((g) => g.folder)) : new Set();
   refresh({ reset: true });
 }
 
@@ -70,6 +106,7 @@ export function refresh({ reset = false } = {}) {
   const S = globalThis.BookmarksSearch;
   const pool = view.scope === null ? store.all() : store.all().filter(inScope);
   view.results = S.search(pool, view.query, pool.length || 1);
+  arrange();
   view.needles = needlesOf(view.query);
   view.lastVersion = store.version();
 
@@ -85,6 +122,59 @@ export function refresh({ reset = false } = {}) {
   paint(keep);
   if (reset) $('#view-links').scrollTop = 0;
   paintMeta();
+}
+
+const byFolder = (a, b) => (a === '') - (b === '') || a.localeCompare(b, undefined, { sensitivity: 'base' });
+
+// In folder mode the results are regrouped, each folder keeping the search's
+// own order inside it, and a collapsed folder keeps its heading and count but
+// gives up its rows: what is not drawn cannot be marked, moved or deleted.
+function arrange() {
+  if (view.mode !== 'folders') {
+    view.groups = [];
+    view.items = view.results.map((_, i) => i);
+    view.pos = view.items.slice();
+    return;
+  }
+  const buckets = new Map();
+  for (const b of view.results) {
+    const f = b.folder || '';
+    if (!buckets.has(f)) buckets.set(f, []);
+    buckets.get(f).push(b);
+  }
+  view.groups = [...buckets.keys()].sort(byFolder).map((folder) => ({
+    folder, n: buckets.get(folder).length, collapsed: view.collapsed.has(folder),
+  }));
+  view.results = [];
+  view.items = [];
+  view.pos = [];
+  for (const g of view.groups) {
+    view.items.push(g);
+    if (g.collapsed) continue;
+    for (const b of buckets.get(g.folder)) {
+      view.pos.push(view.items.length);
+      view.items.push(view.results.length);
+      view.results.push(b);
+    }
+  }
+}
+
+function groupHTML(g) {
+  const cut = g.folder.lastIndexOf('/');
+  const name = g.folder
+    ? `${cut > 0 ? `<span class="group-parent">${esc(g.folder.slice(0, cut + 1))}</span>` : ''}${esc(g.folder.slice(cut + 1))}`
+    : 'Unfiled';
+  return `<li class="group${g.collapsed ? ' collapsed' : ''}" data-folder="${esc(g.folder)}" role="presentation">
+    <button type="button" class="group-toggle" data-act="group" aria-expanded="${!g.collapsed}" title="${g.collapsed ? 'Show' : 'Hide'} these links">
+      ${icon('chev-down', 'group-chev')}${icon(g.folder ? 'folder' : 'inbox')}<span class="group-name">${name}</span><span class="group-n">${g.n.toLocaleString()}</span>
+    </button>
+    <button type="button" class="btn link sm" data-act="group-scope" title="Show only this folder">Open</button>
+  </li>`;
+}
+
+function itemHTML(k) {
+  const it = view.items[k];
+  return typeof it === 'number' ? rowHTML(view.results[it], it) : groupHTML(it);
 }
 
 function rowHTML(b, i) {
@@ -113,10 +203,11 @@ function rowHTML(b, i) {
 
 function paint(upTo) {
   const ul = list();
-  view.shown = Math.min(upTo, view.results.length);
+  view.shown = Math.min(upTo, view.items.length);
   let html = '';
-  for (let i = 0; i < view.shown; i++) html += rowHTML(view.results[i], i);
+  for (let k = 0; k < view.shown; k++) html += itemHTML(k);
   ul.innerHTML = html;
+  ul.classList.toggle('grouped', view.mode === 'folders');
   ul.classList.toggle('selecting', view.marked.size > 0);
   appendMore();
   paintEmpty();
@@ -125,10 +216,11 @@ function paint(upTo) {
 function appendMore() {
   const ul = list();
   ul.querySelector('.more')?.remove();
-  if (view.shown >= view.results.length) return;
+  if (view.shown >= view.items.length) return;
   const li = document.createElement('li');
   li.className = 'more';
-  li.textContent = `Show more (${(view.results.length - view.shown).toLocaleString()} left)`;
+  const left = view.items.slice(view.shown).filter((it) => typeof it === 'number').length;
+  li.textContent = left ? `Show more (${left.toLocaleString()} left)` : 'Show more folders';
   li.onclick = showMore;
   ul.append(li);
   observer.observe(li);
@@ -137,9 +229,9 @@ function appendMore() {
 function showMore() {
   const ul = list();
   const from = view.shown;
-  view.shown = Math.min(view.shown + PAGE, view.results.length);
+  view.shown = Math.min(view.shown + PAGE, view.items.length);
   let html = '';
-  for (let i = from; i < view.shown; i++) html += rowHTML(view.results[i], i);
+  for (let k = from; k < view.shown; k++) html += itemHTML(k);
   ul.querySelector('.more')?.remove();
   ul.insertAdjacentHTML('beforeend', html);
   appendMore();
@@ -153,7 +245,7 @@ const observer = new IntersectionObserver((entries) => {
 
 function paintEmpty() {
   const empty = $('#empty');
-  if (view.results.length) { empty.hidden = true; return; }
+  if (view.items.length) { empty.hidden = true; return; }
   empty.hidden = false;
   if (!store.count()) {
     empty.innerHTML = '<b>No links yet</b>Save your first one, or bring them in from a browser.'
@@ -180,6 +272,12 @@ function paintMeta() {
     scope.querySelector('button').onclick = () => setScope(null);
   }
   $('#q').placeholder = view.scope === null ? `Search ${plural(total, 'link')}` : 'Search this folder';
+  for (const b of document.querySelectorAll('#list-mode button')) b.classList.toggle('on', b.dataset.mode === view.mode);
+  const fold = $('#groups-fold');
+  fold.hidden = view.mode !== 'folders' || view.groups.length < 2;
+  const allShut = view.groups.length && view.groups.every((g) => g.collapsed);
+  fold.textContent = allShut ? 'Expand all' : 'Collapse all';
+  fold.dataset.collapse = String(!allShut);
   paintSelbar();
 }
 
@@ -282,7 +380,7 @@ export function moveCursor(delta) {
   const prev = view.cursor;
   const next = Math.min(Math.max((prev < 0 && delta > 0 ? -1 : prev) + delta, 0), view.results.length - 1);
   view.cursor = next;
-  while (next >= view.shown) showMore();
+  while (view.pos[next] >= view.shown) showMore();
   paintRow(prev);
   paintRow(next);
   list().querySelector(`[data-i="${next}"]`)?.scrollIntoView({ block: 'nearest' });
@@ -323,6 +421,13 @@ export function init() {
   const ul = list();
 
   ul.addEventListener('click', (e) => {
+    const group = e.target.closest('.group');
+    if (group) {
+      const act = e.target.closest('[data-act]')?.dataset.act;
+      if (act === 'group') toggleGroup(group.dataset.folder);
+      else if (act === 'group-scope') setScope(group.dataset.folder);
+      return;
+    }
     const li = e.target.closest('.row');
     if (!li) return;
     const i = Number(li.dataset.i);
@@ -383,6 +488,8 @@ export function init() {
   ul.addEventListener('dragend', (e) => e.target.closest?.('.row')?.classList.remove('dragging'));
 
   $('#btn-new').onclick = () => openEditor(null, { folder: view.scope || '' });
+  for (const b of document.querySelectorAll('#list-mode button')) b.onclick = () => setMode(b.dataset.mode);
+  $('#groups-fold').onclick = (e) => setAllGroups(e.currentTarget.dataset.collapse === 'true');
   $('#btn-syntax').onclick = () => { $('#syntax').hidden = !$('#syntax').hidden; };
   $('#sel-clear').onclick = clearMarks;
   $('#sel-edit').onclick = () => { const b = store.get([...view.marked][0]); if (b) openEditor(b); };

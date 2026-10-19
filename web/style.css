@@ -332,6 +332,10 @@ input[type="checkbox"], input[type="radio"] { width: auto; accent-color: var(--a
 .scope svg { width: 14px; height: 14px; }
 
 .list-meta { display: flex; align-items: center; justify-content: space-between; padding: 2px 4px 8px; font-size: 12.5px; }
+.list-meta { flex-wrap: wrap; gap: 6px; }
+.list-tools { display: flex; align-items: center; gap: 10px; }
+.segmented.sm { padding: 2px; }
+.segmented.sm button { padding: 3px 10px; font-size: 12.5px; }
 .syntax {
   display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 10px 12px; margin-bottom: 10px;
   background: var(--surface); border: 1px solid var(--border); border-radius: 0; font-size: 12.5px;
@@ -404,6 +408,26 @@ mark { background: var(--mark); color: inherit; border-radius: 0; padding: 0 1px
 .row-actions { display: flex; gap: 2px; opacity: 0; transition: opacity 0.1s; }
 .row:hover .row-actions, .row.cursor .row-actions { opacity: 1; }
 .row-actions .btn.icon { width: 30px; height: 30px; }
+
+/* By folder: a heading over each folder's rows. */
+.group {
+  display: flex; align-items: center; gap: 8px;
+  padding: 0 10px 0 4px; min-height: 38px; border-top: 1px solid var(--border);
+  background: var(--surface-2);
+}
+.group:first-child { border-top: 0; }
+.group-toggle {
+  flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; padding: 8px 6px;
+  border: 0; background: none; color: var(--text); font: inherit; font-weight: 600; text-align: left; cursor: pointer;
+}
+.group-toggle svg { flex: none; width: 15px; height: 15px; color: var(--muted); }
+.group-chev { transition: transform 0.12s; }
+.group.collapsed .group-chev { transform: rotate(-90deg); }
+.group-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.group-parent { color: var(--muted); font-weight: 400; }
+.group-n { flex: none; color: var(--muted); font-weight: 400; font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.group .btn.link { flex: none; }
+.list.grouped .row .chip[data-act="scope"] { display: none; }
 
 .more {
   display: block; width: 100%; padding: 12px; border: 0; border-top: 1px solid var(--border);
@@ -496,6 +520,39 @@ mark { background: var(--mark); color: inherit; border-radius: 0; padding: 0 1px
 .bar-day { font-size: 11px; color: var(--faint); margin-top: 5px; height: 14px; white-space: nowrap; }
 
 .plain-list { list-style: none; margin: 0; padding: 0; }
+/* ---------------- audit ---------------- */
+
+#view-audit .view-head { flex-wrap: wrap; }
+.audit-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 12px; }
+.audit-tools input { flex: 1; min-width: 180px; }
+.audit-wrap { overflow-x: auto; background: var(--surface); border: 1px solid var(--border); }
+.audit-wrap:has(table[hidden]) { display: none; }
+.audit { width: 100%; border-collapse: collapse; font-size: 13px; }
+.audit th {
+  position: sticky; top: 0; text-align: left; font-weight: 600; font-size: 12px; color: var(--muted);
+  padding: 8px 10px; background: var(--surface-2); white-space: nowrap;
+}
+.audit td { padding: 8px 10px; border-top: 1px solid var(--border); vertical-align: top; }
+.aud-when { white-space: nowrap; font-variant-numeric: tabular-nums; color: var(--muted); }
+.aud-link { max-width: 320px; }
+.aud-link a { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 550; }
+.aud-link a:hover { color: var(--accent-text); }
+.aud-link .muted { font-size: 12px; }
+.aud-detail { min-width: 200px; overflow-wrap: anywhere; }
+.aud-field + .aud-field { margin-top: 3px; }
+.aud-field b { font-weight: 600; margin-right: 4px; }
+.aud-from { color: var(--muted); text-decoration: line-through; text-decoration-color: var(--faint); }
+.aud-to { color: var(--text); }
+.aud-route, .aud-via { white-space: nowrap; }
+.aud-target code { font-size: 12px; }
+.aud-badge {
+  display: inline-block; padding: 1px 7px; font-size: 12px; font-weight: 600; white-space: nowrap;
+  background: var(--surface-2); color: var(--text);
+}
+.aud-create, .aud-restore { background: var(--accent-soft); color: var(--accent-text); }
+.aud-delete { background: var(--danger-soft); color: var(--danger); }
+#audit-more { margin-top: 12px; }
+
 .plain-list li { display: flex; align-items: center; gap: 10px; padding: 7px 0; border-top: 1px solid var(--border); font-size: 13.5px; }
 .plain-list li:first-child { border-top: 0; }
 .plain-list .grow { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
