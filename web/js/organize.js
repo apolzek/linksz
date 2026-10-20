@@ -146,7 +146,7 @@ function paintList(p) {
     html += `<li class="orow folder up" data-folder="${esc(up)}" title="Up to ${esc(folderLabel(up))}">${icon('up')}<div class="orow-main"><span class="orow-title muted">${esc(up ? store.nameOf(up) : 'All folders')}</span></div></li>`;
   }
   folders.forEach((f, i) => {
-    html += `<li class="orow folder${p.markedFolders.has(f) ? ' marked' : ''}" data-folder="${esc(f)}" data-fi="${i}" draggable="true">${icon('folder')}<div class="orow-main"><span class="orow-title">${esc(store.nameOf(f))}</span></div><span class="pane-count">${t.total(f)}</span>${icon('chev')}</li>`;
+    html += `<li class="orow folder${p.markedFolders.has(f) ? ' marked' : ''}" data-folder="${esc(f)}" data-fi="${i}" draggable="true"><span class="check-box" data-mark-folder>${icon('check')}</span>${icon('folder')}<div class="orow-main"><span class="orow-title">${esc(store.nameOf(f))}</span></div><span class="pane-count">${t.total(f)}</span>${icon('chev')}</li>`;
   });
   links.forEach((b, i) => {
     const host = hostOf(b.url);
@@ -347,7 +347,8 @@ function wirePane(p) {
 
     const row = e.target.closest('.orow');
     if (!row) return;
-    if (row.dataset.fi != null && (e.ctrlKey || e.metaKey || (e.shiftKey && p.folderAnchor >= 0))) {
+    // The box marks a folder the way Ctrl+click does; the rest of the row opens it.
+    if (row.dataset.fi != null && (e.target.closest('[data-mark-folder]') || e.ctrlKey || e.metaKey || (e.shiftKey && p.folderAnchor >= 0))) {
       markFolder(p, Number(row.dataset.fi), e.shiftKey);
       return;
     }

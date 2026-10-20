@@ -1,11 +1,26 @@
 /* Bookmarks, in the look of omarchy.org: Tokyo Night when dark, Catppuccin
-   Latte when light, square corners, a 1px ring where a shadow would be, and
-   JetBrains Mono for everything. Light or dark follows the system unless the
-   person picks one. */
+   Latte when light, square corners, a 1px ring where a shadow would be, Oxygen
+   for text and JetBrains Mono for code and keys. Light or dark follows the
+   system unless the person picks one. */
 
-/* JetBrains Mono, variable weight, latin. SIL Open Font License: fonts/OFL.txt.
-   Shipped with the app so it looks the same offline and on a phone that does
-   not have it. */
+/* Both faces are shipped with the app so it looks the same offline and on a
+   phone that does not have them. Latin only, SIL Open Font License:
+   fonts/OFL-Oxygen.txt and fonts/OFL.txt. Oxygen comes in 400 and 700; the
+   weights in between resolve to one of the two. */
+@font-face {
+  font-family: "Oxygen";
+  src: url("/fonts/oxygen-400.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Oxygen";
+  src: url("/fonts/oxygen-700.woff2") format("woff2");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
 @font-face {
   font-family: "JetBrains Mono Variable";
   src: url("/fonts/jetbrains-mono.woff2") format("woff2-variations"), url("/fonts/jetbrains-mono.woff2") format("woff2");
@@ -39,7 +54,7 @@
   --radius-sm: 0;
   --side-w: 272px;
   --mono: "JetBrains Mono Variable", "JetBrains Mono", "JetBrainsMono Nerd Font", ui-monospace, Menlo, Consolas, monospace;
-  --font: var(--mono);
+  --font: "Oxygen", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
 
   color-scheme: light;
 }
@@ -180,6 +195,18 @@ input[type="checkbox"], input[type="radio"] { width: auto; accent-color: var(--a
   padding: 5px 12px; border-radius: 0; cursor: pointer;
 }
 .segmented button.on { background: var(--accent); color: var(--on-accent); }
+.palettes-label { margin: 18px 0 8px; }
+.palettes { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 6px; }
+.palettes button {
+  display: flex; align-items: center; gap: 8px; padding: 6px 8px; min-width: 0;
+  border: 1px solid var(--border); background: var(--surface); color: var(--text);
+  font: inherit; font-size: 12.5px; text-align: left; cursor: pointer;
+}
+.palettes button:hover { background: var(--hover); }
+.palettes button.on { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.palettes button > span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.swatch { display: inline-flex; flex: none; box-shadow: 0 0 0 1px var(--border-strong); }
+.swatch i { width: 10px; height: 18px; }
 .segmented.wide { display: flex; width: 100%; margin-bottom: 12px; }
 .segmented.wide button { flex: 1; display: flex; flex-direction: column; padding: 8px; }
 .segmented small { font-weight: 400; font-size: 12px; color: var(--muted); }
@@ -254,10 +281,6 @@ input[type="checkbox"], input[type="radio"] { width: auto; accent-color: var(--a
 }
 .side-top { display: flex; align-items: center; justify-content: space-between; padding: 0 6px 14px; }
 .brand { display: flex; align-items: center; gap: 10px; font-weight: 650; font-size: 15px; }
-.sync { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); transition: background 0.2s; }
-.sync.saving, .sync.syncing { background: var(--accent); animation: pulse 1s infinite; }
-.sync.offline { background: var(--danger); }
-@keyframes pulse { 50% { opacity: 0.3; } }
 
 .nav { display: flex; flex-direction: column; gap: 1px; }
 .nav a {
@@ -320,6 +343,21 @@ input[type="checkbox"], input[type="radio"] { width: auto; accent-color: var(--a
 .search-icon { color: var(--faint); }
 .search-kbd { font-size: 11px; }
 .search:focus-within .search-kbd { display: none; }
+.history-wrap { position: relative; flex: none; }
+.search-history {
+  position: absolute; right: 0; top: calc(100% + 6px); z-index: 30; width: min(360px, calc(100vw - 32px));
+  max-height: 60vh; overflow: auto; background: var(--surface); box-shadow: var(--shadow-lg);
+}
+.search-history-head { display: flex; align-items: center; justify-content: space-between; padding: 8px 10px; border-bottom: 1px solid var(--border); }
+.search-history ul { list-style: none; margin: 0; padding: 4px 0; }
+.search-history li button {
+  display: flex; width: 100%; align-items: baseline; gap: 10px; padding: 7px 10px;
+  border: 0; background: transparent; color: var(--text); font: inherit; text-align: left; cursor: pointer;
+}
+.search-history li button:hover, .search-history li button:focus-visible { background: var(--hover); outline: none; }
+.search-history .q { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.search-history time { flex: none; font-size: 12px; color: var(--faint); font-variant-numeric: tabular-nums; }
+.search-history .empty-history { padding: 10px; color: var(--muted); font-size: 12.5px; }
 .search.small { height: 38px; margin: 0 0 8px; }
 .scope {
   display: inline-flex; align-items: center; gap: 4px; max-width: 45%;

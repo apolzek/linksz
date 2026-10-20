@@ -645,7 +645,7 @@ test('the PWA assets exist and are served', async () => {
   const esperados = [
     '/manifest.webmanifest', '/sw.js', '/icon.svg',
     '/icon-192.png', '/icon-512.png', '/icon-maskable-512.png', '/apple-touch-icon.png',
-    '/style.css', '/app.js', '/search.js',
+    '/style.css', '/themes.css', '/app.js', '/search.js',
   ];
   // Every module the shell imports has to be precached, or the app opens
   // offline to a blank page missing one of them.
@@ -659,10 +659,12 @@ test('the PWA assets exist and are served', async () => {
   }
 });
 
-test('the font is served as a font', async () => {
-  const res = await fetch(base + '/fonts/jetbrains-mono.woff2');
-  assert.equal(res.status, 200);
-  assert.equal(res.headers.get('content-type'), 'font/woff2');
+test('the fonts are served as fonts', async () => {
+  for (const font of ['oxygen-400.woff2', 'oxygen-700.woff2', 'jetbrains-mono.woff2']) {
+    const res = await fetch(base + '/fonts/' + font);
+    assert.equal(res.status, 200, font);
+    assert.equal(res.headers.get('content-type'), 'font/woff2', font);
+  }
 });
 
 test('the manifest has the content-type the browser requires', async () => {
@@ -874,6 +876,24 @@ test('BOOKMARKS_DEV_KEY makes one known vault, idempotently', () => {
 });
 
 /* ---------------- usage ranking ---------------- */
+
+test('the last click is kept to the second, and moves with every click', async () => {
+  const created = await call('POST', '/api/bookmarks', { token, body: { url: 'https://quando.example', title: 'quando' } });
+  const id = created.body.item.id;
+  assert.equal(created.body.item.last_open_at, 0, 'never clicked');
+
+  const before = Date.now();
+  const first = await call('POST', '/api/bookmarks/open', { token, body: { id } });
+  const after = Date.now();
+  const t1 = first.body.item.last_open_at;
+  assert.ok(t1 >= before && t1 <= after, 'the moment of the click, in milliseconds');
+
+  await new Promise((r) => setTimeout(r, 1100));
+  await call('POST', '/api/bookmarks/open', { token, body: { id } });
+  const got = await call('GET', `/api/bookmarks/${id}`, { token });
+  assert.ok(got.body.item.last_open_at - t1 >= 1000, 'the second click replaces the first');
+});
+
 
 test('opening a bookmark counts, and the count survives a sync', async () => {
   const created = await call('POST', '/api/bookmarks', {

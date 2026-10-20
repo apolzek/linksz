@@ -185,3 +185,13 @@ until the pipeline publishes arm64:
 
 A change under `web/` needs `docker compose up -d --build web`: the PWA is
 baked into the image, not mounted.
+
+## On Omarchy
+
+    bash omarchy/install.sh            add Bookmarks to the app menu
+    bash omarchy/install.sh --remove   take it out again
+
+It installs a web app with `omarchy-webapp-install`, pointed at
+`http://localhost:$BOOKMARKS_WEB_PORT` and using the app's own icon, so it
+opens in its own window from the app menu (Super+Alt+Space). The stack still
+has to be running.

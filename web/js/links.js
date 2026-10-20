@@ -7,10 +7,11 @@
 
 import * as store from './store.js';
 import {
-  $, esc, icon, favicon, highlight, hostOf, plural, folderLabel,
+  $, esc, icon, favicon, highlight, hostOf, plural, folderLabel, stamp,
   startLinkDrag, moveLinks, deleteLinks, pickFolder, fail,
 } from './ui.js';
 import { openEditor } from './editor.js';
+import * as searchlog from './searchlog.js';
 
 const PAGE = 40;
 const MODE_KEY = 'bookmarks_list_mode';
@@ -191,6 +192,7 @@ function rowHTML(b, i) {
         <button type="button" class="chip" data-act="scope" title="Show only this folder">${icon(b.folder ? 'folder' : 'inbox')}<span>${esc(folderLabel(b.folder))}</span></button>
         ${tags.map((t) => `<span class="tag" data-tag="${esc(t)}">#${esc(t)}</span>`).join('')}
         ${b.opens > 0 ? `<span class="opens" title="Opened ${b.opens} times">${b.opens}×</span>` : ''}
+        ${b.last_open_at > 0 ? `<time class="opens last-open" datetime="${new Date(b.last_open_at).toISOString()}" title="Last opened">${stamp(b.last_open_at)}</time>` : ''}
       </div>
     </div>
     <div class="row-actions">
@@ -398,7 +400,51 @@ export function toggleCursorMark() {
   toggleMark(view.cursor);
 }
 
+/* ---------------- search history ---------------- */
+
+const historyOpen = () => !$('#search-history').hidden;
+
+function showHistory(open) {
+  $('#search-history').hidden = !open;
+  $('#btn-history').setAttribute('aria-expanded', String(open));
+  if (!open) return;
+  const list = searchlog.load();
+  $('#history-list').innerHTML = list.length
+    ? list.map((e, i) => `<li><button type="button" data-h="${i}"><span class="q">${esc(e.q)}</span><time datetime="${new Date(e.at).toISOString()}">${stamp(e.at)}</time></button></li>`).join('')
+    : '<li class="empty-history">No searches yet.</li>';
+  $('#history-clear').hidden = !list.length;
+}
+
+function initHistory() {
+  const q = $('#q');
+  // A search is kept once the typing stops, or when it is acted on.
+  let timer = 0;
+  q.addEventListener('input', () => {
+    clearTimeout(timer);
+    timer = setTimeout(() => searchlog.add(q.value), 1500);
+  });
+  q.addEventListener('keydown', (e) => { if (e.key === 'Enter') searchlog.add(q.value); });
+  list().addEventListener('click', () => searchlog.add(q.value), true);
+
+  $('#btn-history').addEventListener('click', () => showHistory(!historyOpen()));
+  $('#history-clear').addEventListener('click', () => { searchlog.clear(); showHistory(true); });
+  $('#history-list').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-h]');
+    if (!b) return;
+    const entry = searchlog.load()[Number(b.dataset.h)];
+    showHistory(false);
+    if (!entry) return;
+    searchlog.add(entry.q);
+    setQuery(entry.q);
+    q.focus();
+  });
+  document.addEventListener('click', (e) => {
+    if (historyOpen() && !e.target.closest('.history-wrap')) showHistory(false);
+  });
+}
+
 export function onEscape() {
+  if (historyOpen()) { showHistory(false); return true; }
   if (clearMarks()) return true;
   if ($('#q').value) { setQuery(''); return true; }
   if (view.scope !== null) { setScope(null); return true; }
@@ -408,6 +454,7 @@ export function onEscape() {
 /* ---------------- wiring ---------------- */
 
 export function init() {
+  initHistory();
   const q = $('#q');
   let frame = 0;
   q.addEventListener('input', () => {

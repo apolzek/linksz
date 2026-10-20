@@ -18,6 +18,7 @@ api/        backend: HTTP, SQLite, import/export. Node built-ins only, no deps
 web/        the PWA, and the nginx image that serves it
 docs/       how to run it
 tests/      one suite for all of it: bash tests/run.sh
+omarchy/    adds it to the Omarchy app menu: bash omarchy/install.sh
 ```
 
 It runs in containers, and only there: `docker compose up -d --build`, then

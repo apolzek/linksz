@@ -3,6 +3,8 @@
 
 import * as store from './store.js';
 
+export { stamp } from './stamp.js';
+
 export const $ = (s, root = document) => root.querySelector(s);
 export const $$ = (s, root = document) => [...root.querySelectorAll(s)];
 

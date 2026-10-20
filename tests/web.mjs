@@ -184,6 +184,50 @@ await key('ArrowDown', 'ArrowDown', 40);
 await key('ArrowDown', 'ArrowDown', 40);
 is(await ev("document.querySelector('.row.cursor')?.dataset.i"), '1', 'the arrows move a cursor through the list');
 
+group('search history');
+await key('Escape', 'Escape', 27);
+await click('#q');
+await type('bookmark 3');
+await sleep(1800);
+await key('Escape', 'Escape', 27);
+await click('#btn-history');
+is(await hidden('#search-history'), false, 'the history button opens the list');
+is(await ev("[...document.querySelectorAll('#history-list .q')].map((e) => e.textContent)"), ['bookmark 3'],
+  'with the search once the typing stopped, and not the single letters');
+is(/^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d$/.test(await text('#history-list time')), true, 'and when it was made, to the second');
+await click('#history-list [data-h="0"]');
+is([await ev("document.querySelector('#q').value"), await text('#count'), await hidden('#search-history')],
+  ['bookmark 3', '1 of 3 links', true], 'picking one runs it again and closes the list');
+await key('Escape', 'Escape', 27);
+await click('#btn-history');
+await key('Escape', 'Escape', 27);
+is(await hidden('#search-history'), true, 'Esc closes the list');
+await click('#btn-history');
+await click('#history-clear');
+is(await text('#history-list'), 'No searches yet.', 'and Clear empties it');
+await click('#view-links .list-meta');
+is(await hidden('#search-history'), true, 'a click elsewhere closes it');
+
+group('the last click');
+// Through the store, as a click does: a real click would open a tab.
+const opened = (await server('/api/bookmarks')).items.find((b) => b.title === 'Bookmark 3').id;
+await ev(`(async () => {
+  (await import('/js/store.js')).registerOpen(${q(opened)});
+  await new Promise((r) => setTimeout(r, 800));
+})()`);
+const last = (await server('/api/bookmarks')).items.find((b) => b.id === opened);
+is(last.last_open_at > Date.now() - 60_000, true, 'the server keeps the moment of the click');
+is(await ev(`document.querySelector('#list .row time.last-open')?.getAttribute('datetime')`), new Date(last.last_open_at).toISOString(),
+  'and the row shows it');
+is(/^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d$/.test(await text('#list .row time.last-open')), true, 'to the second');
+await key('Escape', 'Escape', 27);
+
+group('the look');
+is(await ev("getComputedStyle(document.body).fontFamily.split(',')[0].replace(/\"/g, '')"), 'Oxygen', 'text is set in Oxygen');
+is(await ev("document.fonts.ready.then(() => document.fonts.check('15px Oxygen'))"), true, 'and the face is loaded');
+is(await ev("getComputedStyle(document.querySelector('kbd')).fontFamily.includes('JetBrains Mono')"), true, 'keys stay in the mono face');
+is(await ev("document.querySelector('#sync')"), null, 'no sync dot in the sidebar');
+
 /* ---------------- the folder list ---------------- */
 group('the folder list');
 await click('#tree .node[data-folder="pasta"] .node-name');
@@ -360,6 +404,15 @@ await sleep(1000);
 all = (await server('/api/bookmarks')).items;
 is([all.some((b) => b.folder === 'pasta/1'), all.some((b) => b.folder === 'pasta/3'), all.some((b) => b.folder === 'web/1' || b.folder === 'web/3')],
   [true, true, false], 'one undo puts all of them back');
+await ev("(async () => { const o = await import('/js/organize.js'); o.openFolder('pasta', 'a'); })()");
+await sleep(300);
+is(await ev("[...document.querySelectorAll('#pane-a .orow.folder[data-fi]')].every((li) => li.querySelector('.check-box use')?.getAttribute('href') === '#i-check')"),
+  true, 'folder rows have a check box, like links');
+await click('#pane-a .orow[data-folder="pasta/1"] .check-box');
+is([await text('#pane-a .pane-folder span'), await ev(runOf)], ['pasta', ['pasta/1']], 'clicking the box marks the folder instead of opening it');
+await click('#pane-a .orow[data-folder="pasta/1"] .check-box');
+is(await ev(runOf), [], 'and clicking it again unmarks it');
+is(await ev("document.querySelector('#view-organize .titles p')"), null, 'no instructions above the panes');
 await ev("(async () => { const o = await import('/js/organize.js'); o.openFolder('pasta/1', 'a'); o.openFolder('pasta/2', 'b'); })()");
 await sleep(300);
 
@@ -636,6 +689,17 @@ is(await ev("document.querySelector('#bookmarklet').getAttribute('href')"), `jav
   'and the bookmarklet opens it in front of the page');
 await click('#bookmarklet');
 is(await lastToast(), 'Drag it to the bookmarks bar', 'clicking it here explains instead of running it');
+
+group('settings: the omarchy themes');
+is(await ev("document.querySelectorAll('#palettes button').length"), 23, 'every omarchy theme is offered');
+await click('#palettes [data-theme="nord"]');
+is([await ev('document.documentElement.dataset.theme'), await ev("localStorage.getItem('bookmarks_theme')"),
+  await ev('getComputedStyle(document.body).backgroundColor')], ['nord', 'nord', 'rgb(46, 52, 64)'], 'picking one paints the page in it, and is remembered');
+is(await ev("[...document.querySelectorAll('#theme button.on, #palettes button.on')].map((b) => b.dataset.theme)"), ['nord'], 'and it alone is shown as chosen');
+await click('#palettes [data-theme="catppuccin-latte"]');
+is(await ev('getComputedStyle(document.body).backgroundColor'), 'rgb(239, 241, 245)', 'a light one works the same');
+await click('#theme [data-theme="auto"]');
+is([await ev('document.documentElement.dataset.theme ?? null'), await ev("localStorage.getItem('bookmarks_theme')")], [null, 'auto'], 'System goes back to following the system');
 
 group('signing out');
 await click('#btn-signout');

@@ -13,6 +13,8 @@ const path = require('node:path');
 const WEB = path.join(__dirname, '..', 'web');
 const css = fs.readFileSync(path.join(WEB, 'style.css'), 'utf8');
 const sw = fs.readFileSync(path.join(WEB, 'sw.js'), 'utf8');
+const themesCss = fs.readFileSync(path.join(WEB, 'themes.css'), 'utf8');
+const index = fs.readFileSync(path.join(WEB, 'index.html'), 'utf8');
 
 // The declarations of one rule, as a map. Only for the token blocks, which
 // hold nothing but custom properties.
@@ -63,15 +65,20 @@ test('corners are square, and only dots are round', () => {
   assert.equal(light['--radius-sm'], '0');
 });
 
-test('the font ships with the app and is there offline', () => {
-  const src = /@font-face\s*\{[^}]*url\("([^"]+)"\)/.exec(css);
-  assert.ok(src, 'no @font-face');
-  const file = path.join(WEB, src[1]);
-  assert.ok(fs.existsSync(file), `${src[1]} is missing`);
-  assert.equal(fs.readFileSync(file).subarray(0, 4).toString(), 'wOF2', 'not a woff2 file');
-  assert.ok(sw.includes(`'${src[1]}'`), `sw.js does not precache ${src[1]}`);
-  assert.ok(fs.existsSync(path.join(WEB, 'fonts', 'OFL.txt')), 'the font licence travels with it');
-  assert.match(light['--font'], /--mono/, 'everything is set in the mono face');
+test('the fonts ship with the app and are there offline', () => {
+  const srcs = [...css.matchAll(/@font-face\s*\{[^}]*url\("([^"]+)"\)/g)].map((m) => m[1]);
+  assert.ok(srcs.length, 'no @font-face');
+  for (const src of srcs) {
+    const file = path.join(WEB, src);
+    assert.ok(fs.existsSync(file), `${src} is missing`);
+    assert.equal(fs.readFileSync(file).subarray(0, 4).toString(), 'wOF2', `${src} is not a woff2 file`);
+    assert.ok(sw.includes(`'${src}'`), `sw.js does not precache ${src}`);
+  }
+  for (const licence of ['OFL.txt', 'OFL-Oxygen.txt']) {
+    assert.ok(fs.existsSync(path.join(WEB, 'fonts', licence)), `${licence} travels with the fonts`);
+  }
+  assert.match(light['--font'], /^"Oxygen"/, 'text is set in Oxygen');
+  assert.match(light['--mono'], /JetBrains Mono/, 'code and keys are set in JetBrains Mono');
 });
 
 /* ---------------- legible text ---------------- */
@@ -96,5 +103,36 @@ for (const [name, theme] of [['light', light], ['dark', darkByChoice]]) {
   test(`segmented captions read in ${name}, chosen or not`, () => {
     assert.ok(contrast(theme['--on-accent'], theme['--accent']) >= 4.5, 'on the accent');
     assert.ok(contrast(theme['--muted'], theme['--surface-2']) >= 4.5, 'on the track');
+  });
+}
+
+/* ---------------- the omarchy palettes ---------------- */
+
+const palettes = {};
+for (const m of themesCss.matchAll(/:root\[data-theme="([\w-]+)"\]\s*\{([^{}]*)\}/g)) palettes[m[1]] = tokens(m[2]);
+
+test('Settings offers exactly the palettes themes.css defines', async () => {
+  const { PALETTES } = await import(path.join(WEB, 'js', 'themes.js'));
+  assert.deepEqual(PALETTES.map((p) => p.name).sort(), Object.keys(palettes).sort());
+  assert.ok(PALETTES.length >= 20, 'the omarchy themes are there');
+  for (const p of PALETTES) {
+    assert.deepEqual(p.swatch, [palettes[p.name]['--bg'], palettes[p.name]['--accent'], palettes[p.name]['--text']], `${p.name} swatch`);
+    assert.match(themesCss, new RegExp(`data-theme="${p.name}"\\][^}]*color-scheme: ${p.dark ? 'dark' : 'light'}`), `${p.name} color-scheme`);
+  }
+});
+
+test('the palettes are loaded, offline too, and applied before the first paint', () => {
+  assert.match(index, /<link rel="stylesheet" href="\/themes.css">/);
+  assert.ok(sw.includes("'/themes.css'"), 'sw.js does not precache themes.css');
+  assert.match(index, /if \(t && t !== 'auto'\) document.documentElement.dataset.theme = t/);
+});
+
+for (const [name, theme] of Object.entries(palettes)) {
+  test(`palette ${name} sets every colour and reads`, () => {
+    const colours = Object.keys(light).filter((k) => !['--radius', '--radius-sm', '--side-w', '--mono', '--font'].includes(k));
+    assert.deepEqual(Object.keys(theme).sort(), colours.sort());
+    assert.ok(contrast(theme['--text'], theme['--bg']) >= 7, 'text on the page');
+    assert.ok(contrast(theme['--on-accent'], theme['--accent']) >= 4.5, 'on the accent');
+    assert.ok(contrast(theme['--muted'], theme['--surface-2']) >= 4.5, 'muted on the track');
   });
 }

@@ -5,15 +5,18 @@ import { api } from './http.js';
 import * as store from './store.js';
 import { $, $$, plural, toast, fail, confirmDialog } from './ui.js';
 import { bookmarklet } from './address.js';
+import { PALETTES } from './themes.js';
 
 const THEME_KEY = 'bookmarks_theme';
 
+// 'auto', 'light', 'dark', or the name of one of the omarchy palettes.
 export function applyTheme(name) {
   const root = document.documentElement;
-  if (name === 'light' || name === 'dark') root.dataset.theme = name;
-  else delete root.dataset.theme;
+  if (!['light', 'dark', ...PALETTES.map((p) => p.name)].includes(name)) name = 'auto';
+  if (name === 'auto') delete root.dataset.theme;
+  else root.dataset.theme = name;
   try { localStorage.setItem(THEME_KEY, name); } catch { /* this tab only */ }
-  for (const b of $$('#theme button')) b.classList.toggle('on', b.dataset.theme === (name || 'auto'));
+  for (const b of $$('#theme button, #palettes button')) b.classList.toggle('on', b.dataset.theme === name);
   // The bar colour of an installed app follows the page.
   requestAnimationFrame(() => {
     const bg = getComputedStyle(document.body).backgroundColor;
@@ -43,8 +46,10 @@ export function init(opts) {
   signOut = opts.signOut;
   let saved = 'auto';
   try { saved = localStorage.getItem(THEME_KEY) || 'auto'; } catch { /* default */ }
+  $('#palettes').innerHTML = PALETTES.map((p) => `<button type="button" data-theme="${p.name}" title="${p.label}">
+      <span class="swatch">${p.swatch.map((c) => `<i style="background:${c}"></i>`).join('')}</span><span>${p.label}</span></button>`).join('');
   applyTheme(saved);
-  for (const b of $$('#theme button')) b.onclick = () => applyTheme(b.dataset.theme);
+  for (const b of $$('#theme button, #palettes button')) b.onclick = () => applyTheme(b.dataset.theme);
   window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => applyTheme(localStorage.getItem(THEME_KEY) || 'auto'));
 
   $('#vault-form').onsubmit = async (e) => {

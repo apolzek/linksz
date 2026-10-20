@@ -382,9 +382,6 @@ function registerServiceWorker() {
   fetch('/api/health', { cache: 'no-store' }).then((r) => r.json()).then((b) => settings.showBuild(b.build)).catch(() => {});
 
   store.onStatus((s) => {
-    const dot = $('#sync');
-    dot.className = `sync ${s}`;
-    dot.title = { saving: 'Saving…', syncing: 'Syncing…', offline: 'Offline: changes wait for the server', synced: 'Up to date', idle: '' }[s] || '';
     // The session ended elsewhere (the key was rotated, or signed out).
     if (s === 'signed-out') signOut();
   });

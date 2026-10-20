@@ -12,13 +12,14 @@
 'use strict';
 
 // Bump this version whenever a shell file changes.
-const VERSION = 'v74';
+const VERSION = 'v75';
 const SHELL_CACHE = `bookmarks-shell-${VERSION}`;
 
 const SHELL = [
   '/',
   '/index.html',
   '/style.css',
+  '/themes.css',
   '/app.js',
   '/search.js',
   '/js/http.js',
@@ -33,11 +34,16 @@ const SHELL = [
   '/js/clicklog.js',
   '/js/data.js',
   '/js/settings.js',
+  '/js/searchlog.js',
+  '/js/stamp.js',
+  '/js/themes.js',
   '/js/address.js',
   '/manifest.webmanifest',
   '/icon.svg',
   '/icon-192.png',
   '/icon-512.png',
+  '/fonts/oxygen-400.woff2',
+  '/fonts/oxygen-700.woff2',
   '/fonts/jetbrains-mono.woff2',
 ];
 

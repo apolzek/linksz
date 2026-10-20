@@ -21,8 +21,8 @@ heading() { printf '\n\033[1m── %s %s\033[0m\n' "$1" "$(printf '─%.0s' $(s
 heading "search (node:test)"
 node --test tests/search.test.js
 
-heading "saving from the address bar, and the theme (node:test)"
-node --test tests/address.test.mjs tests/theme.test.js
+heading "saving from the address bar, the theme and the frontend units (node:test)"
+node --test tests/address.test.mjs tests/theme.test.js tests/frontend.test.mjs
 
 heading "yaml, import/export and link titles (node:test)"
 node --test tests/yaml.test.js tests/portability.test.js tests/titles.test.js
