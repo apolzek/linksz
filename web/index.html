@@ -362,6 +362,14 @@
           <a class="btn" id="bookmarklet" href="#" draggable="true">Save to Bookmarks</a></p>
       </section>
       <section class="card">
+        <div class="card-head"><h2>Devices</h2></div>
+        <p class="muted">Every browser and app signed in to this vault. Signing one out here
+          ends its session without touching the key.</p>
+        <ul class="devices" id="devices"></ul>
+        <p class="muted">The browser extension connects from its own popup: it opens this app,
+          which asks before giving it a session of its own.</p>
+      </section>
+      <section class="card">
         <div class="card-head"><h2>Access key</h2></div>
         <p class="muted">Generate a new key if this one may have leaked. The old key stops
           working at once and every other device is signed out.</p>

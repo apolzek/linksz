@@ -128,6 +128,12 @@ const text = (sel) => ev(`document.querySelector(${q(sel)})?.textContent ?? null
 const hidden = (sel) => ev(`(() => { const el = document.querySelector(${q(sel)}); return !el || el.hidden || el.closest('[hidden]') !== null; })()`);
 const lastToast = () => ev("[...document.querySelectorAll('.toast')].pop()?.innerText ?? ''");
 const go = async (hash) => { await ev(`location.hash = ${q(hash)}`); await sleep(400); };
+// Polls until `f` gives something truthy, or gives up and returns it anyway.
+const until = async (f, ms = 4000) => {
+  let v;
+  for (let t = 0; t < ms; t += 150) { if ((v = await f())) return v; await sleep(150); }
+  return v;
+};
 
 await sleep(2500);
 await cdp.send('Page.bringToFront');
@@ -689,6 +695,25 @@ is(await ev("document.querySelector('#bookmarklet').getAttribute('href')"), `jav
   'and the bookmarklet opens it in front of the page');
 await click('#bookmarklet');
 is(await lastToast(), 'Drag it to the bookmarks bar', 'clicking it here explains instead of running it');
+
+group('settings: devices');
+is(await until(() => ev("document.querySelectorAll('#devices li').length > 0")), true, 'Settings lists the devices signed in');
+is(await ev("[...document.querySelectorAll('#devices li')].filter((li) => li.querySelector('.badge')).length"), 1, 'and marks this one');
+const other = await ev(`fetch('/api/auth/key', { method: 'POST', headers: { 'content-type': 'application/json' },
+  body: JSON.stringify({ key: ${JSON.stringify(KEY)}, device: 'Old phone' }) }).then((r) => r.json()).then((r) => r.token)`);
+await go('#/links');
+await go('#/settings');
+is(await until(() => ev("[...document.querySelectorAll('#devices strong')].map((s) => s.textContent).includes('Old phone')")), true,
+  'a device that signs in shows up');
+await ev("[...document.querySelectorAll('#devices li')].find((li) => li.textContent.includes('Old phone')).querySelector('[data-revoke]').click()");
+await sleep(300);
+is(await text('#confirm-title'), 'Sign out Old phone?', 'signing one out asks first');
+await click('#confirm-yes');
+await sleep(600);
+is(await ev(`fetch('/api/me', { headers: { authorization: ${q('Bearer ' + other)} } }).then((r) => r.status)`), 401,
+  'and that device is out');
+is(await ev("[...document.querySelectorAll('#devices strong')].map((s) => s.textContent).includes('Old phone')"), false, 'and off the list');
+is(await hidden('#shell'), false, 'while this one stays in');
 
 group('settings: the omarchy themes');
 is(await ev("document.querySelectorAll('#palettes button').length"), 23, 'every omarchy theme is offered');

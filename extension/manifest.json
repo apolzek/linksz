@@ -1,0 +1,22 @@
+{
+  "manifest_version": 3,
+  "name": "Bookmarks",
+  "description": "Save the page you are on to your Bookmarks vault, and search it from the address bar.",
+  "version": "0.1.0",
+  "icons": { "16": "icons/icon-16.png", "32": "icons/icon-32.png", "48": "icons/icon-48.png", "128": "icons/icon-128.png" },
+  "action": {
+    "default_title": "Bookmarks",
+    "default_popup": "popup.html",
+    "default_icon": { "16": "icons/icon-16.png", "32": "icons/icon-32.png" }
+  },
+  "background": { "service_worker": "src/background.js", "type": "module" },
+  "options_page": "options.html",
+  "permissions": ["storage", "tabs", "contextMenus"],
+  "host_permissions": ["http://localhost/*", "http://127.0.0.1/*"],
+  "optional_host_permissions": ["http://*/*", "https://*/*"],
+  "externally_connectable": { "matches": ["http://localhost/*", "http://127.0.0.1/*"] },
+  "omnibox": { "keyword": "bm" },
+  "commands": {
+    "_execute_action": { "suggested_key": { "default": "Alt+Shift+B" }, "description": "Open the Bookmarks popup" }
+  }
+}

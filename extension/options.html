@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Bookmarks extension</title>
+<link rel="stylesheet" href="popup.css">
+</head>
+<body>
+<main style="max-width: 520px">
+  <h1><img src="icons/icon-32.png" alt="">Bookmarks extension</h1>
+  <div class="card">
+    <div><label>Server</label><div id="o-server"></div></div>
+    <div><label>Vault</label><div id="o-vault"></div></div>
+    <p class="note muted">The extension keeps a session token for this vault, never the access key.
+      The app lists it under Settings &gt; Devices, where it can be signed out.</p>
+  </div>
+  <div class="card">
+    <p class="note"><strong>Address bar:</strong> type <code>bm</code>, a space, then what you are looking for.</p>
+    <p class="note"><strong>Right click:</strong> “Save page to Bookmarks” or “Save link to Bookmarks” saves to Temporary.</p>
+    <p class="note"><strong>Popup:</strong> <kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>B</kbd>. A ✓ on the button means the page is saved already.</p>
+  </div>
+</main>
+<script type="module" src="options.js"></script>
+</body>
+</html>

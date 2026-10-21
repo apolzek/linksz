@@ -796,6 +796,36 @@ test('the static files carry no CORS header either', async () => {
   });
 });
 
+/* ---------------- sessions from before the hashes ---------------- */
+
+test('sessions that kept the token itself are hashed, and stay signed in', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bookmarks-plain-sessions-'));
+  const dbPath = path.join(dir, 'bookmarks.db');
+  try {
+    const { DatabaseSync } = require('node:sqlite');
+    const old = new DatabaseSync(dbPath);
+    old.exec(`
+      CREATE TABLE users (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL DEFAULT '', key_hash TEXT UNIQUE, created_at INTEGER NOT NULL);
+      CREATE TABLE sessions (token TEXT PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, created_at INTEGER NOT NULL);
+      INSERT INTO users VALUES (1, 'old', NULL, 1);
+      INSERT INTO sessions VALUES ('plain-token-1', 1, 5);
+    `);
+    old.close();
+    const legacy = createApp(dbPath);
+    const rows = legacy.db.prepare('SELECT * FROM sessions').all();
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].token, undefined, 'the token column is gone');
+    assert.equal(rows[0].token_hash, require('../api/db').hashToken('plain-token-1'));
+    assert.equal(rows[0].created_at, 5);
+    await new Promise((r) => legacy.server.listen(0, '127.0.0.1', r));
+    const me = await fetch(`http://127.0.0.1:${legacy.server.address().port}/api/me`, { headers: { authorization: 'Bearer plain-token-1' } });
+    legacy.server.close();
+    assert.equal(me.status, 200, 'the device that had it is still signed in');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 /* ---------------- vaults from before the keys ---------------- */
 
 // A database in the shape the password era left behind: users with an email,

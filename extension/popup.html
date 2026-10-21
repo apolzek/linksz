@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Bookmarks</title>
+<link rel="stylesheet" href="popup.css">
+</head>
+<body class="popup">
+
+<!-- Not connected: connect through the app, or with the key. -->
+<main id="connect" hidden>
+  <h1><img src="icons/icon-32.png" alt="">Bookmarks</h1>
+  <p class="note" id="connect-why"></p>
+  <div>
+    <label for="server">Server</label>
+    <input id="server" placeholder="http://localhost:8080" spellcheck="false" autocomplete="off">
+  </div>
+  <button type="button" class="primary" id="btn-connect">Connect through the app</button>
+  <p class="note muted">Opens the app, signed in already, which asks before giving this extension a session of its own. The access key stays out of it.</p>
+  <details>
+    <summary>Use the access key instead</summary>
+    <div class="row">
+      <input id="key" placeholder="XXXX-XXXX-…" spellcheck="false" autocomplete="off">
+      <button type="button" id="btn-key">Open</button>
+    </div>
+    <p class="note muted">The key is exchanged for a session and not kept.</p>
+  </details>
+  <p class="note error" id="connect-error"></p>
+</main>
+
+<!-- Connected: the page on screen, and a search. -->
+<main id="connected" hidden>
+  <h1><img src="icons/icon-32.png" alt="">Bookmarks <span class="vault" id="vault"></span></h1>
+  <form class="card" id="save-form">
+    <div>
+      <label for="title">Title</label>
+      <input id="title" autocomplete="off">
+      <div class="small muted url" id="url"></div>
+    </div>
+    <div>
+      <label for="folder">Folder</label>
+      <input id="folder" list="folders" placeholder="Temporary" autocomplete="off" spellcheck="false">
+      <datalist id="folders"></datalist>
+    </div>
+    <p class="note" id="saved-note"></p>
+    <div class="row">
+      <button type="submit" class="primary" id="btn-save">Save</button>
+      <button type="button" id="btn-undo" hidden>Undo</button>
+    </div>
+  </form>
+  <div>
+    <input id="q" type="search" placeholder="Search bookmarks" autocomplete="off" spellcheck="false">
+    <ul class="results" id="results"></ul>
+  </div>
+  <p class="note error" id="error"></p>
+</main>
+<footer id="footer" hidden>
+  <button type="button" class="link" id="btn-app">Open the app</button>
+  <button type="button" class="link" id="btn-disconnect">Disconnect</button>
+</footer>
+
+<script type="module" src="popup.js"></script>
+</body>
+</html>

@@ -18,6 +18,7 @@ const { DatabaseSync } = require('node:sqlite');
 const path = require('node:path');
 const fs = require('node:fs');
 const os = require('node:os');
+const crypto = require('node:crypto');
 
 function defaultDbPath() {
   if (process.env.BOOKMARKS_DB) return process.env.BOOKMARKS_DB;
@@ -81,6 +82,38 @@ function migrateUsersToKeys(db) {
   }
 }
 
+// Sessions used to keep the token itself. The table is rebuilt with its hash
+// instead, so every device that is signed in stays signed in.
+function hashSessionTokens(db) {
+  const columns = db.prepare('SELECT name FROM pragma_table_info(?)').all('sessions').map((c) => c.name);
+  if (!columns.includes('token')) return;
+  const rows = db.prepare('SELECT token, user_id, created_at FROM sessions').all();
+  db.exec('BEGIN');
+  try {
+    db.exec(`
+      DROP TABLE sessions;
+      CREATE TABLE sessions (
+        id           INTEGER PRIMARY KEY AUTOINCREMENT,
+        token_hash   TEXT NOT NULL UNIQUE,
+        user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        name         TEXT NOT NULL DEFAULT '',
+        created_at   INTEGER NOT NULL,
+        last_used_at INTEGER NOT NULL DEFAULT 0
+      );
+    `);
+    const insert = db.prepare('INSERT INTO sessions (token_hash, user_id, created_at) VALUES (?, ?, ?)');
+    for (const r of rows) insert.run(hashToken(r.token), r.user_id, r.created_at);
+    db.exec('COMMIT');
+  } catch (err) {
+    db.exec('ROLLBACK');
+    throw err;
+  }
+}
+
+function hashToken(token) {
+  return crypto.createHash('sha256').update(String(token)).digest('hex');
+}
+
 function open(dbPath = defaultDbPath()) {
   if (dbPath !== ':memory:') fs.mkdirSync(path.dirname(dbPath), { recursive: true });
 
@@ -100,10 +133,16 @@ function open(dbPath = defaultDbPath()) {
       created_at INTEGER NOT NULL
     );
 
+    -- A signed-in device. Only the token's SHA-256 is kept, like the key's, so
+    -- a copy of this file opens no vault. The name and the last use are what
+    -- Settings shows, so a lost device can be signed out on its own.
     CREATE TABLE IF NOT EXISTS sessions (
-      token      TEXT PRIMARY KEY,
-      user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-      created_at INTEGER NOT NULL
+      id           INTEGER PRIMARY KEY AUTOINCREMENT,
+      token_hash   TEXT NOT NULL UNIQUE,
+      user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      name         TEXT NOT NULL DEFAULT '',
+      created_at   INTEGER NOT NULL,
+      last_used_at INTEGER NOT NULL DEFAULT 0
     );
 
     -- id is a client-generated UUID, which is what allows offline creation.
@@ -199,7 +238,8 @@ function open(dbPath = defaultDbPath()) {
   migrateUsersToKeys(db);
   migrateNotesToDescription(db);
   addUsageColumns(db);
+  hashSessionTokens(db);
   return db;
 }
 
-module.exports = { open, defaultDbPath };
+module.exports = { open, defaultDbPath, hashToken };

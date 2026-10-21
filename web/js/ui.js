@@ -116,11 +116,14 @@ export function anyDialogOpen() {
   return !!document.querySelector('dialog[open]');
 }
 
-export function confirmDialog({ title, text = '', ok = 'Delete' }) {
+// `danger` paints the yes in red, for what cannot be taken back; a question
+// that only grants something is asked in the accent.
+export function confirmDialog({ title, text = '', ok = 'Delete', danger = true }) {
   const dlg = $('#dlg-confirm');
   $('#confirm-title').textContent = title;
   $('#confirm-text').textContent = text;
   $('#confirm-yes').textContent = ok;
+  $('#confirm-yes').className = `btn ${danger ? 'danger' : 'primary'}`;
   dlg.returnValue = '';
   dlg.showModal();
   // Cancel holds the focus, so a stray Enter says no.

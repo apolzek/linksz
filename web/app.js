@@ -246,6 +246,14 @@ async function openShell(user) {
   // there is not.
   await store.open(user.id);
   store.startSync();
+  const connecting = settings.connectRequest();
+  if (connecting) {
+    history.replaceState(null, '', '/#/settings');
+    go();
+    await settings.connectExtension(connecting);
+    settings.show();
+    return;
+  }
   go();
   takeShare();
 }

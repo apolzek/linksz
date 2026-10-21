@@ -23,7 +23,7 @@ const crypto = require('node:crypto');
 const { AsyncLocalStorage } = require('node:async_hooks');
 const { execFileSync } = require('node:child_process');
 
-const { open } = require('./db');
+const { open, hashToken } = require('./db');
 const { search } = require('../web/search');
 const { newAccessKey, hashKey, newToken } = require('./auth');
 const portability = require('./portability');
@@ -147,6 +147,27 @@ const DAY = 86400000;
 
 // The part of the app a write came through, as the audit trail names it.
 // Anything not listed is the app itself: the form, a move, a delete, a sync.
+// A client other than the app says so in a header, and only these names are
+// taken: the value ends up in the audit log.
+const CLIENTS = new Set(['extension']);
+function viaHeader(req) {
+  const v = String(req.headers['x-bookmarks-via'] || '').toLowerCase();
+  return CLIENTS.has(v) ? v : '';
+}
+
+// What a session is called in Settings: what the client said, or the browser
+// and system read off its User-Agent.
+function deviceName(req, given) {
+  const named = String(given || '').replace(/\s+/g, ' ').trim().slice(0, 80);
+  if (named) return named;
+  const ua = String(req.headers['user-agent'] || '');
+  const browser = /Edg\//.test(ua) ? 'Edge' : /Firefox\//.test(ua) ? 'Firefox' : /Chrom(e|ium)\//.test(ua) ? 'Chrome'
+    : /Safari\//.test(ua) ? 'Safari' : /^curl\//.test(ua) ? 'curl' : '';
+  const system = /Android/.test(ua) ? 'Android' : /iPhone|iPad/.test(ua) ? 'iOS' : /Windows/.test(ua) ? 'Windows'
+    : /Mac OS X/.test(ua) ? 'macOS' : /Linux/.test(ua) ? 'Linux' : '';
+  return [browser, system].filter(Boolean).join(' on ') || 'Unknown device';
+}
+
 const VIA = {
   'POST /api/import': 'import',
   'POST /api/folders/move': 'folder',
@@ -245,10 +266,15 @@ function createApp(dbPath, { titles = {} } = {}) {
     insertUser: db.prepare('INSERT INTO users (name, key_hash, created_at) VALUES (?, ?, ?)'),
     setKey: db.prepare('UPDATE users SET key_hash = ? WHERE id = ?'),
     rename: db.prepare('UPDATE users SET name = ? WHERE id = ?'),
-    insertSession: db.prepare('INSERT INTO sessions (token, user_id, created_at) VALUES (?, ?, ?)'),
-    sessionByToken: db.prepare('SELECT * FROM sessions WHERE token = ?'),
-    deleteSession: db.prepare('DELETE FROM sessions WHERE token = ?'),
-    deleteOtherSessions: db.prepare('DELETE FROM sessions WHERE user_id = ? AND token <> ?'),
+    insertSession: db.prepare('INSERT INTO sessions (token_hash, user_id, name, created_at, last_used_at) VALUES (?, ?, ?, ?, ?)'),
+    sessionByHash: db.prepare('SELECT * FROM sessions WHERE token_hash = ?'),
+    touchSession: db.prepare('UPDATE sessions SET last_used_at = ? WHERE id = ? AND last_used_at < ?'),
+    deleteSession: db.prepare('DELETE FROM sessions WHERE token_hash = ?'),
+    deleteSessionById: db.prepare('DELETE FROM sessions WHERE user_id = ? AND id = ?'),
+    deleteOtherSessions: db.prepare('DELETE FROM sessions WHERE user_id = ? AND token_hash <> ?'),
+    listSessions: db.prepare('SELECT id, name, created_at, last_used_at, token_hash FROM sessions WHERE user_id = ? ORDER BY last_used_at DESC, id DESC'),
+    bookmarksByUrl: db.prepare(`SELECT * FROM bookmarks WHERE user_id = ? AND deleted = 0
+      AND rtrim(url, '/') = rtrim(?, '/') AND url <> '' ORDER BY updated_at DESC`),
     allBookmarks: db.prepare('SELECT * FROM bookmarks WHERE user_id = ? AND deleted = 0 ORDER BY updated_at DESC'),
     // >= and not >: the cursor is a millisecond, and a change written in the
     // same millisecond as the previous answer would fall in the gap and never
@@ -355,16 +381,26 @@ function createApp(dbPath, { titles = {} } = {}) {
     return m ? m[1] : '';
   }
 
-  function auth(req) {
+  function sessionOf(req) {
     const token = bearer(req);
-    const s = token && q.sessionByToken.get(token);
+    return (token && q.sessionByHash.get(hashToken(token))) || null;
+  }
+
+  // The last use is written at most once a minute: it is for a person reading
+  // Settings, not a log, and every request would otherwise be a write.
+  function auth(req) {
+    const s = sessionOf(req);
     if (!s) return null;
+    const ts = now();
+    q.touchSession.run(ts, s.id, ts - 60_000);
     return q.userById.get(s.user_id) || null;
   }
 
-  function startSession(userId) {
+  // Only the hash is stored; the token itself is in this answer and nowhere else.
+  function startSession(userId, name) {
     const token = newToken();
-    q.insertSession.run(token, userId, now());
+    const ts = now();
+    q.insertSession.run(hashToken(token), userId, name, ts, ts);
     return token;
   }
 
@@ -471,7 +507,7 @@ function createApp(dbPath, { titles = {} } = {}) {
       const { key, hash } = freshKey();
       const info = q.insertUser.run(vaultName(b.name), hash, now());
       const id = Number(info.lastInsertRowid);
-      return json(res, 201, { key, token: startSession(id), user: q.userById.get(id) });
+      return json(res, 201, { key, token: startSession(id, deviceName(req, b.device)), user: q.userById.get(id) });
     },
 
     'POST /api/auth/key': async (req, res) => {
@@ -479,7 +515,31 @@ function createApp(dbPath, { titles = {} } = {}) {
       const hash = hashKey(b.key);
       const row = hash && q.userByKey.get(hash);
       if (!row) return json(res, 401, { error: 'that key does not open any vault' });
-      return json(res, 200, { token: startSession(row.id), user: q.userById.get(row.id) });
+      return json(res, 200, { token: startSession(row.id, deviceName(req, b.device)), user: q.userById.get(row.id) });
+    },
+
+    // A new session for another client of the same vault, handed out by one
+    // that is already signed in. This is how the browser extension connects
+    // without the key ever passing through it.
+    'POST /api/auth/session': async (req, res, user) => {
+      const b = await readBody(req);
+      return json(res, 201, { token: startSession(user.id, deviceName(req, b.device)), user });
+    },
+
+    // The devices signed in to this vault. The hash never leaves the server;
+    // `current` marks the one asking.
+    'GET /api/auth/sessions': async (req, res, user) => {
+      const mine = hashToken(bearer(req));
+      const sessions = q.listSessions.all(user.id).map(({ token_hash, ...s }) => ({ ...s, current: token_hash === mine }));
+      return json(res, 200, { sessions });
+    },
+
+    // Signs one device out, this one included.
+    'POST /api/auth/sessions/revoke': async (req, res, user) => {
+      const b = await readBody(req);
+      const info = q.deleteSessionById.run(user.id, Number(b.id));
+      if (!info.changes) return json(res, 404, { error: 'not found' });
+      return json(res, 200, { ok: true });
     },
 
     // A new key for this vault. The old one stops working at once, and every
@@ -489,14 +549,14 @@ function createApp(dbPath, { titles = {} } = {}) {
       const { key, hash } = freshKey();
       tx(() => {
         q.setKey.run(hash, user.id);
-        q.deleteOtherSessions.run(user.id, bearer(req));
+        q.deleteOtherSessions.run(user.id, hashToken(bearer(req)));
       });
       return json(res, 200, { key });
     },
 
     'POST /api/auth/logout': async (req, res) => {
       const token = bearer(req);
-      if (token) q.deleteSession.run(token);
+      if (token) q.deleteSession.run(hashToken(token));
       return json(res, 200, { ok: true });
     },
 
@@ -509,6 +569,13 @@ function createApp(dbPath, { titles = {} } = {}) {
     'GET /api/me': async (req, res, user) => json(res, 200, { user }),
 
     'GET /api/bookmarks': async (req, res, user, url) => {
+      // ?url= is "is this page saved already?": the same rule as sameLink in
+      // web/js/address.js, where only a trailing slash is ignored. A link saved
+      // in two folders is two answers, since that is allowed.
+      if (url.searchParams.has('url')) {
+        const items = q.bookmarksByUrl.all(user.id, url.searchParams.get('url') || '');
+        return json(res, 200, { items, total: items.length });
+      }
       const all = q.allBookmarks.all(user.id);
       const query = url.searchParams.get('q') || '';
       const limit = Math.min(Number(url.searchParams.get('limit')) || 200, 5000);
@@ -750,7 +817,12 @@ function createApp(dbPath, { titles = {} } = {}) {
     // The folders written down, which is not the whole tree: the app unions
     // these with the ones it derives from the `folder` of each bookmark.
     'GET /api/folders': async (req, res, user) => {
-      return json(res, 200, { folders: q.allFolders.all(user.id) });
+      // `used` is the other half of the tree: the folders bookmarks are in,
+      // for a client that does not hold every bookmark (the extension).
+      return json(res, 200, {
+        folders: q.allFolders.all(user.id),
+        used: q.bookmarkFolders.all(user.id).map((r) => r.folder),
+      });
     },
 
     // Creates a folder that owns nothing yet, which the `folder` string on a
@@ -987,7 +1059,7 @@ function createApp(dbPath, { titles = {} } = {}) {
     const origin = req.headers.origin;
     if (origin && (anyOriginAllowed || allowedOrigins.has(origin.replace(/\/+$/, '')))) {
       res.setHeader('access-control-allow-origin', origin);
-      res.setHeader('access-control-allow-headers', 'content-type, authorization');
+      res.setHeader('access-control-allow-headers', 'content-type, authorization, x-bookmarks-via');
       res.setHeader('access-control-allow-methods', 'GET, POST, PUT, DELETE, OPTIONS');
       res.setHeader('access-control-max-age', '600');
     }
@@ -1011,7 +1083,7 @@ function createApp(dbPath, { titles = {} } = {}) {
       // Named routes first: otherwise `POST /api/bookmarks/open` would be read
       // as a bookmark whose id is "open".
       const handler = routes[key];
-      const via = VIA[key] || 'app';
+      const via = VIA[key] || viaHeader(req) || 'app';
       if (handler) return await requestVia.run(via, () => handler(req, res, user, url));
 
       const idMatch = /^\/api\/bookmarks\/([^/]+)$/.exec(pathname);

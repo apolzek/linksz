@@ -19,6 +19,7 @@ web/        the PWA, and the nginx image that serves it
 docs/       how to run it
 tests/      one suite for all of it: bash tests/run.sh
 omarchy/    adds it to the Omarchy app menu: bash omarchy/install.sh
+extension/  the browser extension, self-contained: code, tests, installer
 ```
 
 It runs in containers, and only there: `docker compose up -d --build`, then
@@ -56,7 +57,7 @@ extras are opt in, because each needs something the
 machine may not have and each skips itself rather than failing when it is
 missing:
 
-    bash tests/run.sh --web        the app in headless Chrome
+    bash tests/run.sh --web        the app in headless Chrome, the extension in Chromium
     bash tests/run.sh --compose    the two containers behind nginx
     bash tests/run.sh --all        both
 
