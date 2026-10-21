@@ -177,6 +177,11 @@ function paintCount(p) {
   box.className = 'check-box' + (m + f && all ? ' on' : m + f ? ' some' : '');
   box.innerHTML = m + f && all ? icon('check') : '';
   p.el.querySelector('[data-act="delete-marked"]').hidden = !(m + f);
+  // With something selected, the only trash on the pane is the one for the
+  // selection: the folder's own, beside it, once took a whole folder when
+  // one link was meant.
+  const folderTrash = p.el.querySelector('.pane-head [data-act="delete"]');
+  if (folderTrash) folderTrash.hidden = Boolean(m + f);
   paintActions();
 }
 

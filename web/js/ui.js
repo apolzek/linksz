@@ -173,12 +173,13 @@ export function confirmDialog({ title, text = '', ok = 'Delete', danger = true }
 }
 
 // One text field, validated by `submit`, which throws to keep the dialog open.
-export function promptDialog({ title, label, value = '', ok = 'Save', submit }) {
+export function promptDialog({ title, label, value = '', ok = 'Save', danger = false, submit }) {
   const dlg = $('#dlg-prompt');
   const input = $('#prompt-input');
   $('#prompt-title').textContent = title;
   $('#prompt-label').textContent = label;
   $('#prompt-ok').textContent = ok;
+  $('#prompt-ok').className = `btn ${danger ? 'danger' : 'primary'}`;
   $('#prompt-error').textContent = '';
   input.value = value;
   dlg.showModal();
@@ -470,12 +471,25 @@ export async function askDeleteFolders(paths, links = []) {
   const one = paths.length === 1 && !links.length;
   const parts = [plural(paths.length, 'folder')];
   if (links.length) parts.push(plural(links.length, 'link'));
-  const yes = await confirmDialog({
-    title: one ? `Delete ${store.nameOf(paths[0])}?` : `Delete ${parts.join(' and ')}?`,
-    text: one
-      ? (n ? `It holds ${plural(n, 'link')}, and they go with it, along with every folder inside.` : 'The folder is empty.')
-      : (n ? `The folders hold ${plural(n, 'link')}, and they go with them, along with every folder inside.` : 'The folders are empty.'),
-  });
+  const title = one ? `Delete ${store.nameOf(paths[0])}?` : `Delete ${parts.join(' and ')}?`;
+  // A folder with links in it is a lot to lose to one click, and twice a whole
+  // folder went when one link was meant: the name has to be typed, and the
+  // button says how much goes.
+  const yes = n
+    ? await promptDialog({
+      title,
+      label: one
+        ? `It holds ${plural(n, 'link')}, and they go with it, along with every folder inside. Type ${store.nameOf(paths[0])} to delete it.`
+        : `The folders hold ${plural(n, 'link')}, and they go with them, along with every folder inside. Type ${n} to delete them.`,
+      ok: `Delete ${plural(n + links.length, 'link')}`,
+      danger: true,
+      submit: (typed) => {
+        const want = one ? store.nameOf(paths[0]) : String(n);
+        if (typed.trim() !== want) throw new Error(`Type ${want} to confirm`);
+        return true;
+      },
+    })
+    : await confirmDialog({ title, text: one ? 'The folder is empty.' : 'The folders are empty.' });
   if (!yes) return false;
   // One undo for all of it: the loose links, and each folder with what it held.
   const items = links.length ? await store.removeMany(links) : [];

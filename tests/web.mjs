@@ -696,7 +696,7 @@ is(await ev("document.querySelector('#bookmarklet').getAttribute('href')"), `jav
 await click('#bookmarklet');
 is(await lastToast(), 'Drag it to the bookmarks bar', 'clicking it here explains instead of running it');
 
-group('undo with Ctrl+Z');
+// Fixtures for the two groups below: a folder with two links and an empty one.
 await go('#/');
 await ev('document.activeElement.blur()');
 await ev(`(async () => {
@@ -711,11 +711,34 @@ const undoLive = async () => (await server('/api/bookmarks?limit=5000')).items.f
 const undoFolders = async () => (await server('/api/folders')).folders.map((f) => f.path).filter((p) => /^(undo|undone)(\/|$)/.test(p)).sort();
 const ctrlZ = async () => { await letter('z', CTRL); await sleep(1200); };
 
+group('a folder with links is not deleted by accident');
+await go('#/organize');
+await ev("(async () => { const o = await import('/js/organize.js'); o.openFolder('undo', 'a'); })()");
+await sleep(400);
+is(await hidden('#pane-a .pane-head [data-act="delete"]'), false, 'with nothing selected, the folder has its bin');
+await click('#pane-a .orow[data-i="0"]');
+is([await hidden('#pane-a .pane-head [data-act="delete"]'), await hidden('#pane-a [data-act="delete-marked"]')], [true, false],
+  'with a link selected, the only bin is the one for the selection');
+await key('Escape', 'Escape', 27);
+is(await hidden('#pane-a .pane-head [data-act="delete"]'), false, 'and the folder bin is back when the selection goes');
+await click('#pane-a .pane-head [data-act="delete"]');
+is([await ev("document.querySelector('#dlg-prompt').open"), await text('#prompt-ok'), await ev("document.querySelector('#prompt-ok').className")],
+  [true, 'Delete 2 links', 'btn danger'], 'a folder with links asks for its name, and says how much goes');
+await ev("document.querySelector('#prompt-input').value = 'nope'; document.querySelector('#prompt-form').requestSubmit(); 1");
+await sleep(400);
+is([await ev("document.querySelector('#dlg-prompt').open"), await text('#prompt-error')], [true, 'Type undo to confirm'], 'the wrong name deletes nothing');
+await key('Escape', 'Escape', 27);
+await sleep(300);
+is((await undoLive()).length, 2, 'and cancelling keeps every link');
+await go('#/');
+await ev('document.activeElement.blur()');
+
+group('undo with Ctrl+Z');
 const foldersBefore = await undoFolders();
 // Not awaited: it waits on the confirm dialog, clicked below.
 await ev("import('/js/ui.js').then((u) => { u.askDeleteFolders(['undo']); }); 1");
 await sleep(300);
-await click('#confirm-yes');
+await ev("document.querySelector('#prompt-input').value = 'undo'; document.querySelector('#prompt-form').requestSubmit(); 1");
 await sleep(900);
 is(await undoLive(), [], 'deleting a folder takes its links');
 await ctrlZ();
@@ -751,7 +774,7 @@ is((await undoLive()).includes('undo|Undo two'), true, 'Ctrl+Z takes the edit ba
 
 await ev("import('/js/ui.js').then((u) => { u.askDeleteFolders(['undo']); }); 1");
 await sleep(300);
-await click('#confirm-yes');
+await ev("document.querySelector('#prompt-input').value = 'undo'; document.querySelector('#prompt-form').requestSubmit(); 1");
 await sleep(900);
 await ev("import('/js/ui.js').then((u) => u.moveLinks([], 'x')).then(() => 1)");
 await ctrlZ();
