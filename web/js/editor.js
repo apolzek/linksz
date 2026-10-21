@@ -1,7 +1,7 @@
 // The one form a link has: new or edit.
 
 import * as store from './store.js';
-import { $, icon, folderLabel, pickFolder, deleteLinks, toast, fail, wireDialog, hostOf } from './ui.js';
+import { $, icon, folderLabel, pickFolder, deleteLinks, undoable, fail, wireDialog, hostOf } from './ui.js';
 
 let editing = null;   // the bookmark being edited, null for a new one
 let folder = '';
@@ -59,10 +59,13 @@ async function save() {
   const was = editing;
   $('#dlg-edit').close('saved');
   try {
-    if (was) await store.update(was.id, fields);
-    else {
-      await store.create(fields);
-      toast(`Saved to ${folderLabel(folder)}`);
+    if (was) {
+      const prev = Object.fromEntries(Object.keys(fields).map((k) => [k, was[k] ?? '']));
+      await store.update(was.id, fields);
+      undoable(`Edited “${fields.title}”`, () => store.update(was.id, prev));
+    } else {
+      const b = await store.create(fields);
+      undoable(`Saved to ${folderLabel(folder)}`, () => store.removeMany([b.id]));
     }
   } catch (err) {
     fail(err);

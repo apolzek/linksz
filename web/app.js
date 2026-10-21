@@ -16,7 +16,7 @@
 
 import { api, getToken, setToken, isOffline } from './js/http.js';
 import * as store from './js/store.js';
-import { $, $$, anyDialogOpen, wireDialog, askNewFolder, fail, toast, hostOf, folderLabel, favicon } from './js/ui.js';
+import { $, $$, anyDialogOpen, wireDialog, askNewFolder, fail, toast, undoable, undoLast, hostOf, folderLabel, favicon } from './js/ui.js';
 import * as links from './js/links.js';
 import * as organize from './js/organize.js';
 import * as tree from './js/tree.js';
@@ -77,6 +77,14 @@ function onKey(e) {
   // box, the same letter with Alt.
   const cmd = (k) => (e.key.toLowerCase() === k && !e.ctrlKey && !e.metaKey)
     && ((!typing && !e.altKey) || (e.altKey && inSearch));
+
+  // Ctrl+Z takes back the last change, on every page. In a text field it is
+  // the field's own undo.
+  if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'z' && !typing) {
+    e.preventDefault();
+    undoLast();
+    return;
+  }
 
   if (route === 'organize') {
     if (organize.onKey(e, typing)) e.preventDefault();
@@ -289,7 +297,7 @@ async function saveFromPath(url) {
   try {
     const b = await store.create({ url, title: hostOf(url), folder: TEMP_FOLDER });
     show(TEMP_FOLDER);
-    toast(`Saved ${hostOf(url)} to ${TEMP_FOLDER}`, { action: 'Undo', onAction: () => store.removeMany([b.id]).catch(fail) });
+    undoable(`Saved ${hostOf(url)} to ${TEMP_FOLDER}`, () => store.removeMany([b.id]));
   } catch (err) {
     fail(err);
   }

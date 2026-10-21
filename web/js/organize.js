@@ -20,7 +20,7 @@ import * as store from './store.js';
 import {
   $, esc, icon, favicon, hostOf, plural, folderLabel, pickFolder, dropTarget,
   startLinkDrag, startFolderDrag, moveLinks, moveFoldersTo, deleteLinks, askNewFolder,
-  askRenameFolder, askDeleteFolder, askDeleteFolders, fail, toast,
+  askRenameFolder, askDeleteFolder, askDeleteFolders, fail, toast, undoable,
 } from './ui.js';
 import { openEditor } from './editor.js';
 import { api } from './http.js';
@@ -500,10 +500,8 @@ export async function onPaste(e) {
     const made = [];
     for (const url of fresh) made.push(await store.create({ url, folder: p.path }));
     for (const b of made) fillTitle(b);
-    toast(`Added ${made.length === 1 ? hostOf(fresh[0]) : plural(made.length, 'link')} to ${folderLabel(p.path)}`, {
-      action: 'Undo',
-      onAction: () => store.removeMany(made.map((b) => b.id)).catch(fail),
-    });
+    undoable(`Added ${made.length === 1 ? hostOf(fresh[0]) : plural(made.length, 'link')} to ${folderLabel(p.path)}`,
+      () => store.removeMany(made.map((b) => b.id)));
   } catch (err) { fail(err); }
 }
 

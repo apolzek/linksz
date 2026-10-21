@@ -433,13 +433,33 @@ export async function moveFolder(from, toParent) {
   return target;
 }
 
+// Returns what went, the links and the folders written down, so the delete
+// can be undone: restore() the links, reviveFolders() the folders.
 export async function deleteFolder(path) {
   const snap = snapshotBranch(path);
+  const paths = [...state.folders].filter((p) => p === path || p.startsWith(path + '/'));
   for (const b of snap.items) state.items.delete(b.id);
-  for (const p of [...state.folders]) if (p === path || p.startsWith(path + '/')) state.folders.delete(p);
+  for (const p of paths) state.folders.delete(p);
   changed();
   await write(() => api('/api/folders/delete', { method: 'POST', body: { path } }), () => restoreBranch(snap));
-  return snap.items.length;
+  return { items: snap.items, paths };
+}
+
+// Writes folders down again, parents first. One the links already put back on
+// the tree answers 409, which here means it is there: what was wanted.
+export async function reviveFolders(paths) {
+  const todo = [...new Set(paths)].sort((a, b) => a.split('/').length - b.split('/').length);
+  for (const p of todo) state.folders.add(p);
+  changed();
+  await write(async () => {
+    for (const p of todo) {
+      try {
+        await api('/api/folders', { method: 'POST', body: { path: p } });
+      } catch (err) {
+        if (err.status !== 409) throw err;
+      }
+    }
+  });
 }
 
 /* ---------------- sync ---------------- */

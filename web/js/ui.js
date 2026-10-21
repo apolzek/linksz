@@ -95,6 +95,45 @@ export function toast(message, { action, onAction, error = false, ms = 5000 } = 
   return close;
 }
 
+/* ---------------- undo ---------------- */
+
+// Every change that can be taken back goes on one stack, newest last. The
+// toast's Undo and Ctrl+Z both take from it; an entry runs once, whichever
+// comes first.
+const undos = [];
+const UNDO_DEPTH = 50;
+
+export function undoable(message, undo) {
+  const entry = { message, undo, done: false };
+  undos.push(entry);
+  if (undos.length > UNDO_DEPTH) undos.shift();
+  toast(message, { action: 'Undo', onAction: () => runUndo(entry) });
+  return entry;
+}
+
+async function runUndo(entry) {
+  if (entry.done) return;
+  entry.done = true;
+  const i = undos.indexOf(entry);
+  if (i >= 0) undos.splice(i, 1);
+  try {
+    await entry.undo();
+    toast(`Undone: ${entry.message}`);
+  } catch (err) { fail(err); }
+}
+
+// Ctrl+Z: the newest change still standing.
+export function undoLast() {
+  const entry = undos.pop();
+  if (!entry) { toast('Nothing to undo'); return Promise.resolve(false); }
+  undos.push(entry);
+  return runUndo(entry).then(() => true);
+}
+
+export function canUndo() {
+  return undos.length > 0;
+}
+
 export function fail(err) {
   toast(err?.message || String(err), { error: true, ms: 7000 });
 }
@@ -349,19 +388,13 @@ function canDropFolder(from, to) {
 export async function moveLinks(ids, folder) {
   const before = await store.moveMany(ids, folder);
   if (!before.size) return before;
-  toast(`Moved ${plural(before.size, 'link')} to ${folderLabel(folder)}`, {
-    action: 'Undo',
-    onAction: () => store.unmove(before).catch(fail),
-  });
+  undoable(`Moved ${plural(before.size, 'link')} to ${folderLabel(folder)}`, () => store.unmove(before));
   return before;
 }
 
 export async function moveFolderTo(from, toParent) {
   const target = await store.moveFolder(from, toParent);
-  toast(`Moved ${store.nameOf(from)} to ${folderLabel(toParent)}`, {
-    action: 'Undo',
-    onAction: () => store.moveFolder(target, store.parentOf(from)).catch(fail),
-  });
+  undoable(`Moved ${store.nameOf(from)} to ${folderLabel(toParent)}`, () => store.moveFolder(target, store.parentOf(from)));
   return target;
 }
 
@@ -376,13 +409,8 @@ export async function moveFoldersTo(paths, toParent) {
     try { done.push([from, await store.moveFolder(from, toParent)]); } catch (err) { error = err; break; }
   }
   if (done.length) {
-    toast(`Moved ${plural(done.length, 'folder')} to ${folderLabel(toParent)}`, {
-      action: 'Undo',
-      onAction: async () => {
-        try {
-          for (const [from, target] of [...done].reverse()) await store.moveFolder(target, store.parentOf(from));
-        } catch (err) { fail(err); }
-      },
+    undoable(`Moved ${plural(done.length, 'folder')} to ${folderLabel(toParent)}`, async () => {
+      for (const [from, target] of [...done].reverse()) await store.moveFolder(target, store.parentOf(from));
     });
   }
   if (error) throw error;
@@ -402,10 +430,8 @@ export async function deleteLinks(ids, { ask = ids.length > 1, before } = {}) {
   before?.();
   const gone = await store.removeMany(ids);
   if (gone.length) {
-    toast(`Deleted ${gone.length === 1 ? `“${gone[0].title || hostOf(gone[0].url)}”` : plural(gone.length, 'link')}`, {
-      action: 'Undo',
-      onAction: () => store.restore(gone).catch(fail),
-    });
+    undoable(`Deleted ${gone.length === 1 ? `“${gone[0].title || hostOf(gone[0].url)}”` : plural(gone.length, 'link')}`,
+      () => store.restore(gone));
   }
   return gone;
 }
@@ -420,12 +446,15 @@ export async function askNewFolder(parent = '') {
 }
 
 export async function askRenameFolder(path) {
-  return promptDialog({
+  const was = store.nameOf(path);
+  const target = await promptDialog({
     title: 'Rename folder',
     label: 'Name',
-    value: store.nameOf(path),
+    value: was,
     submit: (v) => store.renameFolder(path, v),
   });
+  if (target && target !== path) undoable(`Renamed ${was} to ${store.nameOf(target)}`, () => store.renameFolder(target, was));
+  return target;
 }
 
 export async function askDeleteFolder(path) {
@@ -448,8 +477,17 @@ export async function askDeleteFolders(paths, links = []) {
       : (n ? `The folders hold ${plural(n, 'link')}, and they go with them, along with every folder inside.` : 'The folders are empty.'),
   });
   if (!yes) return false;
-  if (links.length) await deleteLinks(links, { ask: false });
-  for (const p of paths) await store.deleteFolder(p);
-  toast(`Deleted ${one ? store.nameOf(paths[0]) : plural(paths.length, 'folder')}`);
+  // One undo for all of it: the loose links, and each folder with what it held.
+  const items = links.length ? await store.removeMany(links) : [];
+  const folders = [];
+  for (const p of paths) {
+    const gone = await store.deleteFolder(p);
+    items.push(...gone.items);
+    folders.push(...gone.paths);
+  }
+  undoable(`Deleted ${one ? store.nameOf(paths[0]) : parts.join(' and ')}${n && one ? ` and ${plural(n, 'link')}` : ''}`, async () => {
+    await store.reviveFolders(folders);
+    await store.restore(items);
+  });
   return true;
 }

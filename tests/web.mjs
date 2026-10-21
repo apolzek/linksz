@@ -696,6 +696,78 @@ is(await ev("document.querySelector('#bookmarklet').getAttribute('href')"), `jav
 await click('#bookmarklet');
 is(await lastToast(), 'Drag it to the bookmarks bar', 'clicking it here explains instead of running it');
 
+group('undo with Ctrl+Z');
+await go('#/');
+await ev('document.activeElement.blur()');
+await ev(`(async () => {
+  const s = await import('/js/store.js');
+  await s.create({ url: 'https://undo-1.example', title: 'Undo one', folder: 'undo/inner' });
+  await s.create({ url: 'https://undo-2.example', title: 'Undo two', folder: 'undo' });
+  await s.createFolder('undo/empty');
+})()`);
+await sleep(500);
+const undoLive = async () => (await server('/api/bookmarks?limit=5000')).items.filter((b) => b.url.startsWith('https://undo-'))
+  .map((b) => `${b.folder}|${b.title}`).sort();
+const undoFolders = async () => (await server('/api/folders')).folders.map((f) => f.path).filter((p) => /^(undo|undone)(\/|$)/.test(p)).sort();
+const ctrlZ = async () => { await letter('z', CTRL); await sleep(1200); };
+
+const foldersBefore = await undoFolders();
+// Not awaited: it waits on the confirm dialog, clicked below.
+await ev("import('/js/ui.js').then((u) => { u.askDeleteFolders(['undo']); }); 1");
+await sleep(300);
+await click('#confirm-yes');
+await sleep(900);
+is(await undoLive(), [], 'deleting a folder takes its links');
+await ctrlZ();
+is(await undoLive(), ['undo/inner|Undo one', 'undo|Undo two'], 'Ctrl+Z brings the links back where they were');
+is([await undoFolders(), foldersBefore.includes('undo/empty')], [foldersBefore, true], 'and the folders as they were, the empty one too');
+is(await lastToast(), 'Undone: Deleted undo and 2 links', 'and says what it undid');
+
+await ev("import('/js/ui.js').then((u) => { u.askRenameFolder('undo'); }); 1");
+await sleep(300);
+await ev("document.querySelector('#prompt-input').value = 'undone'; document.querySelector('#prompt-form').requestSubmit(); 1");
+await sleep(900);
+is(await undoLive(), ['undone/inner|Undo one', 'undone|Undo two'], 'renaming a folder moves what is in it');
+await ctrlZ();
+is(await undoLive(), ['undo/inner|Undo one', 'undo|Undo two'], 'Ctrl+Z puts the old name back');
+
+const two = (await server('/api/bookmarks?limit=5000')).items.find((b) => b.url === 'https://undo-2.example');
+await ev(`import('/js/ui.js').then((u) => u.moveLinks([${q(two.id)}], 'elsewhere')).then(() => 1)`);
+await sleep(700);
+is((await undoLive()).includes('elsewhere|Undo two'), true, 'moving a link files it elsewhere');
+await ctrlZ();
+is((await undoLive()).includes('undo|Undo two'), true, 'Ctrl+Z moves it back');
+
+await ev(`(async () => {
+  const s = await import('/js/store.js');
+  (await import('/js/editor.js')).openEditor(s.all().find((b) => b.url === 'https://undo-2.example'));
+})()`);
+await sleep(300);
+await ev("document.querySelector('#e-title').value = 'Renamed by mistake'; document.querySelector('#edit-form').requestSubmit(); 1");
+await sleep(900);
+is((await undoLive()).includes('undo|Renamed by mistake'), true, 'editing a link changes it');
+await ctrlZ();
+is((await undoLive()).includes('undo|Undo two'), true, 'Ctrl+Z takes the edit back');
+
+await ev("import('/js/ui.js').then((u) => { u.askDeleteFolders(['undo']); }); 1");
+await sleep(300);
+await click('#confirm-yes');
+await sleep(900);
+await ev("import('/js/ui.js').then((u) => u.moveLinks([], 'x')).then(() => 1)");
+await ctrlZ();
+is(await undoLive(), ['undo/inner|Undo one', 'undo|Undo two'], 'the newest change is the one undone');
+
+await ev(`import('/js/ui.js').then((u) => u.moveLinks([${q(two.id)}], 'elsewhere')).then(() => 1)`);
+await sleep(700);
+await click('#q');
+await type('typed');
+await ctrlZ();
+is((await undoLive()).includes('elsewhere|Undo two'), true, 'in a text field, Ctrl+Z is the field\'s own and the move stays');
+await key('Escape', 'Escape', 27);
+await ev('document.activeElement.blur()');
+await ctrlZ();
+is((await undoLive()).includes('undo|Undo two'), true, 'out of it, Ctrl+Z undoes the move');
+
 group('settings: devices');
 is(await until(() => ev("document.querySelectorAll('#devices li').length > 0")), true, 'Settings lists the devices signed in');
 is(await ev("[...document.querySelectorAll('#devices li')].filter((li) => li.querySelector('.badge')).length"), 1, 'and marks this one');
