@@ -1550,3 +1550,43 @@ test('the title endpoint reads the page when it may, and writes nothing', async 
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+/* ---------------- a link's preview ---------------- */
+
+test('the preview endpoint needs a session and an http url', async () => {
+  assert.equal((await call('GET', '/api/preview?url=https%3A%2F%2Fexample.com')).status, 401);
+  assert.equal((await call('GET', '/api/preview?url=javascript%3Aalert(1)', { token })).status, 400);
+  assert.equal((await call('GET', '/api/preview', { token })).status, 400);
+});
+
+test('the preview endpoint reads the page once, then answers from its cache', async () => {
+  let hits = 0;
+  const page = require('node:http').createServer((req, res) => {
+    hits += 1;
+    res.writeHead(200, { 'content-type': 'text/html', 'content-security-policy': "frame-ancestors 'none'" });
+    res.end('<head><title>Cached page</title><meta name="description" content="Read once"></head>');
+  });
+  await new Promise((r) => page.listen(0, '127.0.0.1', r));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'linksz-preview-'));
+  const app = createApp(path.join(dir, 'b.db'), { titles: { allow: (ip) => ip === '127.0.0.1' } });
+  await new Promise((r) => app.server.listen(0, '127.0.0.1', r));
+  const at = `http://127.0.0.1:${app.server.address().port}`;
+  try {
+    const vault = await fetch(`${at}/api/auth/vault`, { method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'previews' }) }).then((x) => x.json());
+    const url = `http://127.0.0.1:${page.address().port}/cached`;
+    const ask = () => fetch(`${at}/api/preview?url=${encodeURIComponent(url)}`, {
+      headers: { authorization: `Bearer ${vault.token}` } }).then((x) => x.json());
+    const first = await ask();
+    assert.equal(first.title, 'Cached page');
+    assert.equal(first.description, 'Read once');
+    assert.equal(first.frame, false, 'frame-ancestors none is a card');
+    assert.deepEqual(await ask(), first);
+    assert.equal(hits, 1, 'the second ask never left the server');
+  } finally {
+    app.server.close();
+    page.close();
+    app.db.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

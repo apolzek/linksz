@@ -25,6 +25,7 @@ import * as data from './js/data.js';
 import * as settings from './js/settings.js';
 import * as audit from './js/audit.js';
 import * as clicklog from './js/clicklog.js';
+import * as preview from './js/preview.js';
 import { openEditor, initEditor } from './js/editor.js';
 import { linkFromAddress, sameLink, TEMP_FOLDER } from './js/address.js';
 
@@ -105,6 +106,7 @@ function onKey(e) {
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a' && !typing) { e.preventDefault(); links.markAll(); return; }
   if (e.key === 'F2' || cmd('e')) { e.preventDefault(); links.editCursor(); return; }
   if (cmd('m')) { e.preventDefault(); links.moveSelected(); return; }
+  if (cmd('p')) { e.preventDefault(); const b = links.cursorLink(); if (b) preview.openPreview(b); return; }
   if (cmd('x')) { e.preventDefault(); links.toggleCursorMark(); return; }
   if (cmd('g')) { e.preventDefault(); links.toggleMode(); return; }
   if (cmd('n')) { e.preventDefault(); openEditor(null, { folder: links.getScope() || '' }); return; }
@@ -353,6 +355,7 @@ function registerServiceWorker() {
   initEditor();
   settings.init({ signOut, onUser: rememberUser });
   links.init();
+  preview.init();
   organize.init();
   activity.init();
   data.init();

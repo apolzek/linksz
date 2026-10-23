@@ -345,6 +345,16 @@
         <div class="palettes" id="palettes"></div>
       </section>
       <section class="card">
+        <div class="card-head"><h2>Previews</h2></div>
+        <p class="muted">Resting the pointer on a link opens a preview: the page itself when
+          the site allows it, otherwise a card with what the page says about itself.
+          <kbd>p</kbd> opens one for the link under the cursor either way.</p>
+        <div class="segmented" id="preview-hover">
+          <button type="button" data-hover="on">On hover</button>
+          <button type="button" data-hover="off">Only with p</button>
+        </div>
+      </section>
+      <section class="card">
         <div class="card-head"><h2>Vault</h2></div>
         <form id="vault-form" class="input-row">
           <input id="vault-name" placeholder="Name this vault" maxlength="80" autocomplete="off">
@@ -393,6 +403,7 @@
           <dt><kbd>Ctrl</kbd>+<kbd>A</kbd></dt><dd>Select everything listed</dd>
           <dt><kbd>m</kbd></dt><dd>Move to a folder</dd>
           <dt><kbd>e</kbd> or <kbd>F2</kbd></dt><dd>Edit</dd>
+          <dt><kbd>p</kbd></dt><dd>Preview</dd>
           <dt><kbd>Del</kbd></dt><dd>Delete</dd>
           <dt><kbd>n</kbd></dt><dd>New link</dd>
           <dt><kbd>Esc</kbd></dt><dd>Clear selection, then search</dd>
@@ -471,6 +482,23 @@
     </div>
     <ul id="picker-list" class="picker-list" role="listbox"></ul>
   </form>
+</dialog>
+
+<dialog id="dlg-preview" class="dialog preview" aria-labelledby="preview-title">
+  <header class="preview-head">
+    <span id="preview-fav"></span>
+    <div class="preview-titles">
+      <h2 id="preview-title"></h2>
+      <span id="preview-host" class="muted"></span>
+    </div>
+    <div class="segmented" id="preview-mode" hidden>
+      <button type="button" data-mode="page">Page</button>
+      <button type="button" data-mode="card">Card</button>
+    </div>
+    <a class="btn primary" id="preview-open" target="_blank" rel="noopener noreferrer"><svg><use href="#i-ext"/></svg>Open</a>
+    <button type="button" class="btn icon" data-close title="Close (Esc)"><svg><use href="#i-x"/></svg></button>
+  </header>
+  <div class="preview-body" id="preview-body"></div>
 </dialog>
 
 <dialog id="dlg-confirm" class="dialog confirm" role="alertdialog">

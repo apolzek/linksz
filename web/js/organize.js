@@ -150,7 +150,7 @@ function paintList(p) {
   });
   links.forEach((b, i) => {
     const host = hostOf(b.url);
-    html += `<li class="orow${p.marked.has(b.id) ? ' marked' : ''}" data-i="${i}" draggable="true" role="option">
+    html += `<li class="orow${p.marked.has(b.id) ? ' marked' : ''}" data-i="${i}" data-id="${esc(b.id)}" draggable="true" role="option">
       <span class="check-box">${icon('check')}</span>${favicon(b.url, b.title)}
       <div class="orow-main"><span class="orow-title">${esc(b.title || host || b.url)}</span><span class="orow-host">${esc(host)}</span></div>
       <button type="button" class="btn icon edit-link" title="Edit (e)" draggable="false">${icon('edit')}</button>

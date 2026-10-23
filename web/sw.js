@@ -12,7 +12,7 @@
 'use strict';
 
 // Bump this version whenever a shell file changes.
-const VERSION = 'v79';
+const VERSION = 'v80';
 const SHELL_CACHE = `linksz-shell-${VERSION}`;
 
 const SHELL = [
@@ -38,6 +38,7 @@ const SHELL = [
   '/js/stamp.js',
   '/js/themes.js',
   '/js/address.js',
+  '/js/preview.js',
   '/manifest.webmanifest',
   '/icon.svg',
   '/icon-192.png',

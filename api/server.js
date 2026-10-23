@@ -27,7 +27,7 @@ const { open, hashToken } = require('./db');
 const { search } = require('../web/search');
 const { newAccessKey, hashKey, newToken } = require('./auth');
 const portability = require('./portability');
-const { titleFor } = require('./titles');
+const { titleFor, previewFor } = require('./titles');
 const audit = require('./audit');
 
 const WEB_DIR = path.join(__dirname, '..', 'web');
@@ -224,10 +224,18 @@ function buildInfo() {
   return buildInfoCache;
 }
 
-// `titles` reaches titleFor: the tests use it to let the title fetcher read a
-// page served on loopback, which it refuses everywhere else.
+// How long a link's preview is kept, and how many of them.
+const PREVIEW_TTL_MS = 6 * 60 * 60 * 1000;
+const PREVIEW_CACHE = 500;
+
+// `titles` reaches titleFor and previewFor: the tests use it to let the
+// fetcher read a page served on loopback, which it refuses everywhere else.
 function createApp(dbPath, { titles = {} } = {}) {
   const db = open(dbPath);
+  // Link previews already fetched, by address, oldest first. Shared by every
+  // vault on this server, which is fine: what a public page says about itself
+  // is the same whoever asks.
+  const previews = new Map();
 
   // Several writes as one: a batch of 900 moves is one commit instead of 900,
   // which in SQLite is the difference between instant and a visible pause, and
@@ -812,6 +820,22 @@ function createApp(dbPath, { titles = {} } = {}) {
       const target = String(url.searchParams.get('url') || '').trim();
       if (!/^https?:\/\//i.test(target)) return json(res, 400, { error: 'url must be http or https' });
       return json(res, 200, await titleFor(target, titles));
+    },
+
+    // What the preview of a link shows: whether the site lets the app frame it,
+    // and a card from what the page says about itself. Read through a cache,
+    // since the same link is hovered over and over and the page rarely moves.
+    'GET /api/preview': async (req, res, user, url) => {
+      const target = String(url.searchParams.get('url') || '').trim();
+      if (!/^https?:\/\//i.test(target)) return json(res, 400, { error: 'url must be http or https' });
+      const hit = previews.get(target);
+      if (hit && Date.now() - hit.at < PREVIEW_TTL_MS) return json(res, 200, hit.value);
+      const value = await previewFor(target, titles);
+      previews.delete(target);
+      previews.set(target, { at: Date.now(), value });
+      // A Map keeps insertion order, so the first key is the oldest.
+      if (previews.size > PREVIEW_CACHE) previews.delete(previews.keys().next().value);
+      return json(res, 200, value);
     },
 
     // The folders written down, which is not the whole tree: the app unions

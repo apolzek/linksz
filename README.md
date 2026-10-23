@@ -130,8 +130,8 @@ Six pages, in the sidebar (and under the thumb on a phone):
     Activity          opens per day, the most opened links, the recent ones
     Audit log         every change to a link, and every click, with when
     Import & export   backups and bringing links in
-    Settings          theme, the vault's name, saving from anywhere, the key,
-                      signing out
+    Settings          theme, previews, the vault's name, saving from anywhere,
+                      the key, signing out
 
 **All links.** Typing searches the whole vault as you type. The folder tree in
 the sidebar narrows the list to one folder and everything below it. Up and down
@@ -177,6 +177,21 @@ Several lines of links file them all, and one already in that folder is not
 filed twice. The
 pencil on a link, shown on hover, edits it; so do `e` and F2 with one link
 selected.
+
+**Previews.** Rest the pointer on a link, in the list or on the Organize
+page, and after a second a preview opens: the page itself, in a frame, when
+the site lets other pages show it, and otherwise a card with what the page
+says about itself, its title, description and image. `p` opens one for the
+link under the cursor. Most big sites (GitHub, Google, YouTube, banks) refuse
+to be framed, and a browser gives a page no way to tell a refused frame from a
+slow one, so the server asks first: it reads the page's head the way it does
+for titles, never from a private address, and checks `X-Frame-Options` and
+CSP `frame-ancestors`; only an explicit yes to every origin gets a frame. The
+answer is kept for six hours. The frame is sandboxed without
+`allow-top-navigation`, so a page cannot navigate the app away. A preview the
+pointer opened closes when the pointer leaves it; Esc or a click outside
+closes any. Settings turns the hover off, leaving `p`. Not on a phone: there is
+no pointer to rest.
 
 **Saving from anywhere.** Put the app's address in front of any link; see
 [Saving a link from anywhere](#saving-a-link-from-anywhere).

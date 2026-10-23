@@ -182,7 +182,7 @@ function rowHTML(b, i) {
   const host = hostOf(b.url);
   const tags = (b.tags || '').split(',').filter(Boolean).slice(0, 4);
   const cls = ['row', view.marked.has(b.id) ? 'marked' : '', i === view.cursor ? 'cursor' : ''].join(' ');
-  return `<li class="${cls}" data-i="${i}" draggable="true" role="option" aria-selected="${view.marked.has(b.id)}">
+  return `<li class="${cls}" data-i="${i}" data-id="${esc(b.id)}" draggable="true" role="option" aria-selected="${view.marked.has(b.id)}">
     <span class="check-box" data-act="mark">${icon('check')}</span>
     ${favicon(b.url, b.title)}
     <div class="row-main">
@@ -386,6 +386,11 @@ export function moveCursor(delta) {
   paintRow(prev);
   paintRow(next);
   list().querySelector(`[data-i="${next}"]`)?.scrollIntoView({ block: 'nearest' });
+}
+
+// The link under the cursor, or the one selected when it is the only one.
+export function cursorLink() {
+  return view.results[view.cursor] || (view.marked.size === 1 ? store.get([...view.marked][0]) : null);
 }
 
 export function openCursor() {

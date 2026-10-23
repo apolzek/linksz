@@ -646,6 +646,31 @@ mark { background: var(--mark); color: inherit; border-radius: 0; padding: 0 1px
 .dialog.confirm { width: min(420px, calc(100vw - 24px)); }
 .dialog.confirm h2 { font-size: 17px; margin-bottom: 6px; }
 .dialog.confirm p { margin: 0; }
+.dialog.preview {
+  width: min(1100px, calc(100vw - 48px)); height: min(820px, calc(100vh - 48px));
+  max-height: none; display: flex; flex-direction: column;
+}
+.dialog.preview:not([open]) { display: none; }
+.preview-head {
+  display: flex; align-items: center; gap: 10px; padding: 10px 12px 10px 16px;
+  border-bottom: 1px solid var(--border); flex: none;
+}
+.preview-titles { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.preview-titles h2 { font-size: 15px; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.preview-titles span { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.preview-body { flex: 1; min-height: 0; overflow: auto; background: var(--bg); }
+.preview-frame { display: block; width: 100%; height: 100%; border: 0; background: #fff; }
+.preview-wait { padding: 40px; text-align: center; }
+.preview-card { max-width: 680px; margin: 0 auto; padding: 28px 24px; }
+.preview-card h3 { font-size: 20px; margin: 0 0 10px; color: var(--text); }
+.preview-card p { margin: 0 0 12px; }
+.preview-image {
+  display: block; width: 100%; max-height: 360px; object-fit: cover; margin-bottom: 18px;
+  border: 1px solid var(--border); background: var(--surface-2);
+}
+.preview-url { font-size: 12px; word-break: break-all; }
+#preview-open svg { width: 15px; height: 15px; }
+
 .folder-field { justify-content: flex-start; width: 100%; height: 38px; font-weight: 500; }
 .folder-field span { flex: 1; text-align: left; overflow: hidden; text-overflow: ellipsis; }
 .folder-field .chev { color: var(--faint); }

@@ -89,9 +89,11 @@ async function type(text) {
   await sleep(200);
 }
 
+// Centred, not just brought into view: an element scrolled to the very top
+// sits under the sticky header, which then takes the click.
 async function click(sel, modifiers = 0) {
   const at = await ev(`(() => { const el = document.querySelector(${q(sel)}); if (!el) return null;
-    el.scrollIntoView({ block: 'nearest' }); const r = el.getBoundingClientRect();
+    el.scrollIntoView({ block: 'center' }); const r = el.getBoundingClientRect();
     return [r.x + r.width / 2, r.y + r.height / 2]; })()`);
   if (!at) { bad(`nothing to click at ${sel}`); return; }
   const [x, y] = at;
@@ -820,6 +822,95 @@ await click('#palettes [data-theme="catppuccin-latte"]');
 is(await ev('getComputedStyle(document.body).backgroundColor'), 'rgb(239, 241, 245)', 'a light one works the same');
 await click('#theme [data-theme="auto"]');
 is([await ev('document.documentElement.dataset.theme ?? null'), await ev("localStorage.getItem('bookmarks_theme')")], [null, 'auto'], 'System goes back to following the system');
+
+/* ---------------- previews ---------------- */
+// What the server says about a link, and the site a frame loads, are both
+// answered here, over the DevTools protocol: no test reaches the internet,
+// and the backend's side of it is covered by the node suite.
+group('previews');
+const FRAMED = 'https://framed.example/page';
+let previewReply = null;
+let previewAsks = 0;
+let framedLoads = 0;
+cdp.on((m) => {
+  if (m.method !== 'Fetch.requestPaused') return;
+  const { requestId, request } = m.params;
+  const body = (s) => Buffer.from(s).toString('base64');
+  if (request.url.includes('/api/preview')) {
+    previewAsks += 1;
+    cdp.send('Fetch.fulfillRequest', { requestId, responseCode: 200,
+      responseHeaders: [{ name: 'content-type', value: 'application/json' }], body: body(JSON.stringify(previewReply)) });
+  } else {
+    framedLoads += 1;
+    cdp.send('Fetch.fulfillRequest', { requestId, responseCode: 200,
+      responseHeaders: [{ name: 'content-type', value: 'text/html' }], body: body('<h1>framed page</h1>') });
+  }
+});
+await cdp.send('Fetch.enable', { patterns: [{ urlPattern: '*/api/preview*' }, { urlPattern: 'https://framed.example/*' }] });
+const reply = (over) => ({ url: FRAMED, final_url: FRAMED, title: 'Framed', description: '', image: '', icon: '', site: 'framed.example', frame: true, ...over });
+const previewOpen = () => ev("document.querySelector('#dlg-preview').open");
+const pointAt = async (sel, dx = 0) => {
+  const at = await ev(`(() => { const r = document.querySelector(${q(sel)})?.getBoundingClientRect();
+    return r ? [r.x + r.width / 2 + ${dx}, r.y + r.height / 2] : null; })()`);
+  if (at) await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: at[0], y: at[1] });
+  return at;
+};
+
+await go('#/links');
+previewReply = reply();
+// The second link for the pointer, the first for the keyboard: each link's
+// preview is kept for the session, so the two must be different links.
+const HOVERED = '#list .row[data-i="1"]';
+await pointAt(HOVERED);
+await sleep(700);
+is(await previewOpen(), false, 'passing over a link opens nothing, not even after most of a second');
+await pointAt(HOVERED, 8);
+await sleep(1400);
+is(await previewOpen(), true, 'resting on it opens the preview');
+const frame = await until(() => ev("document.querySelector('#preview-body iframe')?.getAttribute('src') ?? null"));
+is(frame, FRAMED, 'a site that allows it is shown in a frame');
+is(await ev("document.querySelector('#preview-body iframe').getAttribute('sandbox').split(' ').includes('allow-top-navigation')"), false,
+  'which cannot navigate the app away');
+// A frame from another site runs in a process of its own and is not in this
+// page's frame tree; the request for its page is what shows it loaded.
+is(await until(() => framedLoads > 0), true, 'and the browser loads the page in it');
+is(await hidden('#preview-mode'), false, 'with a switch to the card');
+await click('#preview-mode [data-mode="card"]');
+is(await ev("[!!document.querySelector('#preview-body iframe'), !!document.querySelector('.preview-card')]"), [false, true],
+  'the switch shows the card instead');
+
+await pointAt('#dlg-preview');
+await sleep(100);
+await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 3, y: 3 });
+await sleep(150);
+is(await previewOpen(), true, 'a moment outside is not leaving yet');
+await sleep(600);
+is(await previewOpen(), false, 'a preview the pointer opened closes when the pointer leaves it');
+
+previewReply = reply({ url: 'https://closed.example/', final_url: 'https://closed.example/', title: 'Closed',
+  description: 'What the page says about itself', site: 'Closed Site', frame: false });
+await ev('document.activeElement.blur()');
+for (let k = 0; k < 4; k++) await key('ArrowUp', 'ArrowUp', 38);
+is(await ev("document.querySelector('.row.cursor')?.dataset.i ?? null"), '0', 'the cursor on the first link');
+await letter('p');
+is(await until(() => ev("document.querySelector('.preview-card')?.innerText.includes('What the page says about itself') ?? false")), true,
+  'p previews the link under the cursor, and a site that refuses frames gets the card');
+is([await hidden('#preview-mode'), !!(await ev("document.querySelector('#preview-body iframe')"))], [true, false], 'with no frame to switch to');
+is((await text('#preview-body .hint')).includes('does not let other pages show it'), true, 'and says why');
+await key('Escape', 'Escape', 27);
+is(await previewOpen(), false, 'Esc closes it');
+is(await ev("document.querySelector('#preview-body').innerHTML"), '', 'and the frame goes with it');
+
+await go('#/settings');
+await click('#preview-hover [data-hover="off"]');
+await go('#/links');
+const asked = previewAsks;
+await pointAt('#list .row[data-i="2"]', 4);
+await sleep(1400);
+is([await previewOpen(), previewAsks], [false, asked], 'with hover turned off in Settings, resting opens nothing');
+await go('#/settings');
+await click('#preview-hover [data-hover="on"]');
+await cdp.send('Fetch.disable');
 
 group('signing out');
 await click('#btn-signout');

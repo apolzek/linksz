@@ -170,3 +170,68 @@ test('only http and https', async () => {
   assert.equal((await t.titleFor('file:///etc/passwd')).source, 'none');
   assert.equal((await t.titleFor('ftp://example.com/some-file-name')).title, 'Some File Name', 'the address still reads');
 });
+
+/* ---------------- previews ---------------- */
+
+test('a frame only where the site says every origin may show it', () => {
+  assert.equal(t.frameable({}), true, 'nothing said, nothing refused');
+  assert.equal(t.frameable({ 'x-frame-options': 'DENY' }), false);
+  assert.equal(t.frameable({ 'x-frame-options': 'sameorigin' }), false);
+  assert.equal(t.frameable({ 'x-frame-options': 'ALLOW-FROM https://a.example' }), false);
+  assert.equal(t.frameable({ 'content-security-policy': "default-src 'self'; frame-ancestors 'none'" }), false);
+  assert.equal(t.frameable({ 'content-security-policy': "frame-ancestors 'self' https://*.example.com" }), false,
+    'naming origins is not naming this one');
+  assert.equal(t.frameable({ 'content-security-policy': 'frame-ancestors *' }), true);
+  assert.equal(t.frameable({ 'content-security-policy': "script-src 'self'" }), true, 'other directives do not count');
+  assert.equal(t.frameable({ 'content-security-policy': ["frame-ancestors *", "frame-ancestors 'none'"] }), false,
+    'two policies: both must allow it');
+});
+
+test('a preview reads the card off the page, and the frame off its headers', async () => {
+  const pages = http.createServer((req, res) => {
+    if (req.url === '/open') {
+      res.writeHead(200, { 'content-type': 'text/html' });
+      return res.end(`<head><title>Open page | Example</title>
+        <meta property="og:description" content="What it is &amp; why.">
+        <meta property="og:image" content="/cover.png"><meta property="og:site_name" content="Example">
+        <link rel="icon" href="/fav.svg"></head>`);
+    }
+    if (req.url === '/closed') {
+      res.writeHead(200, { 'content-type': 'text/html', 'x-frame-options': 'DENY' });
+      return res.end('<head><meta name="description" content="Plain description"><title>Closed page</title></head>');
+    }
+    if (req.url === '/moved') { res.writeHead(301, { location: '/open' }); return res.end(); }
+    res.writeHead(404); res.end();
+  });
+  await new Promise((r) => pages.listen(0, '127.0.0.1', r));
+  const at = `http://127.0.0.1:${pages.address().port}`;
+  try {
+    const open = await t.previewFor(`${at}/open`, loopbackOnly);
+    assert.deepEqual(open, {
+      url: `${at}/open`, final_url: `${at}/open`, title: 'Open page | Example', description: 'What it is & why.',
+      image: `${at}/cover.png`, icon: `${at}/fav.svg`, site: 'Example', frame: true,
+    });
+
+    const closed = await t.previewFor(`${at}/closed`, loopbackOnly);
+    assert.equal(closed.frame, false);
+    assert.equal(closed.description, 'Plain description');
+    assert.equal(closed.icon, `${at}/favicon.ico`, 'no icon named, the usual place');
+
+    const moved = await t.previewFor(`${at}/moved`, loopbackOnly);
+    assert.equal(moved.final_url, `${at}/open`, 'the frame loads where the link ends up');
+    assert.equal(moved.url, `${at}/moved`);
+
+    const gone = await t.previewFor(`${at}/missing/an-old-article`, loopbackOnly);
+    assert.equal(gone.frame, false, 'an error page is not framed');
+    assert.equal(gone.title, 'An Old Article');
+  } finally { pages.close(); }
+});
+
+test('a preview never reaches a private address, and never throws', async () => {
+  const before = hits;
+  const r = await t.previewFor(`${base}/gzip`);
+  assert.equal(r.frame, false);
+  assert.equal(r.description, '');
+  assert.equal(hits, before, 'the server never saw the request');
+  assert.equal((await t.previewFor('not a url')).frame, false);
+});

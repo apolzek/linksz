@@ -123,12 +123,13 @@ function fetchHead(url, { allow, timeout, maxBytes }, hops = 0) {
         const next = new URL(res.headers.location, u).toString();
         return fetchHead(next, { allow, timeout, maxBytes }, hops + 1).then(resolve, reject);
       }
+      const meta = { status, headers: res.headers, url: u.toString() };
       const type = String(res.headers['content-type'] || '');
-      if (type && !/html|xml/i.test(type)) { res.resume(); return resolve({ status, html: '' }); }
+      if (type && !/html|xml/i.test(type)) { res.resume(); return resolve({ ...meta, html: '' }); }
       const body = decoder(res);
       const chunks = [];
       let size = 0;
-      const done = () => resolve({ status, html: Buffer.concat(chunks).toString('utf8') });
+      const done = () => resolve({ ...meta, html: Buffer.concat(chunks).toString('utf8') });
       body.on('data', (chunk) => {
         chunks.push(chunk);
         size += chunk.length;
@@ -314,4 +315,71 @@ async function titleFor(url, { allow = isPublicAddress, timeout = TIMEOUT_MS, ma
   return { title: fromUrl, source: fromUrl ? 'url' : 'none' };
 }
 
-module.exports = { titleFor, titleFromUrl, titleInHtml, cleanTitle, isGeneric, isPublicAddress, humanize };
+/* ---------------- a preview ---------------- */
+
+// Whether the site lets another page show it in a frame. Asked of the headers
+// it sends this server, which are the ones it sends a browser too: both
+// X-Frame-Options and CSP frame-ancestors are response headers, never read
+// from the page's own <meta>. Anything but an explicit yes to every origin is
+// a no, since the origin asking (localhost, or whatever host serves the app)
+// is not one a site would ever name.
+function frameable(headers = {}) {
+  const xfo = String(headers['x-frame-options'] || '').trim().toLowerCase();
+  if (xfo && xfo !== 'allowall') return false;
+  const csp = [].concat(headers['content-security-policy'] || []).join(',');
+  for (const policy of csp.split(',')) {
+    const directive = policy.split(';').map((d) => d.trim().toLowerCase()).find((d) => /^frame-ancestors(\s|$)/.test(d));
+    if (directive && !directive.split(/\s+/).slice(1).includes('*')) return false;
+  }
+  return true;
+}
+
+// An address from the page, made absolute, and only if it is http(s): the
+// browser loads it as an image, so nothing else gets in.
+function absolute(ref, base) {
+  if (!ref) return '';
+  try {
+    const u = new URL(ref, base);
+    return u.protocol === 'http:' || u.protocol === 'https:' ? u.toString() : '';
+  } catch { return ''; }
+}
+
+function iconInHtml(html, base) {
+  for (const tag of html.match(/<link\b[^>]*>/gi) || []) {
+    const rel = /\brel\s*=\s*["']([^"']+)["']/i.exec(tag);
+    if (!rel || !/(^|\s)(icon|apple-touch-icon)(\s|$)/i.test(rel[1])) continue;
+    const href = /\bhref\s*=\s*"([^"]*)"|\bhref\s*=\s*'([^']*)'/i.exec(tag);
+    const url = href && absolute(decodeEntities(href[1] ?? href[2]), base);
+    if (url) return url;
+  }
+  return absolute('/favicon.ico', base);
+}
+
+const clip = (s, n) => (s.length > n ? `${s.slice(0, n - 1).trimEnd()}…` : s);
+
+// What the preview of a link shows: the page itself in a frame when the site
+// allows it, and either way a card from what the page says about itself. Never
+// throws: an unreachable page is a card with the address's title and no frame.
+async function previewFor(url, { allow = isPublicAddress, timeout = TIMEOUT_MS, maxBytes = MAX_BYTES } = {}) {
+  const out = { url, final_url: url, title: '', description: '', image: '', icon: '', site: hostOf(url), frame: false };
+  try {
+    const page = await fetchHead(url, { allow, timeout, maxBytes });
+    out.final_url = page.url;
+    const ok = page.status >= 200 && page.status < 300;
+    out.frame = ok && frameable(page.headers);
+    if (ok && page.html) {
+      const { html } = page;
+      const title = cleanTitle(titleInHtml(html, page.url), page.url);
+      if (!isGeneric(title, page.url)) out.title = title;
+      out.description = clip(metaContent(html, 'og:description') || metaContent(html, 'description')
+        || metaContent(html, 'twitter:description'), 300);
+      out.image = absolute(metaContent(html, 'og:image') || metaContent(html, 'twitter:image'), page.url);
+      out.icon = iconInHtml(html, page.url);
+      out.site = metaContent(html, 'og:site_name') || hostOf(page.url);
+    }
+  } catch { /* unreachable, blocked or broken: what the address says */ }
+  if (!out.title) out.title = titleFromUrl(url);
+  return out;
+}
+
+module.exports = { previewFor, frameable, titleFor, titleFromUrl, titleInHtml, cleanTitle, isGeneric, isPublicAddress, humanize };
