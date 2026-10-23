@@ -1072,7 +1072,7 @@ function createApp(dbPath, { titles = {} } = {}) {
     try {
       if (!pathname.startsWith('/api/')) return serveStatic(res, pathname);
       if (pathname === '/api/health') {
-        return json(res, 200, { ok: true, service: 'bookmarks', build: buildInfo() });
+        return json(res, 200, { ok: true, service: 'linksz', build: buildInfo() });
       }
 
       const key = `${req.method} ${pathname}`;
