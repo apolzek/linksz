@@ -1,4 +1,4 @@
-# Node is here for the test suite: the app itself runs in containers.
+# Node is here for the test suite; the stack itself runs in containers.
 [tools]
 node = "24"
 

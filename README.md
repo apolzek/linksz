@@ -6,39 +6,106 @@ opens with its access key.
 
 ## Running it
 
-On Omarchy, or any Linux with Docker, from the published images:
+Three ways in, and they are different things. Pick one.
+
+| | what it is | for |
+|---|---|---|
+| [Desktop](#1-desktop-no-docker) | Node on your machine, a window in the app menu | using it on Omarchy or any Linux desktop |
+| [Docker, local](#2-docker-compose-from-a-clone) | the two containers, built from a clone | working on the code |
+| [Docker, server](#3-docker-from-the-published-images) | the two containers, from the published images | a machine that serves it to others |
+
+All three serve the app on http://localhost:8080 by default. Run one at a
+time: they answer on the same port.
+
+### 1. Desktop, no Docker
 
     curl -fsSL https://raw.githubusercontent.com/apolzek/linksz/master/install.sh | bash
 
-It keeps everything in `~/.local/share/linksz`, serves the app on
-http://localhost:8080 and, on Omarchy, adds it to the app menu.
-`... | bash -s -- --remove` takes it out again and leaves the vault.
+What it does:
 
-From a clone, building the two containers:
+* puts the code in `~/.local/share/linksz/app` and the vault in
+  `~/.local/share/linksz/data`;
+* runs the backend with the Node on your machine (22.13 or later; on Omarchy
+  it installs Node 24 with mise if yours is older or missing), as a systemd
+  user service, `linksz.service`, that starts with your session and listens
+  on 127.0.0.1 only;
+* adds **Linksz** to the app menu (Super+Alt+Space, type "linksz"). It opens
+  in a window of its own, with no tabs and no address bar, and starts the
+  backend first if it is not up.
+
+The backend serves the page and the API on one origin by itself, so there is
+no nginx and no container. Running the same line again updates it. A Docker
+install from an earlier version of this script is stopped and replaced, and
+its vault is the one the desktop install uses.
+
+    curl -fsSL .../install.sh | bash -s -- --remove     take it out, keep the vault
+    systemctl --user status linksz                      is it up
+    journalctl --user -u linksz                         its log
+
+`LINKSZ_PORT`, `LINKSZ_VAULT_DIR` and `LINKSZ_HOME` in front of `bash`
+change the port and the directories.
+
+### 2. Docker compose, from a clone
 
     git clone https://github.com/apolzek/linksz.git
     cd linksz
     docker compose up -d --build
 
-Open http://localhost:8080 and choose **Create one**. The app makes a vault and
-shows its access key, once: keep it in a password manager, because it is the
-only way in and only its hash is stored. On another device, paste the same key.
+Builds both images from the working tree and serves http://localhost:8080. The
+vault is `./data`, or `LINKSZ_VAULT_DIR` in `.env` (copy `.env.example`).
+
+    docker compose up -d --build     apply a change
+    docker compose logs -f           follow both containers
+    docker compose down              stop; the vault stays on disk
+
+To give it a launcher in the Omarchy menu as well: `bash omarchy/install.sh`.
+
+### 3. Docker, from the published images
+
+    curl -fsSL https://raw.githubusercontent.com/apolzek/linksz/master/install-docker.sh | bash
+
+Pulls `ghcr.io/apolzek/linksz-api` and `-web`, keeps its compose file and the
+vault in `~/.local/share/linksz`, and publishes the app on 127.0.0.1:8080. It
+adds nothing to the app menu: reaching it from other machines takes TLS in
+front, see [It is an app, not a page](#it-is-an-app-not-a-page).
+`... | bash -s -- --remove` stops it and leaves the vault. `docs/containers.md`
+has the rest: the images, the environment, backups.
+
+### The browser extension
+
+Saves the page you are on and searches the vault from the address bar, in
+Chromium. It talks to whichever of the three is running.
+
+    bash ~/.local/share/linksz/app/extension/install.sh     after the desktop install
+    bash extension/install.sh                               from a clone
+
+Then restart Chromium, click the Linksz button and **Connect through the app**.
+`--remove` takes it out. It adds the folder to the `--load-extension` line of
+`~/.config/chromium-flags.conf`, which is how Omarchy loads its own. In branded
+Google Chrome, which ignores that line: `chrome://extensions`, Developer mode,
+**Load unpacked**, and pick the `extension` folder.
+[extension/README.md](extension/README.md) has the rest.
+
+### The first time
+
+Open the app and choose **Create one**. The app makes a vault and shows its
+access key, once: keep it in a password manager, because it is the only way in
+and only its hash is stored. On another device, paste the same key.
 
 A vault from before the keys keeps every bookmark and gets a key on its first
-boot with this version, printed once in `docker compose logs api`. A lost key
-is never read back, but the host can always issue a new one:
+boot with this version, printed once in the backend's log
+(`journalctl --user -u linksz`, or `docker compose logs api`). A lost key is
+never read back, but the host can always issue a new one:
 
     docker compose exec api node api/keys.js              list the vaults
     docker compose exec api node api/keys.js issue 1      a new key for vault 1
 
+On the desktop, the same script against the vault the service opens:
+
+    LINKSZ_DB=~/.local/share/linksz/data/bookmarks.db node ~/.local/share/linksz/app/api/keys.js
+
 Settings has **Generate a new key** too: the old one stops working at once, and
 every other device signed in with it is signed out.
-
-The vault is a plain SQLite file in a directory on your machine, mounted into
-the api container. By default that is `./data`; to point it at one you already
-have, copy `.env.example` to `.env` and set `LINKSZ_VAULT_DIR` along with
-the uid that owns it. `docs/containers.md` has the rest: the published images,
-the environment, backups.
 
 ## It is an app, not a page
 
@@ -169,23 +236,9 @@ Either way the phone needs the app over https, see
 
 ## On the desktop (Omarchy)
 
-The same app, in a window of its own and in the app launcher. Omarchy turns any
-address into a desktop app with a launcher entry:
-
-    omarchy webapp install "Linksz" "http://localhost:8080" "$PWD/web/icon-512.png"
-
-It opens in Chromium's app mode: no tabs and no address bar, and the same code
-the browser runs, so a `docker compose up -d --build` is all an update takes.
-To take it out of the launcher:
-
-    omarchy webapp remove Linksz
-
-The window is only as up as the stack. The containers restart with Docker
-(`restart: unless-stopped`), but Arch starts Docker on first use, not at boot,
-so after a reboot the app would say the server is not answering. To have it up
-from boot:
-
-    sudo systemctl enable docker
+The [desktop install](#1-desktop-no-docker) is the way: a window of its own,
+in the app menu, with the backend kept up by your session and no Docker at
+all.
 
 Elsewhere: Chrome and Edge install it from the icon in the address bar, on any
 system, with the same result.
@@ -293,8 +346,8 @@ Chrome or Docker.
     mise run test      the suite
     mise run test-all  the suite plus the browser and the docker stack
 
-`mise` only pins Node 24 for the test suite; the app itself needs nothing but
-Docker. Without mise, the same commands are `docker compose up -d --build` and
+`mise` only pins Node 24 for the test suite and the desktop install; the
+containers need nothing but Docker. Without mise, the same commands are `docker compose up -d --build` and
 `bash tests/run.sh`.
 
 Environment variables live in `.env` and are documented in

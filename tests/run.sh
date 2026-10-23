@@ -2,7 +2,7 @@
 # Runs the whole suite.
 #
 #   bash tests/run.sh              api, search, yaml, import/export, the address
-#                                  bar and the theme
+#                                  bar, the theme and the desktop install
 #   bash tests/run.sh --web        adds the browser tests: the app (needs Chrome)
 #                                  and the extension (needs Chromium)
 #   bash tests/run.sh --compose    adds the Docker stack (needs Docker)
@@ -33,6 +33,9 @@ node --test tests/api.test.js tests/sessions.test.js
 
 heading "audit trail: link changes and clicks (node:test)"
 node --test tests/audit.test.js
+
+heading "desktop install: the service, the launcher, the menu entry (node:test)"
+node --test tests/install.test.mjs
 
 heading "browser extension: its pieces, its client on the real backend, its installer (node:test)"
 node --test extension/test/*.test.mjs

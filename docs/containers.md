@@ -188,6 +188,9 @@ baked into the image, not mounted.
 
 ## On Omarchy
 
+To use it on the desktop, the desktop install in the README is simpler: no
+containers at all. This is for the stack of a clone:
+
     bash omarchy/install.sh            add Linksz to the app menu
     bash omarchy/install.sh --remove   take it out again
 

@@ -18,13 +18,18 @@ api/        backend: HTTP, SQLite, import/export. Node built-ins only, no deps
 web/        the PWA, and the nginx image that serves it
 docs/       how to run it
 tests/      one suite for all of it: bash tests/run.sh
-omarchy/    adds it to the Omarchy app menu: bash omarchy/install.sh
+omarchy/    a menu entry for the stack of a clone: bash omarchy/install.sh
+install.sh  the desktop install; install-docker.sh, the published images
 extension/  the browser extension, self-contained: code, tests, installer
 ```
 
-It runs in containers, and only there: `docker compose up -d --build`, then
-http://localhost:8080. Two services, api and web. nginx serves the PWA and
-proxies `/api` to the backend, so the browser sees one origin.
+It runs two ways, and they are kept apart. In containers:
+`docker compose up -d --build` from a clone, or `install-docker.sh` from the
+published images, then http://localhost:8080. Two services, api and web; nginx
+serves the PWA and proxies `/api` to the backend, so the browser sees one
+origin. On the desktop: `install.sh` runs `api/server.js` with the host's Node
+as a systemd user service, and the backend serves the PWA itself on the same
+origin, with no Docker and no nginx. Both have to keep working.
 
 Three rules the code depends on:
 
