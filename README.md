@@ -304,8 +304,8 @@ there for something else that wants to drive the API from a page.
 Each image is versioned by the last commit that touched it, so a frontend
 release leaves the backend on the tag it had:
 
-    nochaos/linksz-api      the backend
-    nochaos/linksz-web      nginx: the PWA, and /api proxied to the api
+    ghcr.io/apolzek/linksz-api      the backend
+    ghcr.io/apolzek/linksz-web      nginx: the PWA, and /api proxied to the api
 
 nginx serves the PWA and proxies `/api`, so the browser sees one origin, which
 is what the session token and the service worker want. The api publishes no

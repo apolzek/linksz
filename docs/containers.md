@@ -2,8 +2,8 @@
 
 Two images, each versioned by the last commit that touched it:
 
-    nochaos/linksz-api      the backend
-    nochaos/linksz-web      nginx: the PWA, and /api proxied to the api
+    ghcr.io/apolzek/linksz-api      the backend
+    ghcr.io/apolzek/linksz-web      nginx: the PWA, and /api proxied to the api
 
 From a clone that builds them:
 
@@ -21,7 +21,7 @@ From the published images, with no clone at all:
 
     services:
       api:
-        image: nochaos/linksz-api:latest
+        image: ghcr.io/apolzek/linksz-api:latest
         environment:
           LINKSZ_HOST: 0.0.0.0
           LINKSZ_DB: /data/bookmarks.db
@@ -30,7 +30,7 @@ From the published images, with no clone at all:
         # is root's too instead of yours.
         volumes: ["./data:/data"]
       web:
-        image: nochaos/linksz-web:latest
+        image: ghcr.io/apolzek/linksz-web:latest
         depends_on: { api: { condition: service_healthy } }
         ports: ["8080:80"]
 
