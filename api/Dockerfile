@@ -8,14 +8,14 @@ FROM node:24-alpine
 
 # Which commit this image was built from, and when. The pipeline fills them in;
 # built by hand they stay empty and the app falls back to asking git.
-ARG BOOKMARKS_COMMIT=""
-ARG BOOKMARKS_DEPLOYED_AT=""
+ARG LINKSZ_COMMIT=""
+ARG LINKSZ_DEPLOYED_AT=""
 
-LABEL org.opencontainers.image.title="Bookmarks API" \
+LABEL org.opencontainers.image.title="Linksz API" \
       org.opencontainers.image.description="Self-hosted bookmark manager with instant substring search" \
-      org.opencontainers.image.source="https://github.com/nochaosio/bookmarks.nochaos.io" \
-      org.opencontainers.image.revision="${BOOKMARKS_COMMIT}" \
-      org.opencontainers.image.created="${BOOKMARKS_DEPLOYED_AT}"
+      org.opencontainers.image.source="https://github.com/apolzek/linksz" \
+      org.opencontainers.image.revision="${LINKSZ_COMMIT}" \
+      org.opencontainers.image.created="${LINKSZ_DEPLOYED_AT}"
 
 WORKDIR /app
 
@@ -37,9 +37,9 @@ COPY api/entrypoint.sh /usr/local/bin/entrypoint.sh
 # owns it on the host, and the server itself never runs as root.
 RUN apk --no-cache upgrade \
     && apk add --no-cache su-exec \
-    && addgroup -S bookmarks && adduser -S -G bookmarks bookmarks \
+    && addgroup -S linksz && adduser -S -G linksz linksz \
     && mkdir -p /data \
-    && chown -R bookmarks:bookmarks /data /app \
+    && chown -R linksz:linksz /data /app \
     && chmod +x /usr/local/bin/entrypoint.sh \
     && rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack \
               /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack \
@@ -48,17 +48,17 @@ RUN apk --no-cache upgrade \
 # No `USER` on purpose: the entrypoint starts as root, resolves which uid owns
 # the vault and drops to it. See api/entrypoint.sh.
 
-ENV BOOKMARKS_HOST=0.0.0.0 \
-    BOOKMARKS_PORT=8787 \
-    BOOKMARKS_DB=/data/bookmarks.db \
-    BOOKMARKS_COMMIT=${BOOKMARKS_COMMIT} \
-    BOOKMARKS_DEPLOYED_AT=${BOOKMARKS_DEPLOYED_AT}
+ENV LINKSZ_HOST=0.0.0.0 \
+    LINKSZ_PORT=8787 \
+    LINKSZ_DB=/data/bookmarks.db \
+    LINKSZ_COMMIT=${LINKSZ_COMMIT} \
+    LINKSZ_DEPLOYED_AT=${LINKSZ_DEPLOYED_AT}
 
 EXPOSE 8787
 VOLUME ["/data"]
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
-  CMD node -e "fetch('http://127.0.0.1:'+process.env.BOOKMARKS_PORT+'/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+  CMD node -e "fetch('http://127.0.0.1:'+process.env.LINKSZ_PORT+'/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 CMD ["node", "api/server.js"]

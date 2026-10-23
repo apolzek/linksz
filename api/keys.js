@@ -2,7 +2,7 @@
 //
 // A key is shown once and only its hash is kept, so a lost key cannot be read
 // back. Whoever runs the host can always issue a new one, which is what this is
-// for. It works on the same database the server uses (BOOKMARKS_DB), and the
+// for. It works on the same database the server uses (LINKSZ_DB), and the
 // server does not need to stop: SQLite in WAL takes the write.
 //
 //   node api/keys.js                 lists the vaults

@@ -21,7 +21,7 @@ const os = require('node:os');
 const crypto = require('node:crypto');
 
 function defaultDbPath() {
-  if (process.env.BOOKMARKS_DB) return process.env.BOOKMARKS_DB;
+  if (process.env.LINKSZ_DB) return process.env.LINKSZ_DB;
   const base = process.env.XDG_DATA_HOME || path.join(os.homedir(), '.local', 'share');
   return path.join(base, 'bookmarks', 'bookmarks.db');
 }

@@ -12,7 +12,7 @@ const path = require('node:path');
 const { createApp, issueMissingKeys, ensureDevVault } = require('../api/server');
 const { newAccessKey, normalizeKey, hashKey } = require('../api/auth');
 
-const tmpDb = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'bookmarks-test-')), 'bookmarks.db');
+const tmpDb = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'linksz-test-')), 'bookmarks.db');
 const { server } = createApp(tmpDb);
 let base;
 
@@ -361,8 +361,8 @@ test('the yaml export comes as a download with a filename', async () => {
   const r = await download('yaml');
   assert.equal(r.status, 200);
   assert.match(r.headers.get('content-type'), /yaml/);
-  assert.match(r.headers.get('content-disposition'), /attachment; filename="bookmarks-\d{4}-\d{2}-\d{2}\.yaml"/);
-  assert.match(r.text, /^# Bookmarks export/);
+  assert.match(r.headers.get('content-disposition'), /attachment; filename="linksz-\d{4}-\d{2}-\d{2}\.yaml"/);
+  assert.match(r.text, /^# Linksz export/);
   assert.match(r.text, /^folders:$/m, 'grouped by folder, one key per path');
 });
 
@@ -722,7 +722,7 @@ test('index points at the manifest, the icon and a mobile viewport', async () =>
 // Boots an app on a throwaway database with the environment of the moment, so
 // each case sees the allowlist it is about.
 async function withApp(env, fn) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bookmarks-cors-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'linksz-cors-'));
   const before = {};
   for (const [k, v] of Object.entries(env)) { before[k] = process.env[k]; process.env[k] = v; }
   const app = createApp(path.join(dir, 'bookmarks.db'));
@@ -750,7 +750,7 @@ test('by default no origin is allowed to read the API from a browser', async () 
 });
 
 test('a listed origin is allowed, one letter off is not', async () => {
-  await withApp({ BOOKMARKS_ALLOWED_ORIGINS: 'https://app.example, https://other.example/' }, async (url) => {
+  await withApp({ LINKSZ_ALLOWED_ORIGINS: 'https://app.example, https://other.example/' }, async (url) => {
     const yes = await fetch(url + '/api/health', { headers: { origin: 'https://app.example' } });
     assert.equal(yes.headers.get('access-control-allow-origin'), 'https://app.example');
 
@@ -764,7 +764,7 @@ test('a listed origin is allowed, one letter off is not', async () => {
 });
 
 test('the preflight answers only for an allowed origin', async () => {
-  await withApp({ BOOKMARKS_ALLOWED_ORIGINS: 'https://app.example' }, async (url) => {
+  await withApp({ LINKSZ_ALLOWED_ORIGINS: 'https://app.example' }, async (url) => {
     const yes = await fetch(url + '/api/bookmarks', {
       method: 'OPTIONS',
       headers: { origin: 'https://app.example', 'access-control-request-method': 'POST' },
@@ -782,7 +782,7 @@ test('the preflight answers only for an allowed origin', async () => {
 });
 
 test('* opens it back up, for whoever decides they want that', async () => {
-  await withApp({ BOOKMARKS_ALLOWED_ORIGINS: '*' }, async (url) => {
+  await withApp({ LINKSZ_ALLOWED_ORIGINS: '*' }, async (url) => {
     const r = await fetch(url + '/api/health', { headers: { origin: 'https://anywhere.example' } });
     assert.equal(r.headers.get('access-control-allow-origin'), 'https://anywhere.example');
   });
@@ -799,7 +799,7 @@ test('the static files carry no CORS header either', async () => {
 /* ---------------- sessions from before the hashes ---------------- */
 
 test('sessions that kept the token itself are hashed, and stay signed in', async () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bookmarks-plain-sessions-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'linksz-plain-sessions-'));
   const dbPath = path.join(dir, 'bookmarks.db');
   try {
     const { DatabaseSync } = require('node:sqlite');
@@ -854,7 +854,7 @@ function legacyDb(dbPath) {
 }
 
 test('an old vault keeps every bookmark and gets a key on boot', async () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bookmarks-legacy-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'linksz-legacy-'));
   const dbPath = path.join(dir, 'bookmarks.db');
   try {
     legacyDb(dbPath);
@@ -889,8 +889,8 @@ test('an old vault keeps every bookmark and gets a key on boot', async () => {
   }
 });
 
-test('BOOKMARKS_DEV_KEY makes one known vault, idempotently', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bookmarks-dev-'));
+test('LINKSZ_DEV_KEY makes one known vault, idempotently', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'linksz-dev-'));
   try {
     const app = createApp(path.join(dir, 'bookmarks.db'));
     const key = newAccessKey();
@@ -1530,7 +1530,7 @@ test('the title endpoint reads the page when it may, and writes nothing', async 
     res.end('<head><meta property="og:title" content="O Profeta - Khalil Gibran: Edição Integral"></head>');
   });
   await new Promise((r) => page.listen(0, '127.0.0.1', r));
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bookmarks-title-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'linksz-title-'));
   const app = createApp(path.join(dir, 'b.db'), { titles: { allow: (ip) => ip === '127.0.0.1' } });
   await new Promise((r) => app.server.listen(0, '127.0.0.1', r));
   const at = `http://127.0.0.1:${app.server.address().port}`;

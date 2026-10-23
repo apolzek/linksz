@@ -1,7 +1,7 @@
 {
   "id": "/",
-  "name": "Bookmarks",
-  "short_name": "Bookmarks",
+  "name": "Linksz",
+  "short_name": "Linksz",
   "description": "Self-hosted bookmark manager with instant search.",
   "start_url": "/",
   "scope": "/",

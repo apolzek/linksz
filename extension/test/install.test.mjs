@@ -19,7 +19,7 @@ function run(file, ...args) {
 }
 
 function tmp(content) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bookmarks-flags-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'linksz-flags-'));
   const file = path.join(dir, 'chromium-flags.conf');
   if (content != null) fs.writeFileSync(file, content);
   return { file, done: () => fs.rmSync(dir, { recursive: true, force: true }) };

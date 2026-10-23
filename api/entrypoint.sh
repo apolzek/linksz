@@ -8,7 +8,7 @@
 # everywhere else.
 #
 # The order is:
-#   1. BOOKMARKS_UID / BOOKMARKS_GID, when someone states them;
+#   1. LINKSZ_UID / LINKSZ_GID, when someone states them;
 #   2. otherwise whoever owns the vault directory on the host, which is the
 #      right answer by construction: the file stays readable and writable from
 #      both sides;
@@ -17,7 +17,7 @@
 #      because nothing here needs to run as root.
 set -eu
 
-DB="${BOOKMARKS_DB:-/data/bookmarks.db}"
+DB="${LINKSZ_DB:-/data/bookmarks.db}"
 DATA_DIR=$(dirname "$DB")
 
 # Already unprivileged: `docker run --user` or compose's `user:` won the
@@ -28,12 +28,12 @@ fi
 
 mkdir -p "$DATA_DIR"
 
-uid="${BOOKMARKS_UID:-$(stat -c %u "$DATA_DIR")}"
-gid="${BOOKMARKS_GID:-$(stat -c %g "$DATA_DIR")}"
+uid="${LINKSZ_UID:-$(stat -c %u "$DATA_DIR")}"
+gid="${LINKSZ_GID:-$(stat -c %g "$DATA_DIR")}"
 
 if [ "$uid" = "0" ]; then
-  uid=$(id -u bookmarks)
-  gid=$(id -g bookmarks)
+  uid=$(id -u linksz)
+  gid=$(id -g linksz)
 fi
 
 # Only when it is not already right: the vault can be a large directory the

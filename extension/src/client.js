@@ -17,7 +17,7 @@ export function createClient({ server, token = '', fetch = globalThis.fetch.bind
       headers: {
         ...(body !== undefined ? { 'content-type': 'application/json' } : {}),
         ...(token ? { authorization: `Bearer ${token}` } : {}),
-        'x-bookmarks-via': 'extension',
+        'x-linksz-via': 'extension',
       },
       body: body !== undefined ? JSON.stringify(body) : undefined,
       cache: 'no-store',

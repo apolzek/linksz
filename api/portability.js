@@ -166,7 +166,7 @@ function toYaml(bookmarks, { user = '', folders: known = [] } = {}) {
   }
 
   const header = [
-    'Bookmarks export',
+    'Linksz export',
     user ? `user: ${user}` : '',
     '',
     'Entries are grouped by folder, and the key is the whole path.',

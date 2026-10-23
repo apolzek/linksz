@@ -58,7 +58,7 @@ test('a click is trimmed, and its time kept unless the clock is absurd', () => {
 
 /* ---------------- through the API ---------------- */
 
-const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bookmarks-audit-'));
+const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'linksz-audit-'));
 const app = createApp(path.join(dir, 'b.db'));
 let base;
 let token;

@@ -120,7 +120,7 @@ function paintPane(p) {
 }
 
 function paintList(p) {
-  const S = globalThis.BookmarksSearch;
+  const S = globalThis.LinkszSearch;
   const t = store.tree();
   const q = p.filter.trim();
   const nq = S.norm(q);

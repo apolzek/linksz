@@ -6,7 +6,7 @@
 #
 # The vault is a directory on this machine, mounted into the api container, so
 # the SQLite file stays somewhere you can back up, copy and read without going
-# through docker. Where it lives is BOOKMARKS_VAULT_DIR in .env; the default is
+# through docker. Where it lives is LINKSZ_VAULT_DIR in .env; the default is
 # ./data next to this file.
 #
 # Why localhost and not the machine's IP: a PWA only installs, and a service
@@ -18,36 +18,36 @@
 # file's job: use a tunnel that already terminates TLS (Tailscale, Cloudflare)
 # or a reverse proxy you already run, and point it at web:80.
 
-name: bookmarks
+name: linksz
 
 services:
   api:
     build:
       context: .
       dockerfile: api/Dockerfile
-    image: bookmarks-api:local
+    image: linksz-api:local
     restart: unless-stopped
     environment:
-      BOOKMARKS_HOST: 0.0.0.0
-      BOOKMARKS_PORT: "8787"
-      BOOKMARKS_DB: /data/bookmarks.db
+      LINKSZ_HOST: 0.0.0.0
+      LINKSZ_PORT: "8787"
+      LINKSZ_DB: /data/bookmarks.db
       # Which uid the server runs as, so the vault stays readable and writable
       # from the host too. Empty on purpose: with nothing set, the entrypoint
       # takes the uid that owns the mounted directory, which is already the
       # right answer on any machine. Fill it in (`id -u`, `id -g`) only to
       # override that.
-      BOOKMARKS_UID: ${BOOKMARKS_UID:-}
-      BOOKMARKS_GID: ${BOOKMARKS_GID:-}
+      LINKSZ_UID: ${LINKSZ_UID:-}
+      LINKSZ_GID: ${LINKSZ_GID:-}
       # Which origins may drive the API from a browser. Empty is correct here:
       # nginx serves the PWA and proxies /api on one origin, so the app never
       # makes a cross-origin request. Fill it in (comma separated, or `*`) only
       # for something else that has to reach this API from a page.
-      BOOKMARKS_ALLOWED_ORIGINS: ${BOOKMARKS_ALLOWED_ORIGINS:-}
+      LINKSZ_ALLOWED_ORIGINS: ${LINKSZ_ALLOWED_ORIGINS:-}
     volumes:
       # The vault directory, not the file: SQLite writes bookmarks.db-wal and
       # bookmarks.db-shm next to it, and mounting the single file would strand
       # those inside the container.
-      - ${BOOKMARKS_VAULT_DIR:-./data}:/data
+      - ${LINKSZ_VAULT_DIR:-./data}:/data
     # No ports: the web container is what talks to it. To reach the API
     # directly (debugging), uncomment:
     # ports:
@@ -59,16 +59,16 @@ services:
     build:
       context: .
       dockerfile: web/Dockerfile
-    image: bookmarks-web:local
+    image: linksz-web:local
     restart: unless-stopped
     depends_on:
       api:
         condition: service_healthy
     ports:
-      # The front door. Its own variable, not BOOKMARKS_PORT: that one is the
+      # The front door. Its own variable, not LINKSZ_PORT: that one is the
       # port the API listens on inside its container, and reusing the name here
       # meant anything exporting it in the shell silently moved this one too.
-      - "${BOOKMARKS_WEB_PORT:-8080}:80"
+      - "${LINKSZ_WEB_PORT:-8080}:80"
     networks:
       - bookmarks
 

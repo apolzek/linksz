@@ -95,7 +95,7 @@ function inScope(b) {
 }
 
 function needlesOf(q) {
-  const S = globalThis.BookmarksSearch;
+  const S = globalThis.LinkszSearch;
   return S.parseQuery(q)
     .filter((t) => !t.negate && (t.field === 'any' || t.field === 'title' || t.field === 'url') && t.value)
     .map((t) => t.value);
@@ -104,7 +104,7 @@ function needlesOf(q) {
 // Re-runs the search. `reset` goes back to the top; without it (a sync landed,
 // a row was edited) the list keeps how far it was scrolled.
 export function refresh({ reset = false } = {}) {
-  const S = globalThis.BookmarksSearch;
+  const S = globalThis.LinkszSearch;
   const pool = view.scope === null ? store.all() : store.all().filter(inScope);
   view.results = S.search(pool, view.query, pool.length || 1);
   arrange();

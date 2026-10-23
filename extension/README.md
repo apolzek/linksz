@@ -1,6 +1,6 @@
 # Browser extension
 
-Saves the page you are on to your Bookmarks vault and searches it from the
+Saves the page you are on to your Linksz vault and searches it from the
 address bar. It talks to the same backend as the app, through the same API,
 with a session of its own. Nothing in here is needed to run the app; nothing
 outside here is needed to run the extension, except a server to talk to.
@@ -24,7 +24,7 @@ folder.
 
 ## Connect
 
-Click the Bookmarks button, check the server (`http://localhost:8080` by
+Click the Linksz button, check the server (`http://localhost:8080` by
 default) and click **Connect through the app**:
 
 1. The extension makes a one-time nonce, keeps it in memory, and opens
@@ -68,12 +68,12 @@ call gets a 401, the extension drops the token and asks to connect again.
   already and where, Save and Undo; it steps aside while there is a query.
 * **Address bar**: `bm`, a space, then what you are looking for. Enter opens
   the first match, or the one picked, and counts the open.
-* **Right click**: "Save page to Bookmarks", "Save link to Bookmarks". Both go
+* **Right click**: "Save page to Linksz", "Save link to Linksz". Both go
   to `Temporary`, and a page saved already is not saved twice.
 * **The button** shows ✓ on a page that is in the vault, ! when not connected.
 
 Everything it changes is marked `extension` in the app's audit log (the
-`X-Bookmarks-Via` header).
+`X-Linksz-Via` header).
 
 ## What it needs from the server
 
@@ -88,7 +88,7 @@ The API the app uses, plus:
   extension has the whole tree without loading every bookmark.
 
 No CORS: an extension with permission for a host is not held to it, so
-`BOOKMARKS_ALLOWED_ORIGINS` stays empty.
+`LINKSZ_ALLOWED_ORIGINS` stays empty.
 
 ## Tests
 

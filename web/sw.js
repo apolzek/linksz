@@ -12,8 +12,8 @@
 'use strict';
 
 // Bump this version whenever a shell file changes.
-const VERSION = 'v78';
-const SHELL_CACHE = `bookmarks-shell-${VERSION}`;
+const VERSION = 'v79';
+const SHELL_CACHE = `linksz-shell-${VERSION}`;
 
 const SHELL = [
   '/',
@@ -60,7 +60,7 @@ self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys()
       .then((keys) => Promise.all(
-        keys.filter((k) => k.startsWith('bookmarks-') && k !== SHELL_CACHE)
+        keys.filter((k) => /^(linksz|bookmarks)-/.test(k) && k !== SHELL_CACHE)
           .map((k) => caches.delete(k)),
       ))
       .then(() => self.clients.claim()),

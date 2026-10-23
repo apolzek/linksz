@@ -95,7 +95,7 @@ export function connectUrl(server, extensionId, nonce) {
 // extension started: the right type, from the server it opened, with the
 // nonce it made, in time. Returns the reason when it is not.
 export function checkConnect(msg, senderOrigin, pending, now = Date.now()) {
-  if (!msg || msg.type !== 'bookmarks-connect') return 'not a connection';
+  if (!msg || msg.type !== 'linksz-connect') return 'not a connection';
   if (!pending || !pending.nonce) return 'no connection is waiting';
   if (now - pending.at > CONNECT_TTL) return 'the connection waited too long';
   if (senderOrigin !== pending.server) return 'from another server';

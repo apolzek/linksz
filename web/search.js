@@ -244,5 +244,5 @@ function search(bookmarks, q, limit = 50) {
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = { search, parseQuery, tokenize, norm };
 } else {
-  globalThis.BookmarksSearch = { search, parseQuery, tokenize, norm };
+  globalThis.LinkszSearch = { search, parseQuery, tokenize, norm };
 }

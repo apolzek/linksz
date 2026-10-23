@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
-# Adds Bookmarks to the Omarchy app launcher, as a web app with its own window
+# Adds Linksz to the Omarchy app launcher, as a web app with its own window
 # and the app's own icon. Omarchy's app menu (Super+Alt+Space) lists every
 # .desktop entry in ~/.local/share/applications, which is where
 # omarchy-webapp-install writes it.
 #
-#   bash omarchy/install.sh            install, for http://localhost:$BOOKMARKS_WEB_PORT
+#   bash omarchy/install.sh            install, for http://localhost:$LINKSZ_WEB_PORT
 #   bash omarchy/install.sh --remove   take it out of the launcher
 #
 # It does not start the stack: that is `docker compose up -d --build`.
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
-NAME="Bookmarks"
+NAME="Linksz"
 
 if [[ ${1:-} == --remove ]]; then
   command -v omarchy-webapp-remove >/dev/null || { echo "omarchy-webapp-remove not found: is this Omarchy?" >&2; exit 1; }
@@ -25,7 +25,7 @@ command -v omarchy-webapp-install >/dev/null || { echo "omarchy-webapp-install n
 # purpose: a PWA needs a secure context, and localhost is one without TLS.
 PORT=8080
 if [[ -f .env ]]; then
-  v=$(sed -n 's/^BOOKMARKS_WEB_PORT=\([0-9]\+\).*/\1/p' .env | tail -1)
+  v=$(sed -n 's/^LINKSZ_WEB_PORT=\([0-9]\+\).*/\1/p' .env | tail -1)
   [[ -n $v ]] && PORT=$v
 fi
 URL="http://localhost:$PORT"

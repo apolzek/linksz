@@ -40,7 +40,7 @@ export function favicon(url, title) {
 export function highlight(text, needles) {
   const s = String(text || '');
   if (!needles.length || !s) return esc(s);
-  const norm = globalThis.BookmarksSearch.norm;
+  const norm = globalThis.LinkszSearch.norm;
   let flat = '';
   const map = [];
   for (let i = 0; i < s.length; i++) {
@@ -216,7 +216,7 @@ export function pickFolder({ title = 'Move to', current = null, exclude = () => 
   let options = [];
   let cur = 0;
 
-  const norm = globalThis.BookmarksSearch.norm;
+  const norm = globalThis.LinkszSearch.norm;
 
   function build() {
     const t = store.tree();

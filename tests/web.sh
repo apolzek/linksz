@@ -90,10 +90,10 @@ process.stdout.write(JSON.stringify({ version: 2, count: 1, folders, bookmarks }
 DEV_KEY=$(node -e 'console.log(require("./api/auth").newAccessKey())')
 
 echo "starting the backend on a throwaway vault"
-BOOKMARKS_DB="$WORK/bookmarks.db" \
-BOOKMARKS_HOST=127.0.0.1 \
-BOOKMARKS_PORT="$APP_PORT" \
-BOOKMARKS_DEV_KEY="$DEV_KEY" \
+LINKSZ_DB="$WORK/bookmarks.db" \
+LINKSZ_HOST=127.0.0.1 \
+LINKSZ_PORT="$APP_PORT" \
+LINKSZ_DEV_KEY="$DEV_KEY" \
   node api/server.js >"$WORK/server.log" 2>&1 &
 SERVER_PID=$!
 

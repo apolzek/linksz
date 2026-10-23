@@ -17,22 +17,22 @@ set -euo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
-PROJECT="bookmarks-test-$$"
+PROJECT="linksz-test-$$"
 COMPOSE=(docker compose -p "$PROJECT")
 # A second stack, for the fresh clone case at the end of this file.
-FRESH_PROJECT="bookmarks-fresh-$$"
+FRESH_PROJECT="linksz-fresh-$$"
 FRESH_COMPOSE=(docker compose -p "$FRESH_PROJECT")
 FRESH_PARENT=""
 FAILS=0
 
 # A throwaway vault. Without this the test would mount whatever
-# BOOKMARKS_VAULT_DIR points at in .env, which is the real one, and create
+# LINKSZ_VAULT_DIR points at in .env, which is the real one, and create
 # its test vaults in it.
 VAULT=$(mktemp -d)
-export BOOKMARKS_VAULT_DIR="$VAULT"
-export BOOKMARKS_UID="$(id -u)"
-export BOOKMARKS_GID="$(id -g)"
-export BOOKMARKS_ALLOWED_ORIGINS=""
+export LINKSZ_VAULT_DIR="$VAULT"
+export LINKSZ_UID="$(id -u)"
+export LINKSZ_GID="$(id -g)"
+export LINKSZ_ALLOWED_ORIGINS=""
 
 
 ok()   { printf '  \033[32m✔\033[0m %s\n' "$*"; }
@@ -62,7 +62,7 @@ info "starting the stack (the first build can take a while)"
 # An ephemeral published port: the test talks to the stack from inside the
 # docker network, so a fixed one here would only collide with whatever the
 # machine is already running.
-BOOKMARKS_WEB_PORT=0 "${COMPOSE[@]}" up -d --build >/dev/null 2>&1
+LINKSZ_WEB_PORT=0 "${COMPOSE[@]}" up -d --build >/dev/null 2>&1
 
 # web waits on the api being healthy, so waiting on web waits on both.
 for _ in $(seq 60); do
@@ -85,7 +85,7 @@ published=$("${COMPOSE[@]}" ps --format '{{.Service}} {{.Ports}}' | grep '^api' 
 [[ -f "$VAULT/bookmarks.db" ]] && ok "vault created in the mounted directory" \
   || bad "no bookmarks.db in $VAULT"
 [[ -w "$VAULT/bookmarks.db" ]] && ok "vault writable by the user who owns it" \
-  || bad "vault not writable on the host: check BOOKMARKS_UID"
+  || bad "vault not writable on the host: check LINKSZ_UID"
 [[ "$(stat -c %u "$VAULT/bookmarks.db")" == "$(id -u)" ]] \
   && ok "the server dropped to the uid that owns the vault" \
   || bad "vault owned by $(stat -c %U "$VAULT/bookmarks.db"), not by $(id -un)"
@@ -184,7 +184,7 @@ node -e "
   && ok "the host file is the vault, readable without docker" \
   || bad "the host file does not carry what the API wrote"
 
-# The fresh clone: BOOKMARKS_VAULT_DIR points at a directory that does not exist
+# The fresh clone: LINKSZ_VAULT_DIR points at a directory that does not exist
 # yet, so the docker daemon creates the bind mount and it lands owned by root.
 # Nothing in the environment says which uid to use either. The stack has to come
 # up anyway; this is the case that used to die on `unable to open database file`.
@@ -192,9 +192,9 @@ info "starting a second stack on a vault directory that does not exist"
 FRESH_PARENT=$(mktemp -d)
 FRESH_VAULT="$FRESH_PARENT/vault"
 (
-  unset BOOKMARKS_UID BOOKMARKS_GID
-  export BOOKMARKS_VAULT_DIR="$FRESH_VAULT"
-  BOOKMARKS_WEB_PORT=0 "${FRESH_COMPOSE[@]}" up -d --build >/dev/null 2>&1
+  unset LINKSZ_UID LINKSZ_GID
+  export LINKSZ_VAULT_DIR="$FRESH_VAULT"
+  LINKSZ_WEB_PORT=0 "${FRESH_COMPOSE[@]}" up -d --build >/dev/null 2>&1
 )
 for _ in $(seq 60); do
   fresh_status=$("${FRESH_COMPOSE[@]}" ps --format '{{.Service}} {{.Status}}' 2>/dev/null | grep '^api' || true)

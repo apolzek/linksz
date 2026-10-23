@@ -48,4 +48,4 @@ else
   write "$(others; echo "$DIR")"
   echo "Added to $FLAGS (the previous file is $FLAGS.bak)."
 fi
-echo "Restart Chromium, then click the Bookmarks button and \"Connect through the app\"."
+echo "Restart Chromium, then click the Linksz button and \"Connect through the app\"."

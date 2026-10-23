@@ -39,14 +39,14 @@ Three rules the code depends on:
   registers, only over https or on localhost. That is why localhost is the
   supported way in, and why a change that moves the app off localhost has to
   bring TLS with it.
-* **The vault is a file on the host.** `BOOKMARKS_VAULT_DIR` is bind-mounted at
+* **The vault is a file on the host.** `LINKSZ_VAULT_DIR` is bind-mounted at
   `/data`, so the api runs as the uid that owns it rather than the image's own
   user. Anything that starts the stack from this repository inherits the real
   `.env`, which is why `tests/compose.sh` exports a throwaway
-  `BOOKMARKS_VAULT_DIR` before it does: a test that creates vaults in
+  `LINKSZ_VAULT_DIR` before it does: a test that creates vaults in
   somebody's actual database is a bug, not a test.
 * **CORS is closed.** The API sets no `access-control-allow-origin` unless
-  `BOOKMARKS_ALLOWED_ORIGINS` names the origin. The app is same-origin behind
+  `LINKSZ_ALLOWED_ORIGINS` names the origin. The app is same-origin behind
   nginx and needs none, so anything that wants the header should say why.
 
 ## Before saying it works

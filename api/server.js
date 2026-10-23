@@ -151,7 +151,7 @@ const DAY = 86400000;
 // taken: the value ends up in the audit log.
 const CLIENTS = new Set(['extension']);
 function viaHeader(req) {
-  const v = String(req.headers['x-bookmarks-via'] || '').toLowerCase();
+  const v = String(req.headers['x-linksz-via'] || '').toLowerCase();
   return CLIENTS.has(v) ? v : '';
 }
 
@@ -199,8 +199,8 @@ function buildInfo() {
   if (buildInfoCache) return buildInfoCache;
 
   const fromEnv = {
-    commit: str(process.env.BOOKMARKS_COMMIT, 40),
-    deployed_at: str(process.env.BOOKMARKS_DEPLOYED_AT, 40),
+    commit: str(process.env.LINKSZ_COMMIT, 40),
+    deployed_at: str(process.env.LINKSZ_DEPLOYED_AT, 40),
   };
   if (fromEnv.commit) {
     buildInfoCache = { ...fromEnv, source: 'env' };
@@ -245,7 +245,7 @@ function createApp(dbPath, { titles = {} } = {}) {
   }
 
   // Which origins may drive this API from a browser, read from
-  // BOOKMARKS_ALLOWED_ORIGINS (comma separated). Empty is the default and the
+  // LINKSZ_ALLOWED_ORIGINS (comma separated). Empty is the default and the
   // right answer for the shipped stack: nginx serves the PWA and proxies /api
   // on one origin, so the browser never makes a cross-origin request and no
   // CORS header is needed for the app to work.
@@ -253,7 +253,7 @@ function createApp(dbPath, { titles = {} } = {}) {
   // `*` puts it back to answering everyone, which is a decision someone has to
   // write down rather than something inherited.
   const allowedOrigins = new Set(
-    String(process.env.BOOKMARKS_ALLOWED_ORIGINS || '')
+    String(process.env.LINKSZ_ALLOWED_ORIGINS || '')
       .split(',')
       .map((o) => o.trim().replace(/\/+$/, ''))
       .filter(Boolean),
@@ -601,11 +601,11 @@ function createApp(dbPath, { titles = {} } = {}) {
         yaml: () => [portability.toYaml(items, {
           user: user.name,
           folders: q.allFolders.all(user.id).map((f) => f.path),
-        }), 'application/yaml; charset=utf-8', `bookmarks-${stamp}.yaml`],
+        }), 'application/yaml; charset=utf-8', `linksz-${stamp}.yaml`],
         html: () => [portability.toNetscapeHtml(items),
-          'text/html; charset=utf-8', `bookmarks-${stamp}.html`],
+          'text/html; charset=utf-8', `linksz-${stamp}.html`],
         json: () => [portability.toJson(items, { folders: q.allFolders.all(user.id).map((f) => f.path) }),
-          'application/json; charset=utf-8', `bookmarks-${stamp}.json`],
+          'application/json; charset=utf-8', `linksz-${stamp}.json`],
       };
       if (!renderers[format]) return json(res, 400, { error: 'format must be yaml, html or json' });
 
@@ -1059,7 +1059,7 @@ function createApp(dbPath, { titles = {} } = {}) {
     const origin = req.headers.origin;
     if (origin && (anyOriginAllowed || allowedOrigins.has(origin.replace(/\/+$/, '')))) {
       res.setHeader('access-control-allow-origin', origin);
-      res.setHeader('access-control-allow-headers', 'content-type, authorization, x-bookmarks-via');
+      res.setHeader('access-control-allow-headers', 'content-type, authorization, x-linksz-via');
       res.setHeader('access-control-allow-methods', 'GET, POST, PUT, DELETE, OPTIONS');
       res.setHeader('access-control-max-age', '600');
     }
@@ -1124,12 +1124,12 @@ function issueMissingKeys(db) {
 }
 
 // A known vault for development and tests, opened by the key in
-// BOOKMARKS_DEV_KEY. Off unless that variable is set: a key in an environment
+// LINKSZ_DEV_KEY. Off unless that variable is set: a key in an environment
 // file is a key anyone who reads the file has.
-function ensureDevVault(db, raw = process.env.BOOKMARKS_DEV_KEY) {
+function ensureDevVault(db, raw = process.env.LINKSZ_DEV_KEY) {
   if (!raw) return null;
   const hash = hashKey(raw);
-  if (!hash) throw new Error('BOOKMARKS_DEV_KEY is not a valid access key (32 base32 characters)');
+  if (!hash) throw new Error('LINKSZ_DEV_KEY is not a valid access key (32 base32 characters)');
   const existing = db.prepare('SELECT id FROM users WHERE key_hash = ?').get(hash);
   if (existing) return { id: existing.id, created: false };
   const info = db.prepare('INSERT INTO users (name, key_hash, created_at) VALUES (?, ?, ?)').run('dev', hash, now());
@@ -1137,8 +1137,8 @@ function ensureDevVault(db, raw = process.env.BOOKMARKS_DEV_KEY) {
 }
 
 if (require.main === module) {
-  const port = Number(process.env.BOOKMARKS_PORT) || 8787;
-  const host = process.env.BOOKMARKS_HOST || '127.0.0.1';
+  const port = Number(process.env.LINKSZ_PORT) || 8787;
+  const host = process.env.LINKSZ_HOST || '127.0.0.1';
   const { server, db } = createApp();
 
   ensureDevVault(db);

@@ -41,7 +41,7 @@ read -r APP_PORT CDP_PORT < <(node -e '
 ')
 
 DEV_KEY=$(node -e 'console.log(require("./api/auth").newAccessKey())')
-BOOKMARKS_DB="$WORK/bookmarks.db" BOOKMARKS_HOST=127.0.0.1 BOOKMARKS_PORT="$APP_PORT" BOOKMARKS_DEV_KEY="$DEV_KEY" \
+LINKSZ_DB="$WORK/bookmarks.db" LINKSZ_HOST=127.0.0.1 LINKSZ_PORT="$APP_PORT" LINKSZ_DEV_KEY="$DEV_KEY" \
   node api/server.js >"$WORK/server.log" 2>&1 &
 SERVER_PID=$!
 for _ in $(seq 50); do curl -sf "http://127.0.0.1:$APP_PORT/api/health" >/dev/null 2>&1 && break; sleep 0.2; done

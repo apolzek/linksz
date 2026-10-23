@@ -142,7 +142,7 @@ export function connectRequest(hash = location.hash) {
 export async function connectExtension({ extensionId, nonce }) {
   const runtime = globalThis.chrome?.runtime;
   if (!runtime?.sendMessage) {
-    toast('No extension answers here. Open this from the Bookmarks extension, in Chrome or Chromium.', { error: true, ms: 8000 });
+    toast('No extension answers here. Open this from the Linksz extension, in Chrome or Chromium.', { error: true, ms: 8000 });
     return false;
   }
   const yes = await confirmDialog({
@@ -158,7 +158,7 @@ export async function connectExtension({ extensionId, nonce }) {
   } catch (err) { fail(err); return false; }
   const answer = await new Promise((resolve) => {
     try {
-      runtime.sendMessage(extensionId, { type: 'bookmarks-connect', nonce, token, user }, (r) => {
+      runtime.sendMessage(extensionId, { type: 'linksz-connect', nonce, token, user }, (r) => {
         resolve(runtime.lastError ? null : r);
       });
     } catch { resolve(null); }

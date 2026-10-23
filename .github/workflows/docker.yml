@@ -88,11 +88,11 @@ jobs:
           file: ./api/Dockerfile
           load: true
           pull: true   # always start from the freshest base image
-          tags: bookmarks-api:candidate
+          tags: linksz-api:candidate
           # The stamp reaches the UI through /api/health, next to the sync light
           build-args: |
-            BOOKMARKS_COMMIT=${{ steps.stamp.outputs.sha }}
-            BOOKMARKS_DEPLOYED_AT=${{ steps.stamp.outputs.time }}
+            LINKSZ_COMMIT=${{ steps.stamp.outputs.sha }}
+            LINKSZ_DEPLOYED_AT=${{ steps.stamp.outputs.time }}
           cache-from: type=gha,scope=api
           cache-to: type=gha,mode=max,scope=api
 
@@ -103,17 +103,17 @@ jobs:
           file: ./web/Dockerfile
           load: true
           pull: true
-          tags: bookmarks-web:candidate
+          tags: linksz-web:candidate
           build-args: |
-            BOOKMARKS_COMMIT=${{ steps.stamp.outputs.sha }}
-            BOOKMARKS_DEPLOYED_AT=${{ steps.stamp.outputs.time }}
+            LINKSZ_COMMIT=${{ steps.stamp.outputs.sha }}
+            LINKSZ_DEPLOYED_AT=${{ steps.stamp.outputs.time }}
           cache-from: type=gha,scope=web
           cache-to: type=gha,mode=max,scope=web
 
       - name: Scan the api image
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: bookmarks-api:candidate
+          image-ref: linksz-api:candidate
           format: table
           severity: CRITICAL,HIGH
           scanners: vuln,secret
@@ -125,7 +125,7 @@ jobs:
       - name: Scan the web image
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: bookmarks-web:candidate
+          image-ref: linksz-web:candidate
           format: table
           severity: CRITICAL,HIGH
           scanners: vuln,secret
@@ -160,9 +160,9 @@ jobs:
           set -eu
           publish() {
             image=$1 tag=$2
-            for target in "$NAMESPACE/bookmarks-$image" "$GHCR/bookmarks-$image"; do
-              docker tag "bookmarks-$image:candidate" "$target:$tag"
-              docker tag "bookmarks-$image:candidate" "$target:latest"
+            for target in "$NAMESPACE/linksz-$image" "$GHCR/linksz-$image"; do
+              docker tag "linksz-$image:candidate" "$target:$tag"
+              docker tag "linksz-$image:candidate" "$target:latest"
               docker push "$target:$tag"
               docker push "$target:latest"
             done
@@ -182,5 +182,5 @@ jobs:
             echo "registries accepted the credentials. Nothing was pushed."
             echo "The tags it would have used:"
           fi
-          echo "  bookmarks-api  $TAG_API"
-          echo "  bookmarks-web  $TAG_WEB"
+          echo "  linksz-api  $TAG_API"
+          echo "  linksz-web  $TAG_WEB"

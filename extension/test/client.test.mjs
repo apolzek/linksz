@@ -12,7 +12,7 @@ import { createClient, AuthError } from '../src/client.js';
 const require = createRequire(import.meta.url);
 const { createApp } = require('../../api/server.js');
 
-const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bookmarks-extension-'));
+const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'linksz-extension-'));
 const app = createApp(path.join(dir, 'bookmarks.db'));
 let server;
 let key;

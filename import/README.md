@@ -5,7 +5,7 @@
 choose the file, and pick a mode. The plan shows what will change before
 anything is written.
 
-Bookmarks exported from a browser (the HTML file Chrome, Firefox, Edge or
+Linksz exported from a browser (the HTML file Chrome, Firefox, Edge or
 Safari write) come in through *From a browser* instead.
 
 Your own export files do not belong here: this directory is part of the

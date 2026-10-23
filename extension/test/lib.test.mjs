@@ -76,7 +76,7 @@ test('the connect page carries the extension and the nonce, in the shape the app
 test('only the connection this extension started is taken', () => {
   const token = 'f'.repeat(64);
   const pending = { server: 'http://localhost:8080', nonce: 'n'.repeat(32), at: 1000 };
-  const msg = { type: 'bookmarks-connect', nonce: pending.nonce, token };
+  const msg = { type: 'linksz-connect', nonce: pending.nonce, token };
   assert.equal(checkConnect(msg, 'http://localhost:8080', pending, 2000), '');
   assert.equal(checkConnect({ ...msg, type: 'other' }, 'http://localhost:8080', pending, 2000), 'not a connection');
   assert.equal(checkConnect(msg, 'http://localhost:8080', null, 2000), 'no connection is waiting');

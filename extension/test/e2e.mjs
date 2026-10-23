@@ -144,7 +144,7 @@ is(await until(connectTab, "[...document.querySelectorAll('#devices strong')].ma
 
 group('a connection nobody started is refused');
 const forged = await app.ev(`new Promise((r) => chrome.runtime.sendMessage(${JSON.stringify(ID)},
-  { type: 'bookmarks-connect', nonce: 'x'.repeat(32), token: 'a'.repeat(64) }, r))`);
+  { type: 'linksz-connect', nonce: 'x'.repeat(32), token: 'a'.repeat(64) }, r))`);
 is(forged, { ok: false, error: 'no connection is waiting' }, 'a page cannot hand the extension a token of its choosing');
 is((await ext.ev("chrome.storage.local.get('token')")).token, stored.token, 'and the token it has stays');
 

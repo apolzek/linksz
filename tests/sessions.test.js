@@ -14,7 +14,7 @@ const path = require('node:path');
 const { createApp } = require('../api/server');
 const { hashToken } = require('../api/db');
 
-const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bookmarks-sessions-'));
+const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'linksz-sessions-'));
 const app = createApp(path.join(dir, 'bookmarks.db'));
 let base;
 
@@ -152,7 +152,7 @@ test('the folder list also names the folders bookmarks are in', async () => {
 
 test('a client names itself in the audit trail, and only a known name is taken', async () => {
   const via = async (header) => {
-    const headers = header ? { 'x-bookmarks-via': header } : {};
+    const headers = header ? { 'x-linksz-via': header } : {};
     const b = (await call('POST', '/api/bookmarks', { token: web, body: { url: `https://via-${header || 'none'}.example` }, headers })).body.item;
     const rows = (await call('GET', '/api/audit/changes', { token: web })).body.items;
     return rows.find((r) => r.bookmark_id === b.id).via;

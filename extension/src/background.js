@@ -71,8 +71,8 @@ chrome.storage.onChanged.addListener((changes, area) => { if (area === 'local' &
 /* ---------------- right click ---------------- */
 
 chrome.runtime.onInstalled.addListener(() => {
-  chrome.contextMenus.create({ id: 'save-page', title: 'Save page to Bookmarks', contexts: ['page'] });
-  chrome.contextMenus.create({ id: 'save-link', title: 'Save link to Bookmarks', contexts: ['link'] });
+  chrome.contextMenus.create({ id: 'save-page', title: 'Save page to Linksz', contexts: ['page'] });
+  chrome.contextMenus.create({ id: 'save-link', title: 'Save link to Linksz', contexts: ['link'] });
   refreshBadge();
 });
 

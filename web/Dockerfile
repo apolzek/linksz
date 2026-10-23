@@ -4,14 +4,14 @@
 # serves in a local install: the same web/ directory, nothing generated.
 FROM nginx:1.29-alpine
 
-ARG BOOKMARKS_COMMIT=""
-ARG BOOKMARKS_DEPLOYED_AT=""
+ARG LINKSZ_COMMIT=""
+ARG LINKSZ_DEPLOYED_AT=""
 
-LABEL org.opencontainers.image.title="Bookmarks web" \
+LABEL org.opencontainers.image.title="Linksz web" \
       org.opencontainers.image.description="Self-hosted bookmark manager with instant substring search" \
-      org.opencontainers.image.source="https://github.com/nochaosio/bookmarks.nochaos.io" \
-      org.opencontainers.image.revision="${BOOKMARKS_COMMIT}" \
-      org.opencontainers.image.created="${BOOKMARKS_DEPLOYED_AT}"
+      org.opencontainers.image.source="https://github.com/apolzek/linksz" \
+      org.opencontainers.image.revision="${LINKSZ_COMMIT}" \
+      org.opencontainers.image.created="${LINKSZ_DEPLOYED_AT}"
 
 # The base image lags behind Alpine's own security updates by days; upgrading
 # here is what keeps the scan in CI from failing on a CVE fixed upstream.

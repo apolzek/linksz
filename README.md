@@ -1,4 +1,4 @@
-# Bookmarks
+# Linksz
 
 Self-hosted bookmark manager with instant substring search, served as a PWA that
 installs and works offline. No dependencies, no accounts, no passwords: a vault
@@ -8,8 +8,8 @@ opens with its access key.
 
 Docker, two containers:
 
-    git clone git@github.com:nochaosio/bookmarks.nochaos.io.git
-    cd bookmarks.nochaos.io
+    git clone https://github.com/apolzek/linksz.git
+    cd linksz
     docker compose up -d --build
 
 Open http://localhost:8080 and choose **Create one**. The app makes a vault and
@@ -28,7 +28,7 @@ every other device signed in with it is signed out.
 
 The vault is a plain SQLite file in a directory on your machine, mounted into
 the api container. By default that is `./data`; to point it at one you already
-have, copy `.env.example` to `.env` and set `BOOKMARKS_VAULT_DIR` along with
+have, copy `.env.example` to `.env` and set `LINKSZ_VAULT_DIR` along with
 the uid that owns it. `docs/containers.md` has the rest: the published images,
 the environment, backups.
 
@@ -146,15 +146,15 @@ needs no confirmation, so a page that sends you to such an address can add a
 link to your vault. That is the whole cost, and the Undo takes it back.
 
 On the server it is your domain that comes first, e.g.
-`https://bookmarks.nochaos.io/https://...`; nothing in the code names a host.
+`https://linksz.example.com/https://...`; nothing in the code names a host.
 
-**Bookmarklet.** Settings, *Save from anywhere*, has a **Save to Bookmarks**
+**Bookmarklet.** Settings, *Save from anywhere*, has a **Save to Linksz**
 button. Drag it to the browser's bookmarks bar; clicking it on any page opens
 that page's address behind the prefix in a new tab, and the page itself stays
 where it was.
 
 **Phones.** On Android, the installed app is in the share sheet (the manifest's
-`share_target`): share a page to Bookmarks and the form opens filled in. Safari
+`share_target`): share a page to Linksz and the form opens filled in. Safari
 on iOS has no share target; the address prefix works there as anywhere else.
 Either way the phone needs the app over https, see
 [It is an app, not a page](#it-is-an-app-not-a-page).
@@ -164,13 +164,13 @@ Either way the phone needs the app over https, see
 The same app, in a window of its own and in the app launcher. Omarchy turns any
 address into a desktop app with a launcher entry:
 
-    omarchy webapp install "Bookmarks" "http://localhost:8080" "$PWD/web/icon-512.png"
+    omarchy webapp install "Linksz" "http://localhost:8080" "$PWD/web/icon-512.png"
 
 It opens in Chromium's app mode: no tabs and no address bar, and the same code
 the browser runs, so a `docker compose up -d --build` is all an update takes.
 To take it out of the launcher:
 
-    omarchy webapp remove Bookmarks
+    omarchy webapp remove Linksz
 
 The window is only as up as the stack. The containers restart with Docker
 (`restart: unless-stopped`), but Arch starts Docker on first use, not at boot,
@@ -290,12 +290,12 @@ Docker. Without mise, the same commands are `docker compose up -d --build` and
 `bash tests/run.sh`.
 
 Environment variables live in `.env` and are documented in
-`docs/containers.md`. The short version: `BOOKMARKS_VAULT_DIR` is where the
-vault file lives, `BOOKMARKS_WEB_PORT` moves the published port,
-`BOOKMARKS_DEV_KEY` makes one known vault for development (never on a host
+`docs/containers.md`. The short version: `LINKSZ_VAULT_DIR` is where the
+vault file lives, `LINKSZ_WEB_PORT` moves the published port,
+`LINKSZ_DEV_KEY` makes one known vault for development (never on a host
 others can reach).
 
-The API answers no cross-origin request unless `BOOKMARKS_ALLOWED_ORIGINS`
+The API answers no cross-origin request unless `LINKSZ_ALLOWED_ORIGINS`
 names the origin. The app never needs it, being same-origin behind nginx; it is
 there for something else that wants to drive the API from a page.
 
@@ -304,8 +304,8 @@ there for something else that wants to drive the API from a page.
 Each image is versioned by the last commit that touched it, so a frontend
 release leaves the backend on the tag it had:
 
-    nochaos/bookmarks-api      the backend
-    nochaos/bookmarks-web      nginx: the PWA, and /api proxied to the api
+    nochaos/linksz-api      the backend
+    nochaos/linksz-web      nginx: the PWA, and /api proxied to the api
 
 nginx serves the PWA and proxies `/api`, so the browser sees one origin, which
 is what the session token and the service worker want. The api publishes no

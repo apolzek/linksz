@@ -2,13 +2,13 @@
 
 Two images, each versioned by the last commit that touched it:
 
-    nochaos/bookmarks-api      the backend
-    nochaos/bookmarks-web      nginx: the PWA, and /api proxied to the api
+    nochaos/linksz-api      the backend
+    nochaos/linksz-web      nginx: the PWA, and /api proxied to the api
 
 From a clone that builds them:
 
-    git clone git@github.com:nochaosio/bookmarks.nochaos.io.git
-    cd bookmarks.nochaos.io
+    git clone https://github.com/apolzek/linksz.git
+    cd linksz
     docker compose up -d --build
 
 Nothing to configure first: `.env` is optional (see The vault below) and the
@@ -21,27 +21,27 @@ From the published images, with no clone at all:
 
     services:
       api:
-        image: nochaos/bookmarks-api:latest
+        image: nochaos/linksz-api:latest
         environment:
-          BOOKMARKS_HOST: 0.0.0.0
-          BOOKMARKS_DB: /data/bookmarks.db
+          LINKSZ_HOST: 0.0.0.0
+          LINKSZ_DB: /data/bookmarks.db
         # Create ./data yourself before the first boot. A directory the
         # docker daemon has to invent lands owned by root, and then the vault
         # is root's too instead of yours.
         volumes: ["./data:/data"]
       web:
-        image: nochaos/bookmarks-web:latest
+        image: nochaos/linksz-web:latest
         depends_on: { api: { condition: service_healthy } }
         ports: ["8080:80"]
 
 ## The vault
 
-`BOOKMARKS_VAULT_DIR` is a directory on the host, mounted at `/data` in the api
+`LINKSZ_VAULT_DIR` is a directory on the host, mounted at `/data` in the api
 container, and `bookmarks.db` inside it is the whole vault. Without a `.env` it
 is `./data` next to the compose file; `.env.example` is the shape of the file
 that moves it:
 
-    BOOKMARKS_VAULT_DIR=/home/you/.local/share/bookmarks
+    LINKSZ_VAULT_DIR=/home/you/.local/share/linksz
 
 A directory and not the file itself, because SQLite writes `bookmarks.db-wal`
 and `bookmarks.db-shm` next to it, and a single-file mount would strand those
@@ -51,10 +51,10 @@ The uid matters, and it is handled for you. The image has its own unprivileged
 user, which owns nothing on your disk, so what the api runs as is decided at
 boot: the container's entrypoint reads who owns the mounted directory and drops
 to that user, which keeps the vault readable and writable from both sides.
-`BOOKMARKS_UID` and `BOOKMARKS_GID` override it, and are only worth setting when
+`LINKSZ_UID` and `LINKSZ_GID` override it, and are only worth setting when
 you want a uid other than the directory's owner.
 
-One case is worth knowing: point `BOOKMARKS_VAULT_DIR` at a directory that does
+One case is worth knowing: point `LINKSZ_VAULT_DIR` at a directory that does
 not exist and the docker daemon creates it as root. The stack still comes up,
 with the vault owned by the image's own user, and you will need `sudo` to touch
 it from the host. Creating the directory first (`mkdir -p`) is all it takes to
@@ -63,7 +63,7 @@ keep it yours.
 Copying a vault in is copying a file:
 
     docker compose down
-    cp somewhere/bookmarks.db "$BOOKMARKS_VAULT_DIR/bookmarks.db"
+    cp somewhere/bookmarks.db "$LINKSZ_VAULT_DIR/bookmarks.db"
     docker compose up -d
 
 Copy the `-wal` file with it, or checkpoint it first, or the last writes are
@@ -100,20 +100,20 @@ TLS (Tailscale, Cloudflare) or a reverse proxy you already run, and point it at
 
 ## Environment
 
-    BOOKMARKS_VAULT_DIR       host directory holding bookmarks.db, default ./data
-    BOOKMARKS_UID             uid the api runs as, default: the owner of that directory
-    BOOKMARKS_GID             gid to go with it
-    BOOKMARKS_HOST            interface the api binds to, 0.0.0.0 in a container
-    BOOKMARKS_PORT            port the api listens on inside its container, default 8787
-    BOOKMARKS_WEB_PORT        host port nginx is published on, default 8080
-    BOOKMARKS_DB              path to the vault inside the container, default /data/bookmarks.db
-    BOOKMARKS_ALLOWED_ORIGINS origins allowed to call the API from a browser, empty by default
-    BOOKMARKS_DEV_KEY         an access key; a vault that opens with it is made on boot.
+    LINKSZ_VAULT_DIR       host directory holding bookmarks.db, default ./data
+    LINKSZ_UID             uid the api runs as, default: the owner of that directory
+    LINKSZ_GID             gid to go with it
+    LINKSZ_HOST            interface the api binds to, 0.0.0.0 in a container
+    LINKSZ_PORT            port the api listens on inside its container, default 8787
+    LINKSZ_WEB_PORT        host port nginx is published on, default 8080
+    LINKSZ_DB              path to the vault inside the container, default /data/bookmarks.db
+    LINKSZ_ALLOWED_ORIGINS origins allowed to call the API from a browser, empty by default
+    LINKSZ_DEV_KEY         an access key; a vault that opens with it is made on boot.
                               For development and tests only: unset by default
-    BOOKMARKS_COMMIT          build stamp shown at the bottom of Settings
-    BOOKMARKS_DEPLOYED_AT     the other half of that stamp
+    LINKSZ_COMMIT          build stamp shown at the bottom of Settings
+    LINKSZ_DEPLOYED_AT     the other half of that stamp
 
-`BOOKMARKS_PORT` and `BOOKMARKS_WEB_PORT` are different things on purpose: the
+`LINKSZ_PORT` and `LINKSZ_WEB_PORT` are different things on purpose: the
 first is internal to the api container, the second is the only port that
 reaches your machine.
 
@@ -145,7 +145,7 @@ never needs it: nginx serves the PWA and proxies `/api`, so the browser only
 ever talks to one origin. Something else driving the API from a page is what
 the variable is for, comma separated:
 
-    BOOKMARKS_ALLOWED_ORIGINS=https://notes.example,https://dash.example
+    LINKSZ_ALLOWED_ORIGINS=https://notes.example,https://dash.example
 
 `*` answers everyone. A refused origin still gets a normal response on the
 wire, which is why `curl` and scripts are unaffected: what a browser withholds
@@ -153,15 +153,15 @@ from the page is the body of a response with no matching header.
 
 ## Backups
 
-The vault is a SQLite file in `BOOKMARKS_VAULT_DIR`, so a copy is a copy. To
+The vault is a SQLite file in `LINKSZ_VAULT_DIR`, so a copy is a copy. To
 take one consistently, without stopping the container:
 
     docker compose exec api node -e "
       const { DatabaseSync } = require('node:sqlite');
-      new DatabaseSync(process.env.BOOKMARKS_DB, { readOnly: true })
+      new DatabaseSync(process.env.LINKSZ_DB, { readOnly: true })
         .exec(\"VACUUM INTO '/data/backup.db'\")"
 
-It lands in `BOOKMARKS_VAULT_DIR` next to the vault, because that directory is
+It lands in `LINKSZ_VAULT_DIR` next to the vault, because that directory is
 the mount. Copying `bookmarks.db` while the container runs is not a backup: the
 `-wal` beside it holds writes the file does not have yet.
 
@@ -188,10 +188,10 @@ baked into the image, not mounted.
 
 ## On Omarchy
 
-    bash omarchy/install.sh            add Bookmarks to the app menu
+    bash omarchy/install.sh            add Linksz to the app menu
     bash omarchy/install.sh --remove   take it out again
 
 It installs a web app with `omarchy-webapp-install`, pointed at
-`http://localhost:$BOOKMARKS_WEB_PORT` and using the app's own icon, so it
+`http://localhost:$LINKSZ_WEB_PORT` and using the app's own icon, so it
 opens in its own window from the app menu (Super+Alt+Space). The stack still
 has to be running.

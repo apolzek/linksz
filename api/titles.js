@@ -21,7 +21,7 @@ const dns = require('node:dns');
 const net = require('node:net');
 const zlib = require('node:zlib');
 
-const USER_AGENT = 'Mozilla/5.0 (compatible; Bookmarks link preview; self-hosted)';
+const USER_AGENT = 'Mozilla/5.0 (compatible; Linksz link preview; self-hosted)';
 const TIMEOUT_MS = 6000;
 const MAX_BYTES = 2 * 1024 * 1024;
 const MAX_REDIRECTS = 5;
