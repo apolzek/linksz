@@ -33,6 +33,6 @@ URL="http://localhost:$PORT"
 omarchy-webapp-install "$NAME" "$URL" "$PWD/web/icon-512.png"
 
 echo "Installed: $NAME -> $URL"
-echo "Open the app menu (Super+Alt+Space) and type \"bookmarks\"."
+echo "Open the app menu (Super+Alt+Space) and type \"linksz\"."
 curl -fsS --max-time 3 "$URL/api/health" >/dev/null 2>&1 \
   || echo "Note: nothing answers on $URL yet. Start it with: docker compose up -d --build"
