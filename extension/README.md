@@ -60,9 +60,12 @@ call gets a 401, the extension drops the token and asks to connect again.
 
 ## Use
 
-* **Popup** (<kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>B</kbd>): the page on screen
-  with its title and a folder (the last one used, `Temporary` at first),
-  whether it is saved already and where, Save and Undo, and a search box.
+* **Popup** (<kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>B</kbd>): opens on a search
+  of the vault, with the app's engine. <kbd>↑</kbd>/<kbd>↓</kbd> pick a
+  result, <kbd>Enter</kbd> opens it (the first one when none is picked) and
+  counts the open. Under the search, the page on screen with its title and a
+  folder (the last one used, `Temporary` at first), whether it is saved
+  already and where, Save and Undo; it steps aside while there is a query.
 * **Address bar**: `bm`, a space, then what you are looking for. Enter opens
   the first match, or the one picked, and counts the open.
 * **Right click**: "Save page to Bookmarks", "Save link to Bookmarks". Both go

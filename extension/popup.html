@@ -28,9 +28,13 @@
   <p class="note error" id="connect-error"></p>
 </main>
 
-<!-- Connected: the page on screen, and a search. -->
+<!-- Connected: a search, and the page on screen. -->
 <main id="connected" hidden>
   <h1><img src="icons/icon-32.png" alt="">Bookmarks <span class="vault" id="vault"></span></h1>
+  <div class="search">
+    <input id="q" type="search" placeholder="Search bookmarks" aria-label="Search bookmarks" autocomplete="off" spellcheck="false">
+    <ul class="results" id="results"></ul>
+  </div>
   <form class="card" id="save-form">
     <div>
       <label for="title">Title</label>
@@ -48,10 +52,6 @@
       <button type="button" id="btn-undo" hidden>Undo</button>
     </div>
   </form>
-  <div>
-    <input id="q" type="search" placeholder="Search bookmarks" autocomplete="off" spellcheck="false">
-    <ul class="results" id="results"></ul>
-  </div>
   <p class="note error" id="error"></p>
 </main>
 <footer id="footer" hidden>

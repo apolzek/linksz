@@ -41,7 +41,10 @@ button:disabled { opacity: 0.5; cursor: default; }
   display: flex; flex-direction: column; align-items: flex-start; width: 100%; height: auto;
   padding: 6px 8px; border: 0; background: none; text-align: left; font-weight: 400;
 }
-.results li button:hover, .results li button:focus-visible { background: var(--surface-2); outline: none; }
+.results li button:hover, .results li button.picked { background: var(--surface-2); outline: none; }
+.search { display: flex; flex-direction: column; gap: 6px; }
+.results { max-height: 380px; overflow-y: auto; }
+.results:empty { display: none; }
 .results .t { font-weight: 600; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .results .u { font-size: 11.5px; color: var(--muted); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 footer { display: flex; justify-content: space-between; padding: 0 14px 12px; font-size: 12px; }

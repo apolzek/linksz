@@ -86,6 +86,7 @@ async function showConnected() {
   $('#footer').hidden = false;
   $('#vault').textContent = c.vault;
   $('#error').textContent = '';
+  $('#q').focus();
 
   tab = await targetTab();
   const { api } = await client();
@@ -109,8 +110,6 @@ async function showConnected() {
       $('#saved-note').textContent = `Already saved in ${here.map((b) => folderLabel(b.folder)).join(', ')}.`;
       $('#btn-save').textContent = 'Save again';
     }
-    $('#q').focus();
-    if (canSave) $('#title').focus();
   } catch (err) { fail(err); }
 }
 
@@ -144,10 +143,29 @@ $('#btn-undo').onclick = async () => {
   } catch (err) { fail(err); }
 };
 
+// The search comes first: the popup opens on it. While there is a query the
+// save card steps aside, and the keyboard moves through the results: the
+// arrows pick one, Enter opens it (the first, when none is picked).
 let searching = 0;
+let picked = 0;
+
+function openBookmark(api, b) {
+  api.opened(b.id).catch(() => {});
+  chrome.tabs.create({ url: b.url }).then(() => window.close());
+}
+
+function pick(i) {
+  const rows = [...document.querySelectorAll('#results button')];
+  if (!rows.length) return;
+  picked = (i + rows.length) % rows.length;
+  rows.forEach((r, n) => r.classList.toggle('picked', n === picked));
+  rows[picked].scrollIntoView({ block: 'nearest' });
+}
+
 $('#q').addEventListener('input', async () => {
   const q = $('#q').value.trim();
   const mine = ++searching;
+  $('#save-form').hidden = Boolean(q);
   if (!q) { $('#results').innerHTML = ''; return; }
   try {
     const { api } = await client();
@@ -158,20 +176,27 @@ $('#q').addEventListener('input', async () => {
       const li = document.createElement('li');
       const btn = document.createElement('button');
       btn.type = 'button';
+      btn.tabIndex = -1;
       btn.dataset.id = b.id;
       btn.innerHTML = '<span class="t"></span><span class="u"></span>';
       btn.querySelector('.t').textContent = b.title || b.url;
       btn.querySelector('.u').textContent = `${folderLabel(b.folder)} · ${b.url}`;
-      btn.onclick = async () => {
-        api.opened(b.id).catch(() => {});
-        await chrome.tabs.create({ url: b.url });
-        window.close();
-      };
+      btn.onclick = () => openBookmark(api, b);
       li.append(btn);
       $('#results').append(li);
     }
     if (!items.length) $('#results').innerHTML = '<li class="muted small">Nothing matches.</li>';
+    pick(0);
   } catch (err) { fail(err); }
+});
+
+$('#q').addEventListener('keydown', (e) => {
+  if (e.key === 'ArrowDown') { e.preventDefault(); pick(picked + 1); }
+  else if (e.key === 'ArrowUp') { e.preventDefault(); pick(picked - 1); }
+  else if (e.key === 'Enter') {
+    e.preventDefault();
+    document.querySelectorAll('#results button')[picked]?.click();
+  }
 });
 
 $('#btn-app').onclick = async () => {

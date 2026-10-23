@@ -183,9 +183,33 @@ is(await popup.ev("document.querySelector('#folder').value"), 'ext/saved', 'the 
 
 group('searching');
 await api('POST', '/api/bookmarks', appToken, { url: 'https://zebra.example', title: 'Unique Zebra page', folder: 'animals' });
-await popup.ev("const q = document.querySelector('#q'); q.value = 'zebra'; q.dispatchEvent(new Event('input')); 1");
+await popup.ev("{ const q = document.querySelector('#q'); q.value = 'zebra'; q.dispatchEvent(new Event('input')); } 1");
 is(await until(popup, "[...document.querySelectorAll('#results .t')].map((e) => e.textContent).join() || null"),
   'Unique Zebra page', 'typing searches the vault, with the app\'s engine');
+is(await popup.ev("document.querySelector('#save-form').hidden"), true, 'and the save card steps aside while it does');
+await api('POST', '/api/bookmarks', appToken, { url: 'https://zebra2.example', title: 'Another zebra', folder: 'animals' });
+await popup.ev("{ const q = document.querySelector('#q'); q.value = 'zebra '; q.dispatchEvent(new Event('input')); } 1");
+await until(popup, "document.querySelectorAll('#results button').length === 2");
+await popup.ev("document.querySelector('#q').dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown' })); 1");
+is(await popup.ev("document.querySelector('#results .picked .t').textContent"),
+  await popup.ev("document.querySelectorAll('#results .t')[1].textContent"), 'the arrows pick a result');
+await popup.ev("{ const q = document.querySelector('#q'); q.value = ''; q.dispatchEvent(new Event('input')); } 1");
+is(await popup.ev("[document.querySelector('#save-form').hidden, document.querySelectorAll('#results li').length]"), [false, 0],
+  'an empty search brings the save card back');
+popup.close();
+popup = await open(`${EXT}/popup.html?tab=${PAGE_TAB}`);
+is(await until(popup, "!document.querySelector('#connected').hidden && document.activeElement?.id"), 'q',
+  'the popup opens on the search');
+await popup.ev("{ const q = document.querySelector('#q'); q.value = 'unique zebra'; q.dispatchEvent(new Event('input')); } 1");
+await until(popup, "document.querySelector('#results .picked')");
+const zebraId = (await api('GET', '/api/bookmarks?q=unique%20zebra', appToken)).items[0].id;
+await popup.ev("document.querySelector('#q').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' })); 1").catch(() => {});
+is(Boolean(await tab('https://zebra.example', 4000).then((t) => { t.close(); return true; }).catch(() => false)), true,
+  'Enter opens the picked result in a new tab');
+is(await until({ ev: () => api('GET', '/api/bookmarks?q=unique%20zebra', appToken).then((r) => r.items.find((b) => b.id === zebraId)?.opens > 0) }, 'x'), true,
+  'and counts the open');
+popup.close();
+popup = await open(`${EXT}/popup.html?tab=${PAGE_TAB}`);
 
 /* ---------------- signed out elsewhere ---------------- */
 
