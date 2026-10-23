@@ -6,7 +6,15 @@ opens with its access key.
 
 ## Running it
 
-Docker, two containers:
+On Omarchy, or any Linux with Docker, from the published images:
+
+    curl -fsSL https://raw.githubusercontent.com/apolzek/linksz/master/install.sh | bash
+
+It keeps everything in `~/.local/share/linksz`, serves the app on
+http://localhost:8080 and, on Omarchy, adds it to the app menu.
+`... | bash -s -- --remove` takes it out again and leaves the vault.
+
+From a clone, building the two containers:
 
     git clone https://github.com/apolzek/linksz.git
     cd linksz
