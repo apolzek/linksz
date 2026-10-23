@@ -1,0 +1,29 @@
+# An example of the vault's own format, the one Export > YAML writes and
+# Import > From this app reads. Every field but url is optional.
+#
+#   folder       a path, up to four levels: dev/databases
+#   category     what the link is: tool, repo, article, docs, course, saas...
+#   tags         free words, for search
+#   description  a line about it, also searched
+
+bookmarks:
+  - title: "SQLite documentation"
+    url: "https://sqlite.org/docs.html"
+    folder: "dev/databases"
+    category: "docs"
+    tags:
+      - "sqlite"
+      - "sql"
+    description: "The reference for the database the vault is kept in."
+  - title: "MDN Web Docs"
+    url: "https://developer.mozilla.org/"
+    folder: "dev/web"
+    category: "docs"
+    tags:
+      - "html"
+      - "css"
+      - "javascript"
+  - title: "Omarchy"
+    url: "https://omarchy.org/"
+    folder: "linux"
+    category: "tool"

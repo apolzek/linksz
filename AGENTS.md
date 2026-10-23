@@ -9,7 +9,7 @@ Portuguese; the repository does not.
 
 The code, the tests and the docs are English throughout. Four commits from
 before this rule are not, and rewriting published history is not worth it;
-everything from `429a8b1` on follows it.
+everything from `33f7745` on follows it.
 
 ## Shape
 
