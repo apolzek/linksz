@@ -39,6 +39,7 @@ install from an earlier version of this script is stopped and replaced, and
 its vault is the one the desktop install uses.
 
     curl -fsSL .../install.sh | bash -s -- --remove     take it out, keep the vault
+    linksz login                                        sign the shortcuts in, once
     systemctl --user status linksz                      is it up
     journalctl --user -u linksz                         its log
 
@@ -70,6 +71,25 @@ adds nothing to the app menu: reaching it from other machines takes TLS in
 front, see [It is an app, not a page](#it-is-an-app-not-a-page).
 `... | bash -s -- --remove` stops it and leaves the vault. `docs/containers.md`
 has the rest: the images, the environment, backups.
+
+On Omarchy it also binds two shortcuts, in `~/.config/hypr/linksz.lua`,
+loaded by one line it adds to your `bindings.lua` (and `--remove` takes out):
+
+    Super+Shift+L        find a link in the Omarchy menu and open it: pinned
+                         first, then the most used; the menu searches titles,
+                         folders and addresses
+    Super+Shift+Alt+L    save the link that was copied to Temporary, with its
+                         title, and a notification to say so
+
+Both go through `linksz`, the command line that comes with it (on PATH as
+`~/.local/bin/linksz`), with a session of its own: `linksz login` asks for the
+vault's key once, and Settings lists the session as "Desktop shortcuts". The
+first shortcut pressed without it opens a terminal for that login.
+
+    linksz pick                  what Super+Shift+L runs
+    linksz save [url]            what Super+Shift+Alt+L runs, or save that url
+    linksz search <words>        "title<TAB>url" per match, for scripts
+    linksz logout
 
 ### The browser extension
 

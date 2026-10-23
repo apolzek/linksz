@@ -13,7 +13,7 @@ import os from 'node:os';
 import path from 'node:path';
 import net from 'node:net';
 import http from 'node:http';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -29,7 +29,11 @@ stop() {
   while kill -0 "$pid" 2>/dev/null; do sleep 0.05; done
 }
 case " $* " in
-  *" restart "*|*" start "*)
+  # start, like the real one, leaves a running service alone.
+  *" start "*) [[ -f $pidf ]] && kill -0 "$(cat "$pidf")" 2>/dev/null && exit 0
+    env $(sed -n 's/^Environment=//p' "$unit") $(sed -n 's/^ExecStart=//p' "$unit") >"$HOME/.stub-log" 2>&1 &
+    echo $! >"$pidf" ;;
+  *" restart "*)
     stop
     env $(sed -n 's/^Environment=//p' "$unit") $(sed -n 's/^ExecStart=//p' "$unit") >"$HOME/.stub-log" 2>&1 &
     echo $! >"$pidf" ;;
@@ -64,6 +68,12 @@ test('it installs a service that serves the app, a launcher and a menu entry, an
   const bin = path.join(home, 'stub-bin');
   fs.mkdirSync(bin);
   fs.writeFileSync(path.join(bin, 'systemctl'), STUB, { mode: 0o755 });
+  // Reloading the real Hyprland from a test would be rude.
+  fs.writeFileSync(path.join(bin, 'hyprctl'), `#!/usr/bin/env bash\necho "$*" >>"$HOME/.hyprctl"\n`, { mode: 0o755 });
+  const hypr = path.join(home, '.config', 'hypr');
+  fs.mkdirSync(hypr, { recursive: true });
+  const MINE = '-- my own bindings\no.bind("SUPER + SHIFT + R", "SSH", "alacritty -e ssh box")\n';
+  fs.writeFileSync(path.join(hypr, 'bindings.lua'), MINE);
   const port = await freePort();
   const env = {
     ...process.env,
@@ -89,6 +99,18 @@ test('it installs a service that serves the app, a launcher and a menu entry, an
     assert.ok(fs.existsSync(path.join(home, '.local', 'share', 'icons', 'hicolor', '256x256', 'apps', 'linksz.png')));
 
     assert.ok(fs.existsSync(path.join(appHome, 'app', 'extension', 'install.sh')), 'the extension comes with it');
+    assert.ok(fs.existsSync(path.join(appHome, 'app', 'cli', 'linksz.mjs')), 'and the command line');
+    assert.equal(fs.readlinkSync(path.join(home, '.local', 'bin', 'linksz')), path.join(appHome, 'bin', 'linksz'), 'which is on PATH');
+    const usage = spawnSync(path.join(appHome, 'bin', 'linksz'), ['help'], { env, encoding: 'utf8' });
+    assert.equal(usage.status, 2);
+    assert.match(usage.stderr, /Usage: linksz/, 'a word after the launcher goes to the command line');
+
+    const binds = fs.readFileSync(path.join(hypr, 'linksz.lua'), 'utf8');
+    assert.match(binds, /o\.bind\("SUPER \+ SHIFT \+ L", "Linksz: find a link", ".*\/bin\/linksz pick"\)/);
+    assert.match(binds, /o\.bind\("SUPER \+ SHIFT \+ ALT \+ L", "Linksz: save the copied link", ".*\/bin\/linksz save"\)/);
+    const LINE = 'pcall(require, "hypr.linksz") -- Linksz shortcuts, from install.sh';
+    assert.equal(fs.readFileSync(path.join(hypr, 'bindings.lua'), 'utf8'), `${MINE}\n${LINE}\n`, 'one line is added to bindings.lua');
+    assert.match(fs.readFileSync(path.join(home, '.hyprctl'), 'utf8'), /^reload$/m, 'and Hyprland reloads them');
     assert.ok(!fs.existsSync(path.join(appHome, 'app', 'extension', 'test')), 'its tests do not');
     assert.ok(!fs.existsSync(path.join(appHome, 'app', 'web', 'nginx.conf')), 'build inputs are not served');
 
@@ -103,12 +125,16 @@ test('it installs a service that serves the app, a launcher and a menu entry, an
     // Again is an update: same files, still serving.
     run();
     assert.equal((await get(`${base}/api/health`)).status, 200);
+    assert.equal(fs.readFileSync(path.join(hypr, 'bindings.lua'), 'utf8').split('hypr.linksz').length, 2, 'and only once, however many runs');
 
     run('--remove');
     assert.ok(!fs.existsSync(path.join(appHome, 'app')));
     assert.ok(!fs.existsSync(path.join(home, '.local', 'share', 'applications', 'Linksz.desktop')));
     assert.ok(!fs.existsSync(path.join(home, '.config', 'systemd', 'user', 'linksz.service')));
     assert.ok(fs.existsSync(path.join(appHome, 'data', 'bookmarks.db')), 'the vault stays');
+    assert.equal(fs.readFileSync(path.join(hypr, 'bindings.lua'), 'utf8'), MINE, 'bindings.lua is as it was');
+    assert.ok(!fs.existsSync(path.join(hypr, 'linksz.lua')));
+    assert.ok(!fs.existsSync(path.join(home, '.local', 'bin', 'linksz')));
     await assert.rejects(get(`${base}/api/health`), 'and nothing answers any more');
   } finally {
     try { process.kill(Number(fs.readFileSync(path.join(home, '.stub-pid'), 'utf8'))); } catch {}

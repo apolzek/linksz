@@ -34,8 +34,8 @@ node --test tests/api.test.js tests/sessions.test.js
 heading "audit trail: link changes and clicks (node:test)"
 node --test tests/audit.test.js
 
-heading "desktop install: the service, the launcher, the menu entry (node:test)"
-node --test tests/install.test.mjs
+heading "desktop install and its command line (node:test)"
+node --test tests/install.test.mjs tests/cli.test.mjs
 
 heading "browser extension: its pieces, its client on the real backend, its installer (node:test)"
 node --test extension/test/*.test.mjs

@@ -30,6 +30,11 @@ URL="http://localhost:$PORT"
 UNIT_DIR=${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user
 UNIT=linksz.service
 APPS_DIR=${XDG_DATA_HOME:-$HOME/.local/share}/applications
+HYPR_DIR=${XDG_CONFIG_HOME:-$HOME/.config}/hypr
+# The line that loads the shortcuts from your own bindings.lua, and only it:
+# the shortcuts themselves live in a file of their own.
+HYPR_LINE='pcall(require, "hypr.linksz") -- Linksz shortcuts, from install.sh'
+PATH_LINK=$HOME/.local/bin/linksz
 ICON_DIR=${XDG_DATA_HOME:-$HOME/.local/share}/icons/hicolor/256x256/apps
 
 say() { printf '\033[1;34m›\033[0m %s\n' "$*"; }
@@ -42,6 +47,12 @@ if [[ ${1:-} == --remove ]]; then
   user_systemctl disable --now "$UNIT" >/dev/null 2>&1 || true
   rm -f "$UNIT_DIR/$UNIT" "$APPS_DIR/$NAME.desktop" "$ICON_DIR/linksz.png"
   user_systemctl daemon-reload >/dev/null 2>&1 || true
+  if [[ -f $HYPR_DIR/bindings.lua ]] && grep -qxF "$HYPR_LINE" "$HYPR_DIR/bindings.lua"; then
+    kept=$(grep -vxF "$HYPR_LINE" "$HYPR_DIR/bindings.lua" || true)
+    printf '%s\n' "$kept" >"$HYPR_DIR/bindings.lua"
+  fi
+  rm -f "$HYPR_DIR/linksz.lua"
+  [[ -L $PATH_LINK && $(readlink "$PATH_LINK") == "$HOME_DIR/bin/linksz" ]] && rm -f "$PATH_LINK"
   rm -rf "$HOME_DIR/app" "$HOME_DIR/bin"
   say "Removed. The vault is still in $VAULT_DIR"
   exit 0
@@ -80,15 +91,15 @@ if command -v ss >/dev/null && [[ -n $(ss -Hltn "sport = :$PORT") ]]; then
   die "Port $PORT is taken by something else (docker ps, or ss -ltnp). Free it, or run again with LINKSZ_PORT=<port>."
 fi
 
-# The code: api/ and web/, and the browser extension, which loads from a
-# folder on disk. Into a new directory first, so a
+# The code: api/ and web/, the command line the shortcuts run, and the
+# browser extension, which loads from a folder on disk. Into a new directory first, so a
 # failed download leaves the installed version alone.
 mkdir -p "$HOME_DIR" "$VAULT_DIR"
 NEW=$(mktemp -d "$HOME_DIR/app.XXXXXX")
 trap 'rm -rf "$NEW"' EXIT
 if [[ -n $SOURCE ]]; then
   say "Copying it from $SOURCE"
-  cp -r "$SOURCE/api" "$SOURCE/web" "$SOURCE/extension" "$NEW/"
+  cp -r "$SOURCE/api" "$SOURCE/web" "$SOURCE/cli" "$SOURCE/extension" "$NEW/"
   rm -rf "$NEW/extension/test"
   COMMIT=$(git -C "$SOURCE" rev-parse --short HEAD 2>/dev/null || true)
 else
@@ -99,7 +110,7 @@ else
   [[ $COMMIT =~ ^[0-9a-f]{40}$ ]] || COMMIT=""
   say "Downloading ${COMMIT:0:7}${COMMIT:+ }($REF)"
   curl -fsSL "https://codeload.github.com/$REPO/tar.gz/${COMMIT:-$REF}" \
-    | tar -xz -C "$NEW" --strip-components=1 --wildcards '*/api' '*/web' '*/extension' --exclude '*/extension/test'
+    | tar -xz -C "$NEW" --strip-components=1 --wildcards '*/api' '*/web' '*/cli' '*/extension' --exclude '*/extension/test'
   COMMIT=${COMMIT:0:7}
 fi
 # Build inputs of the web image, not something to serve.
@@ -134,6 +145,12 @@ mkdir -p "$HOME_DIR/bin"
 cat >"$HOME_DIR/bin/linksz" <<EOF
 #!/usr/bin/env bash
 URL=$URL
+# A word after it is a command for the command line: linksz pick, save, login.
+if [[ \$# -gt 0 ]]; then
+  export LINKSZ_URL=\$URL LINKSZ_BIN=$HOME_DIR/bin/linksz
+  systemctl --user start $UNIT 2>/dev/null
+  exec $NODE --disable-warning=ExperimentalWarning $HOME_DIR/app/cli/linksz.mjs "\$@"
+fi
 systemctl --user start $UNIT
 for _ in \$(seq 50); do
   curl -fsS --max-time 1 "\$URL/api/health" >/dev/null 2>&1 && break
@@ -146,6 +163,27 @@ done
 exec xdg-open "\$URL"
 EOF
 chmod +x "$HOME_DIR/bin/linksz"
+# On PATH too, for `linksz login` in a terminal. Never over someone else's.
+if [[ ! -e $PATH_LINK || -L $PATH_LINK ]]; then
+  mkdir -p "${PATH_LINK%/*}"
+  ln -sfn "$HOME_DIR/bin/linksz" "$PATH_LINK"
+fi
+
+# Shortcuts, on Omarchy's Hyprland: Super+Shift+L finds a link in the menu,
+# Super+Shift+Alt+L saves the one copied. In a file of their own, loaded by
+# one line in bindings.lua, so --remove can take both out again.
+HYPR_NOTE=""
+if [[ -f $HYPR_DIR/bindings.lua ]]; then
+  cat >"$HYPR_DIR/linksz.lua" <<LUA
+-- Written by Linksz's install.sh, and removed by its --remove. Change the keys
+-- here; running the installer again writes this file anew.
+o.bind("SUPER + SHIFT + L", "Linksz: find a link", "$HOME_DIR/bin/linksz pick")
+o.bind("SUPER + SHIFT + ALT + L", "Linksz: save the copied link", "$HOME_DIR/bin/linksz save")
+LUA
+  grep -qxF "$HYPR_LINE" "$HYPR_DIR/bindings.lua" || printf '\n%s\n' "$HYPR_LINE" >>"$HYPR_DIR/bindings.lua"
+  command -v hyprctl >/dev/null && hyprctl reload >/dev/null 2>&1 || true
+  HYPR_NOTE=1
+fi
 
 mkdir -p "$APPS_DIR" "$ICON_DIR"
 cp "$HOME_DIR/app/web/icon-512.png" "$ICON_DIR/linksz.png"
@@ -175,6 +213,10 @@ curl -fsS --max-time 2 "$URL/api/health" >/dev/null 2>&1 \
 
 say "Running on $URL, started with your session"
 say "In the app menu: Super+Alt+Space, then type \"linksz\""
+if [[ -n $HYPR_NOTE ]]; then
+  say "Shortcuts: Super+Shift+L finds a link, Super+Shift+Alt+L saves the copied one"
+  say "  sign them in once with: linksz login"
+fi
 say "Browser extension: bash $HOME_DIR/app/extension/install.sh, then restart Chromium"
 say "Vault: $VAULT_DIR    Logs: journalctl --user -u $UNIT"
 say "Remove: curl -fsSL $RAW/install.sh | bash -s -- --remove"

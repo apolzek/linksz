@@ -20,6 +20,7 @@ docs/       how to run it
 tests/      one suite for all of it: bash tests/run.sh
 omarchy/    a menu entry for the stack of a clone: bash omarchy/install.sh
 install.sh  the desktop install; install-docker.sh, the published images
+cli/        `linksz`, the command line the desktop shortcuts run: Node built-ins
 extension/  the browser extension, self-contained: code, tests, installer
 ```
 
