@@ -586,7 +586,9 @@ await ev('document.activeElement.blur()');
 await paste('https://paste-5.example/2024/an-article-worth-reading.html');
 await sleep(150);
 is((await pasted()).some((b) => b.url.includes('paste-5')), true, 'the link is saved before its title is found');
-await sleep(1500);
+// Up to the title fetcher's own timeout: a resolver that is slow to say a
+// name does not exist (some VPN ones take seconds) runs the fetch out.
+await until(async () => (await pasted()).find((b) => b.url.includes('paste-5'))?.title, 8000);
 is((await pasted()).find((b) => b.url.includes('paste-5'))?.title, 'An Article Worth Reading',
   'and then gets a title, from the address when the page cannot be read');
 is(await ev("[...document.querySelectorAll('#pane-a .orow-title')].some((s) => s.textContent === 'An Article Worth Reading')"), true,
@@ -911,6 +913,106 @@ is([await previewOpen(), previewAsks], [false, asked], 'with hover turned off in
 await go('#/settings');
 await click('#preview-hover [data-hover="on"]');
 await cdp.send('Fetch.disable');
+
+/* ---------------- favourites, many at once, Temporary ---------------- */
+group('favourites, opening many at once, sorting Temporary');
+const post = (b) => ev(`fetch('/api/bookmarks', { method: 'POST', headers: { 'content-type': 'application/json',
+  authorization: 'Bearer ' + localStorage.getItem('bookmarks_token') }, body: ${q(JSON.stringify(b))} }).then((r) => r.status)`);
+for (let i = 0; i < 12; i++) await post({ title: `Bulk ${i}`, url: `https://bulk${i}.example/`, folder: 'bulk' });
+await post({ title: 'A repo', url: 'https://github.com/a/b', folder: 'dev/repos' });
+await post({ title: 'New thing on github', url: 'https://github.com/x/new-thing', folder: 'Temporary' });
+await post({ title: 'Throwaway', url: 'https://throwaway.example/', folder: 'Temporary' });
+await go('#/links');
+await until(() => ev("document.querySelector('#count').textContent.includes('of') === false && !!document.querySelector('#btn-triage:not([hidden])')"), 9000);
+// What the app opens is written down instead of opened. `blockAfter` plays a
+// browser that lets one window through and blocks the rest.
+await ev(`window.__opened = []; window.__blockAfter = Infinity;
+  window.open = (u) => (window.__opened.length >= window.__blockAfter ? null : (window.__opened.push(u), {})); 1`);
+const openedNow = () => ev('window.__opened');
+
+await click('#q');
+await type('Bulk 3');
+await ev('document.activeElement.blur()');
+await key('ArrowDown', 'ArrowDown', 40);
+await letter('f');
+await until(() => ev("document.querySelectorAll('#pins .pin').length === 1"));
+is(await ev("[...document.querySelectorAll('#pins .pin')].map((p) => [p.querySelector('kbd')?.textContent, p.querySelector('span:not(.fav)').textContent])"), [['1', 'Bulk 3']],
+  'f pins the link under the cursor, numbered');
+await click('#q');
+await ev("document.querySelector('#q').select()");
+await type('Bulk 7');
+await click('#list .row [data-act="pin"]');
+await until(() => ev("document.querySelectorAll('#pins .pin').length === 2"));
+const pinsOf = () => ev("[...document.querySelectorAll('#pins .pin span:not(.fav)')].map((s) => s.textContent)");
+is(await pinsOf(), ['Bulk 3', 'Bulk 7'], 'the star on a row pins it after the others');
+const onServer = async () => (await server('/api/bookmarks?limit=5000')).items.filter((b) => b.pinned > 0)
+  .sort((a, b) => a.pinned - b.pinned).map((b) => b.title);
+is(await until(async () => (await onServer()).length === 2 && onServer()), ['Bulk 3', 'Bulk 7'], 'and the server keeps both, in order');
+await ev('document.activeElement.blur()');
+await key('2', 'Digit2', 50, ALT);
+is((await openedNow()).at(-1), 'https://bulk7.example/', 'Alt+2 opens the second pin');
+await drag('#pins .pin:nth-child(2)', '#pins .pin:nth-child(1)');
+is(await until(async () => (await pinsOf())[0] === 'Bulk 7' && pinsOf()), ['Bulk 7', 'Bulk 3'], 'dragging a pin onto another puts it first');
+await key('1', 'Digit1', 49, ALT);
+is((await openedNow()).at(-1), 'https://bulk7.example/', 'and Alt+1 follows the new order');
+await ev("document.querySelector('#pins .pin:nth-child(2) [data-unpin]').click()");
+is(await until(async () => (await pinsOf()).length === 1 && pinsOf()), ['Bulk 7'], 'the x on a pin unpins it');
+
+await click('#q');
+await ev("document.querySelector('#q').select()");
+await type('/bulk');
+await ev('document.activeElement.blur()');
+await ev('window.__opened = []');
+await letter('o');
+is(await ev("document.querySelector('#dlg-confirm').open && document.querySelector('#confirm-yes').textContent"), 'Open 12',
+  'o on twelve links asks first');
+await click('#confirm-yes');
+is((await openedNow()).length, 12, 'and opens every one listed');
+is(await lastToast(), 'Opened 12 links', 'saying so');
+await ev('window.__opened = []; window.__blockAfter = 1');
+await letter('o');
+await click('#confirm-yes');
+is((await lastToast()).startsWith('The browser blocked 11 of 12. Allow pop-ups for this site'), true,
+  'a browser that blocks the rest is told about, with what to do');
+await ev('window.__blockAfter = Infinity');
+
+await click('#list-mode [data-mode="folders"]');
+await ev('window.__opened = []');
+await click('#list .group [data-act="group-open"]');
+await click('#confirm-yes');
+is((await openedNow()).length, 12, 'the folder heading opens its folder');
+await click('#list-mode [data-mode="flat"]');
+await key('Escape', 'Escape', 27);
+await key('Escape', 'Escape', 27);
+
+const waiting = Number((await text('#btn-triage span')).match(/\d+/)[0]);
+is(waiting >= 2, true, 'the list offers to sort what waits in Temporary');
+await ev('document.activeElement.blur()');
+await letter('t');
+is(await ev("document.querySelector('#dlg-triage').open"), true, 't opens the sorting');
+const seen = [];
+for (let n = 0; n < waiting; n++) {
+  const title = await text('#triage-body .triage-title');
+  if (!title) break;
+  seen.push(title);
+  if (title === 'New thing on github') {
+    is(await text('#triage-body .triage-suggestions .btn.primary span'), 'dev/repos', 'a link is offered the folder its site is in');
+    await key('Enter', 'Enter', 13);
+  } else if (title === 'Throwaway') {
+    await key('Delete', 'Delete', 46);
+  } else {
+    await letter('s');
+  }
+  await sleep(300);
+}
+is(seen.includes('New thing on github') && seen.includes('Throwaway'), true, 'one link at a time, every one waiting');
+is(await hidden('#triage-body .triage-done'), false, 'until Temporary is done');
+const after = (await server('/api/bookmarks?limit=5000')).items;
+is(after.find((b) => b.title === 'New thing on github')?.folder, 'dev/repos', 'Enter filed it where suggested');
+is(after.some((b) => b.title === 'Throwaway'), false, 'Del deleted the other');
+await key('Escape', 'Escape', 27);
+is(await ev("document.querySelector('#dlg-triage').open"), false, 'Esc closes it');
+await go('#/settings');
 
 group('signing out');
 await click('#btn-signout');

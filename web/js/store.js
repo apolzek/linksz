@@ -194,6 +194,7 @@ function clean(fields) {
   if ('category' in fields) out.category = normCategory(fields.category);
   if ('tags' in fields) out.tags = normTags(fields.tags);
   if ('description' in fields) out.description = String(fields.description || '').trim();
+  if ('pinned' in fields) out.pinned = Math.max(0, Math.floor(Number(fields.pinned) || 0));
   return out;
 }
 
@@ -334,6 +335,34 @@ export async function unmove(before) {
     groups.get(f).push(id);
   }
   for (const [folder, ids] of groups) await moveMany(ids, folder);
+}
+
+/* ---------------- favourites ---------------- */
+
+// The pinned links, in their order. `pinned` is a position, 1 first; gaps
+// left by an unpin are fine, only the order counts.
+export function pins() {
+  return [...state.items.values()].filter((b) => b.pinned > 0)
+    .sort((a, b) => a.pinned - b.pinned || a.created_at - b.created_at);
+}
+
+export function togglePin(id) {
+  const b = state.items.get(id);
+  if (!b) return null;
+  if (b.pinned > 0) return update(id, { pinned: 0 });
+  const last = pins().reduce((m, p) => Math.max(m, p.pinned), 0);
+  return update(id, { pinned: last + 1 });
+}
+
+// Pins in the order given, numbered from 1. Only the ones whose place moved
+// are written.
+export async function orderPins(ids) {
+  const writes = [];
+  ids.forEach((id, i) => {
+    const b = state.items.get(id);
+    if (b && b.pinned !== i + 1) writes.push(update(id, { pinned: i + 1 }));
+  });
+  await Promise.all(writes);
 }
 
 const OPEN_DEBOUNCE = 3000;

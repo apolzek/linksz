@@ -26,6 +26,8 @@ import * as settings from './js/settings.js';
 import * as audit from './js/audit.js';
 import * as clicklog from './js/clicklog.js';
 import * as preview from './js/preview.js';
+import * as pins from './js/pins.js';
+import * as triage from './js/triage.js';
 import { openEditor, initEditor } from './js/editor.js';
 import { linkFromAddress, sameLink, TEMP_FOLDER } from './js/address.js';
 
@@ -87,6 +89,13 @@ function onKey(e) {
     return;
   }
 
+  // Alt and a digit opens that pinned link, on every page and from the search
+  // box too.
+  if (e.altKey && !e.ctrlKey && !e.metaKey && /^Digit[1-9]$/.test(e.code)) {
+    if (pins.openPin(Number(e.code.slice(5)))) e.preventDefault();
+    return;
+  }
+
   if (route === 'organize') {
     if (organize.onKey(e, typing)) e.preventDefault();
     return;
@@ -107,6 +116,10 @@ function onKey(e) {
   if (e.key === 'F2' || cmd('e')) { e.preventDefault(); links.editCursor(); return; }
   if (cmd('m')) { e.preventDefault(); links.moveSelected(); return; }
   if (cmd('p')) { e.preventDefault(); const b = links.cursorLink(); if (b) preview.openPreview(b); return; }
+  if (cmd('f')) { e.preventDefault(); links.togglePinCursor(); return; }
+  if (cmd('o')) { e.preventDefault(); links.openListed(); return; }
+  // With nothing waiting in Temporary, t is a letter like any other.
+  if (cmd('t') && triage.pending()) { e.preventDefault(); triage.openTriage(); return; }
   if (cmd('x')) { e.preventDefault(); links.toggleCursorMark(); return; }
   if (cmd('g')) { e.preventDefault(); links.toggleMode(); return; }
   if (cmd('n')) { e.preventDefault(); openEditor(null, { folder: links.getScope() || '' }); return; }
@@ -356,6 +369,8 @@ function registerServiceWorker() {
   settings.init({ signOut, onUser: rememberUser });
   links.init();
   preview.init();
+  pins.init();
+  triage.init();
   organize.init();
   activity.init();
   data.init();

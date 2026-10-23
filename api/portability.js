@@ -56,7 +56,10 @@ function urlKey(url) {
 // are deliberately out: opening a link is not an edit to it.
 const FIELDS = ['title', 'url', 'folder', 'category', 'tags', 'description'];
 
+// The pin is in too, but only when the incoming side says one: a file from a
+// browser, or from before favourites, carries none, and that is not an unpin.
 function sameContent(a, b) {
+  if (b.pinned !== undefined && Number(a.pinned || 0) !== Number(b.pinned)) return false;
   return FIELDS.every((f) => String(a[f] ?? '') === String(b[f] ?? ''));
 }
 
@@ -74,6 +77,7 @@ function yamlItem(b) {
   // merges them with MAX, so importing an old file cannot lower them.
   if (Number(b.opens) > 0) item.opens = Number(b.opens);
   if (Number(b.last_open_at) > 0) item.last_open_at = Number(b.last_open_at);
+  if (Number(b.pinned) > 0) item.pinned = Number(b.pinned);
   item.created_at = b.created_at;
   item.updated_at = b.updated_at;
   return item;
@@ -305,6 +309,9 @@ function normalizeIncoming(raw, folderFromKey = '') {
     // an old export can restore a count but never shrink one.
     opens: Number(raw.opens) > 0 ? Math.floor(Number(raw.opens)) : 0,
     last_open_at: Number(raw.last_open_at) > 0 ? Math.floor(Number(raw.last_open_at)) : 0,
+    // Only a file that says it is pinned pins; one that says nothing leaves
+    // the link as it is in the vault.
+    ...(Number(raw.pinned) > 0 ? { pinned: Math.floor(Number(raw.pinned)) } : {}),
   };
 }
 

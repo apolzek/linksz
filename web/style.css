@@ -646,6 +646,46 @@ mark { background: var(--mark); color: inherit; border-radius: 0; padding: 0 1px
 .dialog.confirm { width: min(420px, calc(100vw - 24px)); }
 .dialog.confirm h2 { font-size: 17px; margin-bottom: 6px; }
 .dialog.confirm p { margin: 0; }
+/* ---------------- pinned links ---------------- */
+
+.pins { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 0 10px; }
+.pin {
+  display: inline-flex; align-items: center; gap: 7px; max-width: 240px; height: 32px; padding: 0 6px 0 8px;
+  border: 1px solid var(--border); background: var(--surface); color: var(--text); text-decoration: none;
+  font-size: 13px;
+}
+.pin:hover { border-color: var(--accent); }
+.pin.dragging { opacity: 0.45; }
+.pin kbd { font-size: 10px; min-width: 16px; text-align: center; color: var(--muted); }
+.pin .fav { flex: none; }
+.pin > span:not(.fav) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pin-x {
+  display: inline-grid; place-items: center; width: 20px; height: 20px; padding: 0; border: 0;
+  background: none; color: var(--faint); cursor: pointer; visibility: hidden;
+}
+.pin:hover .pin-x, .pin:focus-within .pin-x { visibility: visible; }
+.pin-x:hover { color: var(--text); }
+.pin-x svg { width: 12px; height: 12px; }
+.pin-toggle.on { color: var(--accent); }
+.pin-toggle.on svg { fill: currentColor; }
+
+/* ---------------- sorting Temporary ---------------- */
+
+.dialog.triage { width: min(620px, calc(100vw - 24px)); }
+.triage-wrap { padding: 18px 20px 20px; }
+.triage-wrap h2 { font-size: 17px; margin: 0; }
+.triage-link { display: flex; align-items: center; gap: 12px; margin-bottom: 18px; }
+.triage-main { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.triage-title { font-size: 15px; font-weight: 600; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.triage-main .muted { font-size: 12px; }
+.triage-suggestions { display: flex; flex-wrap: wrap; gap: 8px; margin: 6px 0 18px; }
+.triage-suggestions .btn, .triage-actions .btn { gap: 8px; }
+.triage-suggestions kbd, .triage-actions kbd { font-size: 10px; opacity: 0.75; }
+.triage-actions { display: flex; align-items: center; gap: 8px; }
+.triage-actions .spacer { flex: 1; }
+.triage-done { text-align: center; padding: 18px 0 6px; }
+.triage-done p { margin: 6px 0 16px; }
+
 .dialog.preview {
   width: min(1100px, calc(100vw - 48px)); height: min(820px, calc(100vh - 48px));
   max-height: none; display: flex; flex-direction: column;

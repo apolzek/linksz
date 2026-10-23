@@ -6,6 +6,7 @@ import test from 'node:test';
 import assert from 'node:assert';
 import { record, load, save, add, clear, MAX } from '../web/js/searchlog.js';
 import { stamp } from '../web/js/stamp.js';
+import { suggestFolders, words } from '../web/js/suggest.js';
 
 // A localStorage for node, reset before each test.
 const memory = new Map();
@@ -95,4 +96,43 @@ test('a moment reads to the second, in local time', () => {
   const d = new Date(2026, 9, 20, 9, 5, 7);
   assert.equal(stamp(d.getTime()), '2026-10-20 09:05:07');
   assert.equal(stamp(new Date(2026, 0, 1, 23, 59, 59).getTime()), '2026-01-01 23:59:59');
+});
+
+/* ---------------- where a link probably goes ---------------- */
+
+const vault = [
+  { id: '1', title: 'Kubernetes the hard way', url: 'https://github.com/kelseyhightower/kubernetes-the-hard-way', folder: 'dev/k8s' },
+  { id: '2', title: 'Helm charts best practices', url: 'https://helm.sh/docs/chart_best_practices/', folder: 'dev/k8s' },
+  { id: '3', title: 'Receita de pão de queijo', url: 'https://receitas.example/pao-de-queijo', folder: 'casa/receitas' },
+  { id: '4', title: 'Some repo', url: 'https://github.com/a/b', folder: 'dev/repos' },
+  { id: '5', title: 'Another repo', url: 'https://github.com/c/d', folder: 'dev/repos' },
+  { id: '6', title: 'Not sorted', url: 'https://github.com/e/f', folder: 'Temporary' },
+];
+
+test('words leave out accents, short words, numbers and the filler', () => {
+  assert.deepEqual(words('Receita de Pão de Queijo 2024, the best!'), ['receita', 'pao', 'queijo', 'best']);
+});
+
+test('the same site counts most', () => {
+  const link = { id: 'x', title: 'whatever', url: 'https://github.com/x/y' };
+  assert.equal(suggestFolders(link, vault, { exclude: ['Temporary'] })[0], 'dev/repos');
+});
+
+test('shared words and the folder name count too', () => {
+  const link = { id: 'x', title: 'Kubernetes operators explained', url: 'https://blog.example/k8s' };
+  assert.deepEqual(suggestFolders(link, vault, { exclude: ['Temporary'] }), ['dev/k8s']);
+  const bread = { id: 'y', title: 'Melhor receita de pão', url: 'https://outra.example/' };
+  assert.deepEqual(suggestFolders(bread, vault), ['casa/receitas'], 'a word of the folder name is enough');
+});
+
+test('the folder being sorted, and anything under it, is never suggested', () => {
+  const link = { id: 'x', title: 'x', url: 'https://github.com/x/y' };
+  const out = suggestFolders(link, [...vault, { id: '7', title: 'x', url: 'https://github.com/q', folder: 'Temporary/later' }],
+    { exclude: ['Temporary'] });
+  assert.ok(!out.some((f) => f.startsWith('Temporary')), JSON.stringify(out));
+});
+
+test('nothing alike, nothing suggested, and never more than asked for', () => {
+  assert.deepEqual(suggestFolders({ id: 'z', title: 'zzzz', url: 'https://nowhere.example/' }, vault), []);
+  assert.equal(suggestFolders({ id: 'g', title: 'repo kubernetes receita', url: 'https://github.com/' }, vault, { limit: 2 }).length, 2);
 });

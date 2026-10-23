@@ -12,6 +12,8 @@ import {
 } from './ui.js';
 import { openEditor } from './editor.js';
 import * as searchlog from './searchlog.js';
+import { openAll } from './openall.js';
+import { openTriage, pending } from './triage.js';
 
 const PAGE = 40;
 const MODE_KEY = 'bookmarks_list_mode';
@@ -169,6 +171,7 @@ function groupHTML(g) {
     <button type="button" class="group-toggle" data-act="group" aria-expanded="${!g.collapsed}" title="${g.collapsed ? 'Show' : 'Hide'} these links">
       ${icon('chev-down', 'group-chev')}${icon(g.folder ? 'folder' : 'inbox')}<span class="group-name">${name}</span><span class="group-n">${g.n.toLocaleString()}</span>
     </button>
+    <button type="button" class="btn link sm" data-act="group-open" title="Open every link in this folder, each in a tab">Open links</button>
     <button type="button" class="btn link sm" data-act="group-scope" title="Show only this folder">Open</button>
   </li>`;
 }
@@ -196,6 +199,7 @@ function rowHTML(b, i) {
       </div>
     </div>
     <div class="row-actions">
+      <button type="button" class="btn icon pin-toggle${b.pinned > 0 ? ' on' : ''}" data-act="pin" title="${b.pinned > 0 ? 'Unpin' : 'Pin to the top'} (f)" aria-pressed="${b.pinned > 0}">${icon('star')}</button>
       <button type="button" class="btn icon" data-act="move" title="Move (m)">${icon('move')}</button>
       <button type="button" class="btn icon" data-act="edit" title="Edit (e)">${icon('edit')}</button>
       <button type="button" class="btn icon" data-act="delete" title="Delete (Del)">${icon('trash')}</button>
@@ -280,6 +284,11 @@ function paintMeta() {
   const allShut = view.groups.length && view.groups.every((g) => g.collapsed);
   fold.textContent = allShut ? 'Expand all' : 'Collapse all';
   fold.dataset.collapse = String(!allShut);
+  const sorting = pending();
+  const triage = $('#btn-triage');
+  triage.hidden = !sorting;
+  triage.querySelector('span').textContent = `Sort Temporary (${sorting.toLocaleString()})`;
+  $('#btn-open-all').hidden = !view.results.length;
   paintSelbar();
 }
 
@@ -393,6 +402,17 @@ export function cursorLink() {
   return view.results[view.cursor] || (view.marked.size === 1 ? store.get([...view.marked][0]) : null);
 }
 
+export function togglePinCursor() {
+  const b = cursorLink();
+  if (b) store.togglePin(b.id).catch(fail);
+}
+
+// What the list shows, search and folder included: narrow it, then open it.
+export function openListed() {
+  const label = view.scope === null ? 'this list' : folderLabel(view.scope);
+  return openAll(view.results, view.query ? 'what the search found' : label);
+}
+
 export function openCursor() {
   const b = view.results[view.cursor < 0 ? 0 : view.cursor];
   if (!b || !b.url) return;
@@ -478,6 +498,7 @@ export function init() {
       const act = e.target.closest('[data-act]')?.dataset.act;
       if (act === 'group') toggleGroup(group.dataset.folder);
       else if (act === 'group-scope') setScope(group.dataset.folder);
+      else if (act === 'group-open') openAll(store.inFolder(group.dataset.folder), folderLabel(group.dataset.folder));
       return;
     }
     const li = e.target.closest('.row');
@@ -490,6 +511,7 @@ export function init() {
     if (tag) { e.preventDefault(); setQuery(`#${tag}`); return; }
     if (act === 'scope') { e.preventDefault(); setScope(b.folder || ''); return; }
     if (act === 'edit') { e.preventDefault(); openEditor(b); return; }
+    if (act === 'pin') { e.preventDefault(); store.togglePin(b.id).catch(fail); return; }
     // On a marked row the button speaks for the whole selection.
     if (act === 'move') { e.preventDefault(); if (view.marked.has(b.id)) moveSelected(); else moveOne(b); return; }
     if (act === 'delete') { e.preventDefault(); if (view.marked.has(b.id)) deleteSelected(); else deleteLinks([b.id]).catch(fail); return; }
@@ -544,6 +566,8 @@ export function init() {
   $('#groups-fold').onclick = (e) => setAllGroups(e.currentTarget.dataset.collapse === 'true');
   $('#btn-syntax').onclick = () => { $('#syntax').hidden = !$('#syntax').hidden; };
   $('#sel-clear').onclick = clearMarks;
+  $('#btn-triage').onclick = openTriage;
+  $('#btn-open-all').onclick = openListed;
   $('#sel-edit').onclick = () => { const b = store.get([...view.marked][0]); if (b) openEditor(b); };
 
   store.subscribe(() => {

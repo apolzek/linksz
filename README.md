@@ -178,6 +178,30 @@ filed twice. The
 pencil on a link, shown on hover, edits it; so do `e` and F2 with one link
 selected.
 
+**Favourites.** The star on a link, or `f` on the one under the cursor, pins
+it above the list; Alt+1 to Alt+9 open the first nine from anywhere in the
+app, and dragging one pin onto another reorders them. A pin is a field of the
+link like its title, so it syncs to every device, goes out in the YAML and
+JSON exports and comes back with them. A browser's file knows no pins and
+changes none.
+
+**Opening many at once.** `o`, or **Open all** above the list, opens every
+link listed, so a folder chosen in the sidebar, or a search, opens in one go;
+**Open links** on a folder's heading (by folder view) and the arrow at the top
+of an Organize pane do the same for that folder. Past ten it asks first. A
+browser lets one click open one window and blocks the rest unless pop-ups are
+allowed for the site: the toast says how many were blocked, and allowing
+pop-ups for the app's address is a one-time thing.
+
+**Sorting Temporary.** What is saved in a hurry (the address prefix, the
+extension, the desktop shortcut) lands in Temporary. **Sort Temporary**, or
+`t`, goes through it one link at a time, oldest first, with up to three
+folders it probably belongs in: the folders that hold links from the same
+site count most, then those whose titles share its words, then those whose
+name it mentions. Enter files it in the first, 1 to 3 in that one, `m` picks
+another, `p` previews it, `s` skips, Del deletes; each move and delete has its
+undo in the toast.
+
 **Previews.** Rest the pointer on a link, in the list or on the Organize
 page, and after a second a preview opens: the page itself, in a frame, when
 the site lets other pages show it, and otherwise a card with what the page

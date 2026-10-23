@@ -1590,3 +1590,50 @@ test('the preview endpoint reads the page once, then answers from its cache', as
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+/* ---------------- favourites ---------------- */
+
+test('a pin is kept by writes that do not mention it, and goes with a write that does', async () => {
+  const made = await call('POST', '/api/bookmarks', { token, body: { title: 'Pinned', url: 'https://pinned.example/', pinned: 2 } });
+  assert.equal(made.body.item.pinned, 2);
+  const id = made.body.item.id;
+  let r = await call('PUT', `/api/bookmarks/${id}`, { token, body: { title: 'Renamed' } });
+  assert.equal(r.body.item.pinned, 2, 'an edit of something else keeps it');
+  r = await call('POST', '/api/bookmarks/move', { token, body: { ids: [id], folder: 'elsewhere' } });
+  assert.equal((await call('GET', `/api/bookmarks/${id}`, { token })).body.item.pinned, 2, 'and so does a move');
+  r = await call('PUT', `/api/bookmarks/${id}`, { token, body: { pinned: 0 } });
+  assert.equal(r.body.item.pinned, 0, 'unpinning is writing 0');
+  r = await call('PUT', `/api/bookmarks/${id}`, { token, body: { pinned: -3 } });
+  assert.equal(r.body.item.pinned, 0, 'and nothing below it');
+});
+
+test('pins survive an export and its import, and an import that says nothing unpins nothing', async () => {
+  const made = await call('POST', '/api/bookmarks', { token, body: { title: 'Kept pin', url: 'https://kept-pin.example/', pinned: 1 } });
+  const id = made.body.item.id;
+  const yaml = await (await fetch(`${base}/api/export?format=yaml`, { headers: { authorization: `Bearer ${token}` } })).text();
+  assert.match(yaml, /pinned: 1/);
+  await call('PUT', `/api/bookmarks/${id}`, { token, body: { pinned: 0 } });
+  await call('POST', '/api/import', { token, body: { content: yaml, mode: 'update', apply: true } });
+  assert.equal((await call('GET', `/api/bookmarks/${id}`, { token })).body.item.pinned, 1, 'the file pins it again');
+
+  const html = '<DL><DT><A HREF="https://kept-pin.example/">Kept pin</A></DL>';
+  await call('POST', '/api/import', { token, body: { content: html, mode: 'update', source: 'browser', apply: true } });
+  assert.equal((await call('GET', `/api/bookmarks/${id}`, { token })).body.item.pinned, 1, 'a browser export knows no pins and changes none');
+});
+
+test('a vault from before favourites gets the column on open', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'linksz-pin-'));
+  const file = path.join(dir, 'old.db');
+  const { DatabaseSync } = require('node:sqlite');
+  const old = new DatabaseSync(file);
+  old.exec(`CREATE TABLE bookmarks (id TEXT NOT NULL, user_id INTEGER NOT NULL, title TEXT NOT NULL DEFAULT '',
+    url TEXT NOT NULL DEFAULT '', folder TEXT NOT NULL DEFAULT '', category TEXT NOT NULL DEFAULT '',
+    tags TEXT NOT NULL DEFAULT '', description TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL, deleted INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (user_id, id))`);
+  old.close();
+  const db = require('../api/db').open(file);
+  const columns = db.prepare('SELECT name FROM pragma_table_info(?)').all('bookmarks').map((c) => c.name);
+  db.close();
+  fs.rmSync(dir, { recursive: true, force: true });
+  assert.ok(columns.includes('pinned'));
+});

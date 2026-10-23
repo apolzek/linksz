@@ -43,6 +43,12 @@ function addUsageColumns(db) {
   if (!columns.includes('last_open_at')) db.exec('ALTER TABLE bookmarks ADD COLUMN last_open_at INTEGER NOT NULL DEFAULT 0');
 }
 
+// Vaults from before favourites have no place to keep one.
+function addPinnedColumn(db) {
+  const columns = db.prepare('SELECT name FROM pragma_table_info(?)').all('bookmarks').map((c) => c.name);
+  if (!columns.includes('pinned')) db.exec('ALTER TABLE bookmarks ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0');
+}
+
 // Vaults from before the access keys had an email, a username and a password
 // hash, all NOT NULL. SQLite cannot drop a NOT NULL column in place, so the table
 // is rebuilt: the documented twelve steps, with the foreign keys off while the
@@ -163,6 +169,9 @@ function open(dbPath = defaultDbPath()) {
       -- so a count is not lost when two devices open the same link offline.
       opens        INTEGER NOT NULL DEFAULT 0,
       last_open_at INTEGER NOT NULL DEFAULT 0,
+      -- Pinned to the top of the app, and where: 0 is not pinned, 1 comes
+      -- first. Written like any other field, so the last edit wins.
+      pinned       INTEGER NOT NULL DEFAULT 0,
       PRIMARY KEY (user_id, id)
     );
 
@@ -238,6 +247,7 @@ function open(dbPath = defaultDbPath()) {
   migrateUsersToKeys(db);
   migrateNotesToDescription(db);
   addUsageColumns(db);
+  addPinnedColumn(db);
   hashSessionTokens(db);
   return db;
 }

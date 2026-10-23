@@ -294,12 +294,12 @@ function createApp(dbPath, { titles = {} } = {}) {
     // bookmark I deleted" from "this entry is new", which the live list cannot.
     buriedIds: db.prepare('SELECT id FROM bookmarks WHERE user_id = ? AND deleted = 1'),
     upsert: db.prepare(`
-      INSERT INTO bookmarks (id, user_id, title, url, folder, category, tags, description, created_at, updated_at, deleted, opens, last_open_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO bookmarks (id, user_id, title, url, folder, category, tags, description, created_at, updated_at, deleted, opens, last_open_at, pinned)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(user_id, id) DO UPDATE SET
         title=excluded.title, url=excluded.url, folder=excluded.folder,
         category=excluded.category, tags=excluded.tags, description=excluded.description,
-        updated_at=excluded.updated_at, deleted=excluded.deleted,
+        updated_at=excluded.updated_at, deleted=excluded.deleted, pinned=excluded.pinned,
         -- The counters never go backwards: two devices that opened the same
         -- link while offline both keep what they counted.
         opens=MAX(excluded.opens, bookmarks.opens),
@@ -449,6 +449,9 @@ function createApp(dbPath, { titles = {} } = {}) {
       str(b.description ?? b.notes, 5000),   // `notes`: the field's old name
       created, updated, (buried || b.deleted) ? 1 : 0,
       counter(b.opens), counter(b.last_open_at),
+      // A write that does not mention the pin keeps it: an import, or a client
+      // from before favourites, must not unpin anything.
+      counter(b.pinned ?? existing?.pinned),
     );
     const after = q.getOne.get(userId, id);
     recordChange(userId, before, after, ts);

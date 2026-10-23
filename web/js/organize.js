@@ -24,6 +24,7 @@ import {
 } from './ui.js';
 import { openEditor } from './editor.js';
 import { api } from './http.js';
+import { openAll } from './openall.js';
 
 const KEY = 'bookmarks_organize';
 
@@ -99,6 +100,7 @@ function paintPane(p) {
     <div class="pane-head">
       <button type="button" class="btn pane-folder" data-act="pick" title="Choose the folder for this side">
         ${icon(root ? 'inbox' : 'folder')}<span>${esc(root ? 'Unfiled' : store.nameOf(p.path))}</span>${icon('chev-down', 'chev')}</button>
+      <button type="button" class="btn icon" data-act="open-all" title="Open every link here, each in a tab">${icon('ext')}</button>
       <button type="button" class="btn icon" data-act="new-link" title="New link here (n)">${icon('plus')}</button>
       <button type="button" class="btn icon" data-act="new" title="New folder inside">${icon('folder-plus')}</button>
       ${root ? '' : `<button type="button" class="btn icon" data-act="rename" title="Rename this folder">${icon('edit')}</button>
@@ -316,6 +318,7 @@ function wirePane(p) {
       return;
     }
     if (act === 'new-link') { openEditor(null, { folder: p.path }); return; }
+    if (act === 'open-all') { openAll(p.links, folderLabel(p.path)); return; }
     if (act === 'new') {
       const made = await askNewFolder(p.path);
       if (made) paintPane(p);
