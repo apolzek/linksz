@@ -13,7 +13,7 @@ import * as store from './store.js';
 import { $, $$, esc, favicon, hostOf, wireDialog, anyDialogOpen } from './ui.js';
 
 const HOVER_KEY = 'linksz_preview_hover';
-const HOVER_MS = 1000;
+const HOVER_MS = 2000;
 // Leaving the card for this long closes a preview the pointer opened.
 const LEAVE_MS = 350;
 // The frame runs the site's scripts in its own origin, which can never reach

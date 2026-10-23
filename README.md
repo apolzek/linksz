@@ -223,7 +223,7 @@ another, `p` previews it, `s` skips, Del deletes; each move and delete has its
 undo in the toast.
 
 **Previews.** Rest the pointer on a link, in the list or on the Organize
-page, and after a second a preview opens: the page itself, in a frame, when
+page, and after two seconds a preview opens: the page itself, in a frame, when
 the site lets other pages show it, and otherwise a card with what the page
 says about itself, its title, description and image. `p` opens one for the
 link under the cursor. Most big sites (GitHub, Google, YouTube, banks) refuse
